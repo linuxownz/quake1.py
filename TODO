@@ -1,0 +1,6 @@
+create penv for installing all dependancies
+python -m penv dependancies 
+
+create script to install and activate
+
+execute program from zip file

@@ -1,0 +1,10 @@
+PyOpenGL:
+https://mcfletch.github.io/pyopengl/documentation/manual/index.html
+
+python sdl2
+https://pysdl2.readthedocs.io/en/0.9.13/
+sdl2-mixer
+https://pysdl2.readthedocs.io/en/latest/modules/sdl2_sdlmixer.html#
+
+quakec game logic files
+https://github.com/id-Software/quake-rerelease-qc/tree/main
