@@ -2,16 +2,19 @@
 # main_sdl.py for main_sdl.c
 
 import sys
-import ctypes
+import os
 import atexit
-from sdl2 import *
+import sdl2
+import sdl2.ext
+
 #from common import COM_InitArgv
-import sys_sdl_unix as unix
-import host
-import console
-import sys_sdl_unix
-import gl_vidsdl
 import common
+import console
+import client
+import gl_vidsdl
+import host
+import sys_sdl_unix
+import sys_sdl_unix as unix
 
 class quakeparms_t:
     def __init__(self):
@@ -20,38 +23,30 @@ class quakeparms_t:
         self.argc = 0
         self.argv = []
 
+parms : quakeparms_t = quakeparms_t()
+parms.basedir = os.getcwd()
+parms.userdir = os.getcwd()
+parms.argc = len(sys.argv)
+parms.argv = sys.argv
+
 def Sys_AtExit():
-    SDL_Quit()
+    sdl2.SDL_Quit()
     console.LOG_Close()
 
 def Sys_InitSDL():
-    version = SDL_version()
-    SDL_GetVersion(version)
+    version = sdl2.SDL_version()
+    sdl2.SDL_GetVersion(version)
 
     print(f"SDL Version: {version.major}.{version.minor}.{version.patch}")
 
-    if SDL_Init(0) < 0:
+    if sdl2.SDL_Init(0) < 0:
         #Sys_Error("Couldn't init SDL: %s" % SDL_GetError());
-        print("Couldn't init SDL: %s" % SDL_GetError());
+        print("Couldn't init SDL: %s" % sdl2.SDL_GetError());
         exit(1)
 
     atexit.register( Sys_AtExit )
 
-parms : quakeparms_t = quakeparms_t()
-parms.basedir = '.'
-parms.userdir = '.'
-parms.argc = len(sys.argv)
-parms.argv = sys.argv
-
-
 def main():
-    global parms
-
-    # parms = quakeparms_t()
-    # parms.basedir = '.'
-    # parms.userdir = '.'
-    # parms.argc = len(sys.argv)
-    # parms.argv = sys.argv
 
     common.COM_InitArgv()
     Sys_InitSDL()
@@ -69,7 +64,7 @@ def main():
             time = newtime - oldtime
 
             while time < sys_ticrate.value:
-                SDL_Delay(1)
+                sdl2.SDL_Delay(1)
                 newtime = sys_sdl_unix.Sys_DoubleTime()
                 time = newtime - oldtime
 
@@ -79,11 +74,11 @@ def main():
     else:
         while True:
             if not gl_vidsdl.VID_HasMouseOrInputFocus() or cl.paused:
-                SDL_Delay(16)
+                sdl2.SDL_Delay(16)
 
             if gl_vidsdl.VID_IsMinimized():
                 scr_skipupdate = True
-                SDL_Delay(32)
+                sdl2.SDL_Delay(32)
             else:
                 scr_skipupdate = False
 
@@ -92,15 +87,12 @@ def main():
 
             host.Host_Frame(time)
 
-            if time < sys_throttle.value and not cls.timedemo:
-                SDL_Delay(1)
+            if time < sys_throttle.value and not client.cls.timedemo:
+                sdl2.SDL_Delay(1)
 
             oldtime = newtime
 
     return 0
 
-            
-
 if __name__ == '__main__':
     main()
-

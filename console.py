@@ -33,9 +33,6 @@ con_current    = 0
 con_x          = 0
 con_text       = ''
 
-con_notifytime     = {'name': 'con_notifytime',     'value':'3', 'flags':cvar.CVAR_NONE}
-con_logcenterprint = {'name': 'con_logcenterprint', 'value':'1', 'flags':cvar.CVAR_NONE}
-
 con_lastcenterstring = ''
 
 con_times : List[float] = []
@@ -162,6 +159,9 @@ def Con_Init():
     _cmd.Cmd_AddCommand('condump', Con_Dump_f)
 
     Con_Printf('Console Initialized\n')
+
+    con_notifytime     = {'name': 'con_notifytime',     'value':'3', 'flags':cvar.CVAR_NONE}
+    con_logcenterprint = {'name': 'con_logcenterprint', 'value':'1', 'flags':cvar.CVAR_NONE}
 
     cvar.Cvar_RegisterVariable(con_notifytime)
     cvar.Cvar_RegisterVariable(con_logcenterprint)

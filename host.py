@@ -35,29 +35,6 @@ host_client : client_t = None
 
 host_colormap : bytes = b''
 
-host_framerate = {'name':'host_framerate', 'value': '0',   'flags': cvar.CVAR_NONE}
-host_speeds    = {'name':'host_speeds',    'value': '0',   'flags': cvar.CVAR_NONE}
-host_maxfps    = {'name':'host_maxfps',    'value':'72',   'flags': cvar.CVAR_ARCHIVE}
-host_timescale = {'name':'host_timescale', 'value': '0',   'flags': cvar.CVAR_NONE}
-max_edicts     = {'name':'max_edicts',     'value':'8192', 'flags': cvar.CVAR_NONE}
-sys_ticrate    = {'name':'sys_ticrate',    'value':'0.05', 'flags': cvar.CVAR_NONE}
-serverprofile  = {'name':'serverprofile',  'value': '0',   'flags': cvar.CVAR_NONE}
-fraglimit      = {'name':'fraglimit',      'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
-timelimit      = {'name':'timelimit',      'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
-teamplay       = {'name':'teamplay',       'value': '0',   'flags': cvar.CVAR_NOTIFY |cvar.CVAR_SERVERINFO}
-samelevel      = {'name':'samelevel',      'value': '0',   'flags': cvar.CVAR_NONE}
-noexit         = {'name':'noexit',         'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
-skill          = {'name':'skill',          'value': '1',   'flags': cvar.CVAR_NONE}
-deathmatch     = {'name':'deathmatch',     'value': '0',   'flags': cvar.CVAR_NONE}
-coop           = {'name':'coop',           'value': '0',   'flags': cvar.CVAR_NONE}
-pausable       = {'name':'pausable',       'value': '1',   'flags': cvar.CVAR_NONE}
-developer      = {'name':'developer',      'value': '0',   'flags': cvar.CVAR_NONE}
-temp1          = {'name':'temp1',          'value': '0',   'flags': cvar.CVAR_NONE}
-devstats       = {'name':'devstats',       'value': '0',   'flags': cvar.CVAR_NONE}
-campaign       = {'name':'campaign',       'value': '0',   'flags': cvar.CVAR_NONE}
-horde          = {'name':'horde',          'value': '0',   'flags': cvar.CVAR_NONE}
-sv_cheats      = {'name':'sv_cheats',      'value': '0',   'flags': cvar.CVAR_NONE}
-
 def Max_Fps_f(cvar:cvar_t):
     if cvar.value > 72:
         console.Con_Warning('host_maxfps > 72 breaks physics')
@@ -112,6 +89,30 @@ def Host_InitLocal():
     _cmd.Cmd_AddCommand('version', '1.0')
 
     host_cmd.Host_InitCommands()
+
+
+    host_framerate = {'name':'host_framerate', 'value': '0',   'flags': cvar.CVAR_NONE}
+    host_speeds    = {'name':'host_speeds',    'value': '0',   'flags': cvar.CVAR_NONE}
+    host_maxfps    = {'name':'host_maxfps',    'value':'72',   'flags': cvar.CVAR_ARCHIVE}
+    host_timescale = {'name':'host_timescale', 'value': '0',   'flags': cvar.CVAR_NONE}
+    max_edicts     = {'name':'max_edicts',     'value':'8192', 'flags': cvar.CVAR_NONE}
+    sys_ticrate    = {'name':'sys_ticrate',    'value':'0.05', 'flags': cvar.CVAR_NONE}
+    serverprofile  = {'name':'serverprofile',  'value': '0',   'flags': cvar.CVAR_NONE}
+    fraglimit      = {'name':'fraglimit',      'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
+    timelimit      = {'name':'timelimit',      'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
+    teamplay       = {'name':'teamplay',       'value': '0',   'flags': cvar.CVAR_NOTIFY |cvar.CVAR_SERVERINFO}
+    samelevel      = {'name':'samelevel',      'value': '0',   'flags': cvar.CVAR_NONE}
+    noexit         = {'name':'noexit',         'value': '0',   'flags': cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
+    skill          = {'name':'skill',          'value': '1',   'flags': cvar.CVAR_NONE}
+    deathmatch     = {'name':'deathmatch',     'value': '0',   'flags': cvar.CVAR_NONE}
+    coop           = {'name':'coop',           'value': '0',   'flags': cvar.CVAR_NONE}
+    pausable       = {'name':'pausable',       'value': '1',   'flags': cvar.CVAR_NONE}
+    developer      = {'name':'developer',      'value': '0',   'flags': cvar.CVAR_NONE}
+    temp1          = {'name':'temp1',          'value': '0',   'flags': cvar.CVAR_NONE}
+    devstats       = {'name':'devstats',       'value': '0',   'flags': cvar.CVAR_NONE}
+    campaign       = {'name':'campaign',       'value': '0',   'flags': cvar.CVAR_NONE}
+    horde          = {'name':'horde',          'value': '0',   'flags': cvar.CVAR_NONE}
+    sv_cheats      = {'name':'sv_cheats',      'value': '0',   'flags': cvar.CVAR_NONE}
 
     cvar.Cvar_RegisterVariable(host_framerate)
     cvar.Cvar_RegisterVariable(host_speeds)
@@ -185,7 +186,7 @@ def Host_Init():
 
     global host_colormap
     if cl_main.cls.state != client.cactive_t.ca_dedicated:
-        host_colormap = COM_LoadHunkFile('gfx/colormap.lmp', None)
+        host_colormap = common.COM_LoadHunkFile('gfx/colormap.lmp')
         if host_colormap is None:
             Sys_Error('couldnt load gfx/colormap.lmp')
 
@@ -198,6 +199,7 @@ def Host_Init():
         gl_vidsdl.VID_Init()
         in_sdl.IN_Init()
         TexMgr_Init()
+        Draw_Init()
         
 
 

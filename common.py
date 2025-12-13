@@ -5,10 +5,13 @@ from __future__ import annotations
 import os
 import sys
 import struct
-import cvar
-import _cmd
+
+import console
 import cl_main
+import _cmd
+import cvar
 import io
+import main_sdl
 
 import sys_sdl_unix
 import console
@@ -80,6 +83,8 @@ class pack_t():
         self.handle = handle #file object
         self.numfiles = numfiles
         self.files = files
+    def __str__(self):
+        return f'{self.filename} numfiles: {self.numfiles}, files: {"has files" if self.files else "None"} handle: {self.handle}'
 
 class searchpath_t():
     def __init__(self, path_id, filename, pack:pack_t, next: searchpath_t | None):
@@ -87,6 +92,8 @@ class searchpath_t():
         self.filename = filename
         self.pack = pack
         self.next = next
+    def __str__(self):
+        return f'{self.filename} {self.path_id} {self.pack}'
 
 class sizebuf_s():
     def __init__(self):
@@ -234,6 +241,9 @@ def COM_LoadFile(path):
 def COM_LoadMallocFile(path):
     return COM_LoadFile(path)
 
+def COM_LoadHunkFile(path):
+    return COM_LoadFile(path)
+
 def COM_LoadPackFile(packfile) -> pack_t:
     (handle, filelength) = sys_sdl_unix.Sys_FileOpenRead(packfile)
 
@@ -332,12 +342,12 @@ def COM_AddGameDirectory(base, dir):
             else:
                 old = com_modified
                 if been_here:
-                    base = common.parms.userdir
+                    base = main_sdl.parms.userdir
                 qspak = COM_LoadPackFile(f'{base}/quakespasm.pak')
                 com_modified = old
             
             if pak:
-                search = searchpath_t(path_id, name, pak, com_searchpaths)
+                search = searchpath_t(path_id, '', pak, com_searchpaths)
                 com_searchpaths = search
             
             if qspak:
@@ -349,13 +359,22 @@ def COM_AddGameDirectory(base, dir):
         if not pak:
             break
     
-        if not been_here and common.parms.userdir != common.parms.basedir:
+        if not been_here and main_sdl.parms.userdir != main_sdl.parms.basedir:
             been_here = True
-            com_gamedir = f'{common.parms.userdir}/{dir}'
-            Sys_mkdir(com_gamedir)
+            com_gamedir = f'{main_sdl.parms.userdir}/{dir}'
+            sys_sdl_unix.Sys_mkdir(com_gamedir)
             # goto _add_path
         
         break
+    pass
+
+    s = com_searchpaths
+    while s:
+        print (s)
+        s = s.next
+    
+    breakpoint()
+    pass
     
 def COM_CheckRegistered():
     (handle, filelen, path_id) = COM_OpenFile('gfx/pop.lmp')
@@ -393,10 +412,15 @@ def COM_InitFilesytem():
     _cmd.Cmd_AddCommand('path', COM_Path_f)
     _cmd.Cmd_AddCommand('game', COM_Game_f)
 
-    if '-basedir' in sys.argv:
-        for index, item in enumerate(sys.argv):
-            if item == '-basedir':
-                com_basedir = sys.argv[index+1]
+    i = COM_CheckParm('-basedir')
+
+    if i != 0 and i < com_argc - 1:
+        com_basedir = com_argv[i + 1]
+    else:
+        com_basedir = main_sdl.parms.basedir
+
+    if len(com_basedir) == 0:
+        sys_sdl_unix.Sys_Error("bad argument to -basedir")
 
     COM_AddGameDirectory(com_basedir, 'id1') # GAMENAME
 

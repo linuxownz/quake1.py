@@ -1,6 +1,7 @@
 #cvar.py 
 
 import _cmd
+import console
 
 __cvars: List[cvar_t] = []
 
@@ -77,17 +78,23 @@ def Cvar_RegisterVariable(variable):
         raise NotImplementedError
     
     if Cvar_FindVar(name):
-        Con_Printf(f'Cvar_RegisterVariable: cant register variable {name}, already defined')
+        console.Con_Printf(f'Cvar_RegisterVariable: cant register variable {name}, already defined')
         return
 
     if _cmd.Cmd_Exists(name):
-        Con_Printf(f'Cvar_RegisterVariable {name} is a command')
+        console.Con_Printf(f'Cvar_RegisterVariable {name} is a command')
         return
 
     flags |= CVAR_REGISTERED
     
     __cvars.append(cvar_t(name, string, flags, value, default_string, callback))
     
+def Cvar_GetCvar(name):
+    for cvar in __cvars:
+        if cvar.name == name:
+            return cvar
+    return None
+
 def Cvar_SetCallback(Cvar:dict, callback):
 
     cvar = Cvar_FindVar(Cvar['name'])

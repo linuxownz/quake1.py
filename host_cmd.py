@@ -36,6 +36,8 @@ def FileList_Add(name, _list: filelist_item_t, path_id):
     else:
         _list.next = item
         
+def ExtraMaps_Add(name, _list: filelist_item_t, path_id):
+    FileList_Add(name, _list, path_id)
 
 def Host_Maps_f():
     if Cmd_Argc() > 1:
@@ -981,9 +983,35 @@ def Host_InitCommands():
 
 
 def ExtraMaps_Init():
-    raise NotImplementedError
-    return
-    pass
+    mapname = ''
+    search = common.com_searchpaths
+    while search:
+        if search.filename:
+            filestring = f'{search.filename}/maps/'
+            try:
+                dir_p = os.listdir(filestring)
+            except:
+                search = search.next
+                continue
+
+            if not dir_p:
+                search = search.next
+                continue
+
+            for file in dir_p:
+                if not file.endswith('.bsp'):
+                    continue
+                file = common.COM_StripExtension(file)
+                ExtraMaps_Add(file, search.path_id)
+        else: # pakfile
+            if search.path_id != 1:
+                for i in range(search.pack.numfiles):
+                    if common.COM_FileGetExtension(search.pack.files[i].name) == 'bsp':
+                        mapname = common.COM_StripExtension(search.pack.files[i].name)
+                        ExtraMaps_Add(mapname, extralevels, search.path_id)
+
+        search = search.next
+
 
 def ModList_Init():
     raise NotImplementedError

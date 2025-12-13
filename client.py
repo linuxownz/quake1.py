@@ -22,9 +22,9 @@ class scoreboard_t():
         self.translations = []
 
 class cshift_t():
-    def __init__(self):
-        self.destcolor = [0, 0, 0]
-        self.percent = 0
+    def __init__(self, destcolor, percent):
+        self.destcolor = destcolor
+        self.percent = percent
 
 CSHIFT_CONTENTS = 0
 CSHIFT_DAMAGE   = 1
@@ -161,5 +161,6 @@ class client_state_t():
         self.protocol = 0
         self.protocolflags = 0
 
-
+cls : client_static_t = client_static_t()
+cl  : client_state_t  = client_state_t()
 

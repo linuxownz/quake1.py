@@ -40,9 +40,6 @@ messagesReceived = 0
 unreliableMessagesSent = 0
 unreliableMessagesReceived = 0
 
-net_messagetimeout = {'name': 'net_messagetimeout', 'value':'300',     'flags':cvar.CVAR_NONE}
-hostname           = {'name': 'hostname',           'value':'UNNAMED', 'flags':cvar.CVAR_NONE}
-
 net_time = 0.0
 
 hostCacheCount = 0
@@ -168,6 +165,9 @@ def NET_Init():
         s.next = net_freeSockets
         net_freeSockets = s
         s.disconnected = True
+
+    net_messagetimeout = {'name': 'net_messagetimeout', 'value':'300',     'flags':cvar.CVAR_NONE}
+    hostname           = {'name': 'hostname',           'value':'UNNAMED', 'flags':cvar.CVAR_NONE}
 
     cvar.Cvar_RegisterVariable(net_messagetimeout)
     cvar.Cvar_RegisterVariable(hostname)

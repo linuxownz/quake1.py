@@ -34,18 +34,6 @@ MAX_FIELD_LEN = 64
 GEFV_CACHESIZE = 2
 
 
-nomonsters   = {'name': 'nomonsters',   'value': '0', 'flags': cvar.CVAR_NONE}
-gamecfg      = {'name': 'gamecfg',      'value': '0', 'flags': cvar.CVAR_NONE}
-scratch1     = {'name': 'scratch1',     'value': '0', 'flags': cvar.CVAR_NONE}
-scratch2     = {'name': 'scratch2',     'value': '0', 'flags': cvar.CVAR_NONE}
-scratch3     = {'name': 'scratch3',     'value': '0', 'flags': cvar.CVAR_NONE}
-scratch4     = {'name': 'scratch4',     'value': '0', 'flags': cvar.CVAR_NONE}
-savedgamecfg = {'name': 'savedgamecfg', 'value': '0', 'flags': cvar.CVAR_NONE}
-saved1       = {'name': 'saved1',       'value': '0', 'flags': cvar.CVAR_NONE}
-saved2       = {'name': 'saved2',       'value': '0', 'flags': cvar.CVAR_NONE}
-saved3       = {'name': 'saved3',       'value': '0', 'flags': cvar.CVAR_NONE}
-saved4       = {'name': 'saved4',       'value': '0', 'flags': cvar.CVAR_NONE}
-
 def ED_PrintNum(ent):
     ED_Print(EDICT_NUM(ent))
 
@@ -104,6 +92,18 @@ def PR_Init():
     _cmd.Cmd_AddCommand('edicts', ED_PrintEdicts_f)
     _cmd.Cmd_AddCommand('edictcount', ED_Count)
     _cmd.Cmd_AddCommand('profile', pr_exec.PR_Profile_f)
+
+    nomonsters   = {'name': 'nomonsters',   'value': '0', 'flags': cvar.CVAR_NONE}
+    gamecfg      = {'name': 'gamecfg',      'value': '0', 'flags': cvar.CVAR_NONE}
+    scratch1     = {'name': 'scratch1',     'value': '0', 'flags': cvar.CVAR_NONE}
+    scratch2     = {'name': 'scratch2',     'value': '0', 'flags': cvar.CVAR_NONE}
+    scratch3     = {'name': 'scratch3',     'value': '0', 'flags': cvar.CVAR_NONE}
+    scratch4     = {'name': 'scratch4',     'value': '0', 'flags': cvar.CVAR_NONE}
+    savedgamecfg = {'name': 'savedgamecfg', 'value': '0', 'flags': cvar.CVAR_NONE}
+    saved1       = {'name': 'saved1',       'value': '0', 'flags': cvar.CVAR_NONE}
+    saved2       = {'name': 'saved2',       'value': '0', 'flags': cvar.CVAR_NONE}
+    saved3       = {'name': 'saved3',       'value': '0', 'flags': cvar.CVAR_NONE}
+    saved4       = {'name': 'saved4',       'value': '0', 'flags': cvar.CVAR_NONE}
 
     cvar.Cvar_RegisterVariable(nomonsters)
     cvar.Cvar_SetCallback(nomonsters, ED_Nomonsters_f)

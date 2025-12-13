@@ -6,7 +6,6 @@ import sdl2.ext
 
 import cfgfile
 import _cmd
-import cvar
 import gl_vidsdl
 import sys_sdl_unix
 from vid import modestate_t
@@ -70,20 +69,7 @@ gl_glsl_gamma_able = False; #ericw
 gl_glsl_alias_able = False; #ericw
 gl_stencilbits = 0
 
-vid_fullscreen        = {'name':'vid_fullscreen',        'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_width             = {'name':'vid_width',             'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_height            = {'name':'vid_height',            'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_bpp               = {'name':'vid_bpp',               'value':'16', 'flags': cvar.CVAR_ARCHIVE}
-vid_refreshrate       = {'name':'vid_refreshrate',       'value':'60', 'flags': cvar.CVAR_ARCHIVE}
-vid_vsync             = {'name':'vid_vsync',             'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_fsaa              = {'name':'vid_fsaa',              'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_desktopfullscreen = {'name':'vid_desktopfullscreen', 'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-vid_borderless        = {'name':'vid_borderless',        'value': '0', 'flags': cvar.CVAR_ARCHIVE}
-
-vid_gamma    = {'name':'gamma',    'value':'1', 'flags': cvar.CVAR_ARCHIVE}
-vid_contrast = {'name':'contrast', 'value':'1', 'flags': cvar.CVAR_ARCHIVE}
 fsaa = 0
-
 
 def VID_InitModelist():
     sdlmodes = sdl2.SDL_GetNumDisplayModes(0)
@@ -91,7 +77,21 @@ def VID_InitModelist():
 
 
 def VID_Init():
+    import cvar
     global read_vars
+
+    vid_fullscreen        = {'name':'vid_fullscreen',        'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_width             = {'name':'vid_width',             'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_height            = {'name':'vid_height',            'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_bpp               = {'name':'vid_bpp',               'value':'16', 'flags': cvar.CVAR_ARCHIVE}
+    vid_refreshrate       = {'name':'vid_refreshrate',       'value':'60', 'flags': cvar.CVAR_ARCHIVE}
+    vid_vsync             = {'name':'vid_vsync',             'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_fsaa              = {'name':'vid_fsaa',              'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_desktopfullscreen = {'name':'vid_desktopfullscreen', 'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+    vid_borderless        = {'name':'vid_borderless',        'value': '0', 'flags': cvar.CVAR_ARCHIVE}
+
+    vid_gamma    = {'name':'gamma',    'value':'1', 'flags': cvar.CVAR_ARCHIVE}
+    vid_contrast = {'name':'contrast', 'value':'1', 'flags': cvar.CVAR_ARCHIVE}
 
     read_vars = [ 
        'vid_fullscreen',

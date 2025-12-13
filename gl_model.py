@@ -131,11 +131,6 @@ class qmodel_t():
 loadmodel : qmodel_t  = None
 loadname = ''
 
-gl_subdivide_size = {'name': 'gl_subdivide_size', 'value': '128', 'flags': cvar.CVAR_ARCHIVE}
-external_ents     = {'name': 'external_ents',     'value': '1', 'flags': cvar.CVAR_ARCHIVE}
-external_vis      = {'name': 'external_vis',      'value': '1', 'flags': cvar.CVAR_ARCHIVE}
-external_textures = {'name': 'external_textures', 'value': '1', 'flags': cvar.CVAR_ARCHIVE}
-
 mod_novis = None
 mod_novis_capacity = 0
 
@@ -163,6 +158,11 @@ def Mod_Print():
 def Mod_Init():
     global r_notexture_mip
     global r_notexture_mip2
+
+    gl_subdivide_size = {'name': 'gl_subdivide_size', 'value': '128', 'flags': cvar.CVAR_ARCHIVE}
+    external_ents     = {'name': 'external_ents',     'value': '1', 'flags': cvar.CVAR_ARCHIVE}
+    external_vis      = {'name': 'external_vis',      'value': '1', 'flags': cvar.CVAR_ARCHIVE}
+    external_textures = {'name': 'external_textures', 'value': '1', 'flags': cvar.CVAR_ARCHIVE}
 
     cvar.Cvar_RegisterVariable(gl_subdivide_size)
     cvar.Cvar_RegisterVariable(external_ents)

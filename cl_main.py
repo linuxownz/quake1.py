@@ -4,7 +4,7 @@ from enum import Enum
 import keys
 import snd_dma
 
-from console import Con_DPrintf
+# from console import Con_DPrintf
 
 from typing import (
     IO,  # Use if you do not know the encoding of the file object
@@ -43,6 +43,7 @@ class client_static_t():
 cls = client_static_t()
 
 def CL_Disconnect():
+    import console
     if keys.key_dest == key_message:
         Key_EndChat()
 
