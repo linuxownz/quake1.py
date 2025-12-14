@@ -7,15 +7,18 @@ import cvar
 
 cfg_file : common._fshandle_t = None
 
-def CFG_CloseConfig(file):
+def CFG_CloseConfig():
+    global cfg_file
     if cfg_file:
-        FS_fclose(cfg_file)
+        common.FS_fclose(cfg_file)
         cfg_file = None
 
 def CFG_OpenConfig(cfg_name) -> bool:
+    global cfg_file
+
     CFG_CloseConfig()
 
-    f, length = common.COM_FOpenFile(cfg_name, common.findfilewant.WantHandle)
+    f, length = common.COM_FOpenFile(cfg_name, common.findfilewant.WantFile)
 
     if length == -1:
         return -1
@@ -38,21 +41,27 @@ def CFG_ReadCvars(vars):
 
         buff = common.FS_fgetl(cfg_file)
 
-        if buff == '':
+        if buff is None:
             break
 
+        buff = str(buff, encoding='ascii')
         buff = buff.strip()
         buff = ' '.join(buff.split())
 
-        assert(buff[-1] == '"') # must end with a "
+        if buff == '':
+            continue
+
+        if buff[-1] != '"':
+            continue
         
         for var in vars:
             if var in buff:
                 arg = buff.split()[1]
-                arg.replace('"', '')
+                arg = arg.replace('"', '')
                 cvar.Cvar_Set(var, arg)
+                j += 1
+                break
             
-            j += 1
         if j == num_vars:
             break
 

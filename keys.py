@@ -4,7 +4,6 @@ from __future__ import annotations
 from enum import Enum
 
 import host
-from main_sdl import parms
 import _cmd
 
 # these are the key number
@@ -295,6 +294,8 @@ def Key_Init():
     global menubound
 
     global key_blinktime
+
+    from main_sdl import parms
 
     History_Init()
 

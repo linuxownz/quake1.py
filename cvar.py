@@ -2,8 +2,7 @@
 
 import _cmd
 import console
-
-__cvars: List[cvar_t] = []
+import host
 
 CVAR_NONE       = 0
 CVAR_ARCHIVE    = 1 << 0
@@ -25,6 +24,7 @@ class cvar_t():
         self.default_string = default_string
         self.callback = callback
 
+__cvars: list[cvar_t] = []
 
 def Cvar_List_f():
     for cvar in __cvars:
@@ -89,7 +89,7 @@ def Cvar_RegisterVariable(variable):
     
     __cvars.append(cvar_t(name, string, flags, value, default_string, callback))
     
-def Cvar_GetCvar(name):
+def Cvar_GetCvar(name) -> cvar_t:
     for cvar in __cvars:
         if cvar.name == name:
             return cvar
@@ -119,7 +119,7 @@ def Cvar_SetQuick(Cvar : cvar_t, value):
     if not ( flags & CVAR_REGISTERED ):
         return
 
-    if Cvar.string == None:
+    if Cvar.string is not None:
         Cvar.string = value
     else:
         if Cvar.string == value:
@@ -128,7 +128,7 @@ def Cvar_SetQuick(Cvar : cvar_t, value):
         Cvar.flags |= CVAR_CHANGED
         Cvar.string = value
 
-    Cvar.value = value
+    Cvar.value = Cvar.string
 
     if not Cvar.default_string:
         Cvar.default_string = Cvar.string
@@ -161,15 +161,14 @@ def Cvar_SetValueQuick(cvarname, value):
 def Cvar_Set(varname, value):
     var = Cvar_FindVar(varname)
 
-    if var == '':
+    if var is None:
         console.Con_Printf(f'Cvar_Set: variable {varname} not found!')
         return
 
-    Cvar_SetQuick(varname, value)
+    Cvar_SetQuick(var, value)
 
 def Cvar_SetValue(varname, value:float):
     value = str(value)
-
     Cvar_Set(varname, value)
     
 def Cvar_SetROM(varname, value:str):

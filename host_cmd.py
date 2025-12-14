@@ -1014,8 +1014,9 @@ def ExtraMaps_Init():
 
 
 def ModList_Init():
-    raise NotImplementedError
+    ''' not sure what this does '''
     return
+    raise NotImplementedError
 
 def DemoList_Init():
     demname = ''
@@ -1023,9 +1024,16 @@ def DemoList_Init():
     while search:
         if search.filename:
             filestring = f'{search.filename}'
-            dir_p = os.listdir(filestring)
-            if not dir_p:
+            try:
+                dir_p = os.listdir(filestring)
+            except:
+                search = search.next
                 continue
+
+            if not dir_p:
+                search = search.next
+                continue
+
             for file in dir_p:
                 if not file.endswith('.dem'):
                     continue
@@ -1038,5 +1046,7 @@ def DemoList_Init():
                     if common.COM_FileGetExtension(search.pack.files[i].name) == 'dem':
                         demname = common.COM_StripExtension(search.pack.files[i].name)
                         FileList_Add(demname, demolist, search.path_id)
+        
+        search = search.next
 
          

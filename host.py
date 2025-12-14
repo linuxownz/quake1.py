@@ -114,6 +114,8 @@ def Host_InitLocal():
     horde          = {'name':'horde',          'value': '0',   'flags': cvar.CVAR_NONE}
     sv_cheats      = {'name':'sv_cheats',      'value': '0',   'flags': cvar.CVAR_NONE}
 
+    sys_throttle = {'name':'sys_throttle', 'value':'0.02', 'flags':cvar.CVAR_ARCHIVE}
+
     cvar.Cvar_RegisterVariable(host_framerate)
     cvar.Cvar_RegisterVariable(host_speeds)
 
@@ -128,7 +130,7 @@ def Host_InitLocal():
     cvar.Cvar_RegisterVariable(devstats)
     cvar.Cvar_RegisterVariable(sys_ticrate)
 
-    cvar.Cvar_RegisterVariable(sys_sdl_unix.sys_throttle)
+    cvar.Cvar_RegisterVariable(sys_throttle)
     cvar.Cvar_RegisterVariable(serverprofile)
 
     cvar.Cvar_RegisterVariable(fraglimit)

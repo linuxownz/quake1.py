@@ -107,6 +107,13 @@ class sizebuf_s():
 com_searchpaths      : searchpath_t = None
 com_base_searchpaths : searchpath_t = None
 
+def CLAMP(minval, val, maxval):
+    if val < minval:
+        return minval
+    elif val > maxval:
+        return maxval
+    return val
+
 def ShortSwap(l):
     b1 = l & 255
     b2 = (l>>8) & 255
@@ -136,8 +143,6 @@ def FloatSwap(f):
 
 def FloatNoSwap(f):
     return f
-
-
 
 def COM_InitArgv():
     global safemode
@@ -373,7 +378,7 @@ def COM_AddGameDirectory(base, dir):
         print (s)
         s = s.next
     
-    breakpoint()
+    #breakpoint()
     pass
     
 def COM_CheckRegistered():
@@ -724,7 +729,34 @@ def COM_FindFile(filename, want:findfilewant) -> (io.FileIO, int, int):
                 else: # for COM_FileExists
                     return com_filesize
     
+        else: # check file in directory tree
+            if not cvar.Cvar_GetCvar('registered').value:
+                if '/' in filename:
+                    search  = search.next
+                    continue
+
+            netpath = f'{search.filename}/{filename}'
+
+            if not os.path.isfile(netpath):
+                search  = search.next
+                continue
+
+            path_id = search.path_id
+            if want & findfilewant.WantHandle:
+                handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
+                return ( handle, length )
+            
+            elif want & findfilewant.WantFile:
+                file = open(netpath, 'rb', buffering=False)
+                length = sys_sdl_unix.Sys_filelength(file)
+                return ( file, length )
+            
+            else:
+                return 0
+    
         search  = search.next
+
+    
 
 def COM_FileExists(filename, path_id) -> bool:
     (filelength) = COM_FindFile(filename, findfilewant.WantFileLen)
@@ -750,3 +782,6 @@ def COM_CloseFile(handle):
 def COM_FOpenFile(filename, path_id) -> io.FileIO:
     # wants file, path_id
     return COM_FindFile(filename, path_id)
+
+def COM_FileGetExtension(file):
+    raise NotImplementedError

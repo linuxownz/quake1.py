@@ -12,9 +12,8 @@ isDedicated = False
 stdinIsATTY = False
 
 MAX_HANDLES = 32
-sys_handles : List[io.FileIO] = [None] # could be io.BufferedStream, etc TODO
+sys_handles : list[io.FileIO] = [None] # could be io.BufferedStream, etc TODO
 
-sys_throttle = {'name':'sys_throttle', 'value':'0.02', 'flags':cvar.CVAR_ARCHIVE}
 
 __cwd = '.'
 __userdir = ''
