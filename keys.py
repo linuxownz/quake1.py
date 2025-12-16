@@ -5,6 +5,10 @@ from enum import Enum
 
 import host
 import _cmd
+import client
+import console
+import vid
+import menu
 
 # these are the key number
 K_TAB           = 9
@@ -264,12 +268,21 @@ class keydest_t(Enum):
     key_message = 2
     key_menu    = 3
 
+class key_inputgrab_t():
+    def __init__(self):
+        self.active = False
+        self.lastkey = 0
+        self.lastchar = 0
+
+
+key_inputgrab : key_inputgrab_t =  key_inputgrab_t()
+
 key_dest = keydest_t.key_game
 
-keybindings : List[bool] = []
-consolekeys : List[bool] = []
-menubound   : List[bool] = []
-keydown     : List[bool] = []
+keybindings : list[bool] = [False for _ in range(256)]
+consolekeys : list[bool] = [False for _ in range(256)]
+menubound   : list[bool] = [False for _ in range(256)]
+keydown     : list[bool] = [False for _ in range(256)]
 
 chat_team = False
 chat_buffer = []
@@ -288,6 +301,124 @@ def History_Init():
         key_lines.insert(0, ']')
     except:
         pass
+
+def Key_TextEntry() -> bool:
+    if key_inputgrab.active:
+        return False
+
+    match key_dest:
+        case keydest_t.key_message:
+            return True
+        case keydest_t.key_menu:
+            return M_TextEntry()
+        case keydest_t.key_game:
+            return False
+        case keydest_t.key_console:
+            return True
+        case _:
+            return False
+
+def Key_EventWithKeycode(key, down, keycode):
+    if key < 0 or key >= MAX_KEYS:
+        return
+    
+    if down and ( key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
+        vid.VID_Toggle()
+        return
+
+    if down:
+        if keydown[key]:
+            if key_dest == keydest_t.key_game and not console.con_forcedup:
+                return
+        elif key >= 200 and not keybindings[key]:
+            console.Con_Printf(f'{Key_KeynumToString(key)} is unbound, hit F4 to set\n')
+    elif not keydown[key]:
+        return
+
+    keydown[key] = down
+
+    if key_inputgrab.active:
+        if down:
+            key_inputgrab.lastkey = key
+            if keycode > 0:
+                key_inputgrab.lastchar = keycode
+        return
+
+    if key == K_ESCAPE:
+        if not down:
+            return
+        
+        if keydown[K_SHIFT]:
+            console.Con_ToggleConsole_f()
+            return
+
+        match key_dest:
+            case keydest_t.key_message:
+                Key_Message(key)
+            case keydest_t.key_menu:
+                menu.M_Keydown(key)
+            case keydest_t.key_game | keydest_t.key_console:
+                menu.M_ToggleMenu_f()
+            case _:
+                Sys_Error('Bad key_dest')
+        
+        return
+    
+    if not down:
+        kb = keybindings[key]
+        if kb and kb[0] == '+':
+            cmd = f'-{kb[1:]} {key}\n'
+            Cbuf_AddText(cmd)
+        
+        return
+
+    if client.cls.demoplayback and down and consolekeys[key] and key_dest == keydest_t.key_game and key != K_TAB:
+        menu.M_ToggleMenu_f()
+        return
+
+    if (key_dest == keydest_t.key_menu and menubound[key]) or (key_dest == keydest_t.key_console and not consolekeys[key]) or (key_dest == keydest_t.key_game and ( not console.con_forcedup or not consolekeys[key])):
+        kb = keybindings[key]
+        if kb:
+            if kb[0] == '+':
+                cmd = f'{kb} {key}\n'
+                Cbuf_AddText(cmd)
+            else:
+                Cbuf_AddText(kb)
+                Cbuf_AddText('\n')
+        return
+
+    if not down:
+        return
+
+    match key_dest:
+        case keydest_t.key_message:
+            Key_Message(key)
+        case keydest_t.key_menu:
+            menu.M_Keydown(key)
+        case keydest_t.key_game | keydest_t.key_console:
+            Key_Console(key)
+        case _:
+            Sys_Error('bad key_dest')
+
+        
+
+
+
+
+    
+
+
+
+
+
+
+def Key_Event(key, down):
+    Key_EventWithKeycode(key, down, 0)
+
+def Key_ClearStates():
+    for i in range(MAX_KEYS):
+        if keydown[i]:
+            Key_Event(i, False)
 
 def Key_Init():
     global consolekeys

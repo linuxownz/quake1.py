@@ -9,15 +9,21 @@ import _cmd
 import common
 import console
 import cvar
+import gl_draw
 import gl_model
+import gl_texmgr
 import gl_vidsdl
+import gl_rmisc
+import gl_screen
 import host_cmd
+import in_sdl
 import keys
 import menu
 import net_main
 import net_main
 import pr_edict
 import quakedef
+import snd_dma
 import sv_main
 import sys_sdl_unix
 import view
@@ -200,8 +206,15 @@ def Host_Init():
         host_cmd.DemoList_Init()
         gl_vidsdl.VID_Init()
         in_sdl.IN_Init()
-        TexMgr_Init()
-        Draw_Init()
+        gl_texmgr.TexMgr_Init()
+        gl_draw.Draw_Init()
+        gl_screen.SCR_Init()
+        gl_rmisc.R_Init()
+        snd_dma.S_Init()
+
+        
+
+    raise NotImplementedError
         
 
 

@@ -18,7 +18,9 @@ def CFG_OpenConfig(cfg_name) -> bool:
 
     CFG_CloseConfig()
 
-    f, length = common.COM_FOpenFile(cfg_name, common.findfilewant.WantFile)
+    (handle, length, path_id ) = common.COM_FOpenFile(cfg_name)
+
+    f = common.COM_FileIOFromHandle(handle)
 
     if length == -1:
         return -1

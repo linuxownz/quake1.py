@@ -313,6 +313,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
     pack = pack_t(packfile, handle, len(newfiles), newfiles)
     return pack
 
+    
 
 def COM_AddGameDirectory(base, dir):
     global com_searchpaths
@@ -665,7 +666,6 @@ def Host_Spawn_f():
     else:
         ent = host_client.edict
 
-
 BigShort    = ShortSwap
 LittleShort = ShortNoSwap
 BigLong     = LongSwap
@@ -673,27 +673,14 @@ LittleLong  = LongNoSwap
 BigFloat    = FloatSwap
 LittleFloat = FloatNoSwap       
 
-
-class findfilewant(Flag):
-    WantNone    = 0
-    WantHandle  = 1
-    WantFile    = 2
-    WantPathid  = 4
-    WantFileLen = 8
-
 #static                                     returns file, handle, path_id
-def COM_FindFile(filename, want:findfilewant) -> (io.FileIO, int, int):
+def COM_FindFile(filename) -> (io.FileIO, int, int):
     global file_from_pak
 
     pak:pack_t = None
     file_from_pak = False
     path_id = 0
     handle = None
-
-    returnval = ()
-
-    if want & findfilewant.WantFile and want & findfilewant.WantHandle:
-        Sys_Error('COM_FindFile: both handle and file wanted error')
 
     search = com_searchpaths
     while True: 
@@ -703,8 +690,7 @@ def COM_FindFile(filename, want:findfilewant) -> (io.FileIO, int, int):
 
         if search.pack:
             pak = search.pack
-
-            print (pak.filename, pak.numfiles)
+            # print (pak.filename, pak.numfiles)
 
             for i in range(pak.numfiles):
                 print(pak.files[i].name)
@@ -713,22 +699,11 @@ def COM_FindFile(filename, want:findfilewant) -> (io.FileIO, int, int):
 
                 com_filesize = pak.files[i].filelen
                 file_from_pak = True
-
-                if want & findfilewant.WantFileLen:
-                    return com_filesize
-
-                if want & findfilewant.WantPathid:
-                    path_id = search.path_id
-                
-                if want & findfilewant.WantHandle:
-                    handle = pak.handle
-                    sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
-                    return (handle, com_filesize, path_id)   # returning io.FileIO
-                elif want & findfilewant.WantFile:
-                    pass # returning 
-                else: # for COM_FileExists
-                    return com_filesize
-    
+                path_id = search.path_id
+                handle = pak.handle
+                sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
+                return (handle, com_filesize, path_id )
+   
         else: # check file in directory tree
             if not cvar.Cvar_GetCvar('registered').value:
                 if '/' in filename:
@@ -742,30 +717,26 @@ def COM_FindFile(filename, want:findfilewant) -> (io.FileIO, int, int):
                 continue
 
             path_id = search.path_id
-            if want & findfilewant.WantHandle:
-                handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
-                return ( handle, length )
-            
-            elif want & findfilewant.WantFile:
-                file = open(netpath, 'rb', buffering=False)
-                length = sys_sdl_unix.Sys_filelength(file)
-                return ( file, length )
-            
-            else:
-                return 0
+            handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
+            return ( handle, length, path_id)
     
         search  = search.next
 
+    pass
     
 
+def COM_FileIOFromHandle(handle) -> io.FileIO:
+    import sys_sdl_unix
+    return sys_sdl_unix.sys_handles[handle]
+
 def COM_FileExists(filename, path_id) -> bool:
-    (filelength) = COM_FindFile(filename, findfilewant.WantFileLen)
+    (filelength) = COM_FindFile(filename)
     return filelength >= 0
 
 
 def COM_OpenFile(filename):
     # wants handle, path_id
-    (handle, filelen, path_id) = COM_FindFile(filename, findfilewant.WantHandle | findfilewant.WantPathid)
+    (handle, filelen, path_id) = COM_FindFile(filename)
     return (handle, filelen, path_id)
 
 def COM_CloseFile(handle):
@@ -779,9 +750,8 @@ def COM_CloseFile(handle):
     
     Sys_FileClose(handle)
 
-def COM_FOpenFile(filename, path_id) -> io.FileIO:
-    # wants file, path_id
-    return COM_FindFile(filename, path_id)
+def COM_FOpenFile(filename) -> (int, int, int):
+    return COM_FindFile(filename)
 
 def COM_FileGetExtension(file):
     raise NotImplementedError

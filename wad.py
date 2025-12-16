@@ -1,11 +1,18 @@
 #wad.py 
 
-import common
 import struct
+
+import common
+import console
+
+class NotTestedError(NotImplementedError):
+    def __init__(self):
+        pass
 
 class qpic_t():
     unpack_string = '<IIBBBB'
     def __init__(self, width, height, data: bytes):
+        #raise NotTestedError()
         self.width = width
         self.height = height
         self.data = data
@@ -38,7 +45,7 @@ class wad_t():
 
 
 wad_numlumps = 0
-wad_lumps : List[lumpinfo_t] = []
+wad_lumps : list[lumpinfo_t] = []
 wad_base : bytes = None
 
 WADFILENAME = 'gfx.wad'
@@ -86,6 +93,26 @@ def W_LoadWadFile():
         print(name)
         wad_lumps.append(lumpinfo_t(filepos, disksize, size, _type, compression, name))
 
+def W_GetLumpInfo(lumps: list[lumpinfo_t], numlumps, name) -> lumpinfo_t:
+    name = W_CleanupName(name)
+
+    for lump in lumps:
+        if lump.name == name:
+            return lump
+
+    console.Con_Printf(f'W_GetLumpInfo: {name} not found')
+
+    raise FileNotFoundError
+
+    return None
+
+def W_GetLumpName(name):
+    lump : lumpinfo_t = W_GetLumpInfo(wad_lumps, wad_numlumps, name)
+
+    if lump is None:
+        return None
+
+    return wad_base[lump.filepos:], lump.filepos
 
 
 

@@ -75,6 +75,9 @@ def Con_Printf(msg):
     if con_debuglog:
         Con_DebugLog(msg) 
 
+def Con_Warning(msg):
+    print('Warning: ', msg)
+
 def Con_DPrintf(msg):
     print(msg)
 

@@ -1,8 +1,17 @@
 #gl_screen.py 
 
+import OpenGL
+import OpenGL.GL
+
+import common
+import console
+import cvar
 import wad
 import vid
 import _cmd
+import gl_draw
+import gl_vidsdl
+import sys_sdl_unix
 
 glx = 0
 gly = 0
@@ -15,7 +24,7 @@ scr_conlines = 0.0
 scr_initialized = False
 
 scr_net : wad.qpic_t = None
-scr_turtel : wad.qpic_t = None
+scr_turtle : wad.qpic_t = None
 
 clearconsole = 0
 clearnotify = 0
@@ -37,6 +46,90 @@ scr_erase_center = 0
 
 scr_notifystring = ''
 scr_drawdialog = False
+
+def SCR_Conwidth_f (var):
+    import cvar
+
+    scr_conwidth = int(cvar.Cvar_GetCvar('scr_conwidth').value)
+    scr_conscale = int(cvar.Cvar_GetCvar('scr_conscale').value)
+
+    gl_vidsdl._vid.recalc_refdef = 1
+
+    if scr_conwidth > 0:
+        gl_vidsdl._vid.conwidth = scr_conwidth
+    elif scr_conscale > 0:
+        gl_vidsdl._vid.conwidth = gl_vidsdl._vid.width/scr_conscale
+    else:
+        gl_vidsdl._vid.conwidth = gl_vidsdl._vid.width
+        
+    gl_vidsdl._vid.conwidth = CLAMP(320, gl_vidsdl._vid.conwidth / gl_vidsdl._vid.width)
+    gl_vidsdl._vid.conwidth &= 0xFFFFFFF8
+
+    gl_vidsdl._vid.conheight = gl_vidsdl._vid.height / gl_vidsdl._vid.width 
+    
+
+def SCR_Callback_refdef(var):
+    gl_vidsdl._vid.recalc_refdef = 1
+
+def SCR_ScreenShot_f():
+    global glx, gly, glwidth, glheight
+    ext = 'png'
+
+    cmd_argc = _cmd.Cmd_Argc()
+    
+    if cmd_argc >= 2:
+        requested_ext = _cmd.Cmd_Argv(1)
+        
+        if requested_ext not in ['png', 'tga', 'jpg']:
+            SCR_ScreenShot_Usage()
+            return
+
+    quality = 90
+    if cmd_argc >= 3:
+        quality = int(_cmd.Cmd_Argv(2))
+    
+    if quality < 1 or quality > 100:
+        SCR_ScreenShot_Usage()
+        return
+
+    for i in range(100):
+        imagename = '%s/spasm%04i.%s' % com_gamedir, i, ext
+        if sys_sdl_unix.Sys_FileType(imagename) == common.FS_ENT_NONE:
+            break
+    
+    if i == 100:
+        console.Con_Printf('SCR_ScreenShot_f: Couldnt find unused filename')
+        return
+
+    OpenGL.GL.glPixelStorei(OpenGL.GL.GL_PACK_ALIGNMENT, 1)
+    buffer = OpenGL.GL.glReadnPixels(glx, gly, glwidth, glheight, OpenGL.GL.GL_RGB, OpenGL.GL.GL_UNSIGNED_BYTE)
+
+    ok = False
+    if ext == 'png':
+        ok = Image_WritePNG(imagename, buffer, glwidth, glheight, 24, False)
+    elif ext == 'tga':
+        ok = Image_WriteTGA(imagename, buffer, glwidth, glheight, 24, False)
+    elif ext == 'jpg':
+        ok = Image_WriteJPG(imagename, buffer, glwidth, glheight, 24, quality, False)
+    
+    if ok:
+        console.Con_Printf('wrote %s' % imagename)
+    else:
+        console.Con_Printf('could not write %s' % imagename)
+
+
+def SCR_SizeUp_f():
+    scr_viewsize = cvar.Cvar_GetCvar('scr_viewsize')
+    cvar.Cvar_SetValueQuick('scr_viewsize', int(scr_viewsize.value) + 10)
+
+def SCR_SizeDown_f():
+    scr_viewsize = cvar.Cvar_GetCvar('scr_viewsize')
+    cvar.Cvar_SetValueQuick('scr_viewsize', int(scr_viewsize.value) - 10)
+
+def SCR_LoadPics():
+    global scr_net, scr_turtle
+    scr_net    = gl_draw.Draw_PicFromWad('net') 
+    scr_turtle = gl_draw.Draw_PicFromWad('turtle') 
 
 def SCR_Init():
     import cvar
@@ -63,22 +156,28 @@ def SCR_Init():
 
     cvar.Cvar_RegisterVariable (scr_menuscale)
     cvar.Cvar_RegisterVariable (scr_sbarscale)
-    cvar.Cvar_SetCallback (scr_sbaralpha, SCR_Callback_refdef)
+
     cvar.Cvar_RegisterVariable (scr_sbaralpha)
-    cvar.Cvar_SetCallback (scr_conwidth, SCR_Conwidth_f)
-    cvar.Cvar_SetCallback (scr_conscale, SCR_Conwidth_f)
     cvar.Cvar_RegisterVariable (scr_conwidth)
     cvar.Cvar_RegisterVariable (scr_conscale)
+ 
+    cvar.Cvar_SetCallback (scr_sbaralpha, SCR_Callback_refdef)
+    cvar.Cvar_SetCallback (scr_conwidth, SCR_Conwidth_f)
+    cvar.Cvar_SetCallback (scr_conscale, SCR_Conwidth_f)
+
     cvar.Cvar_RegisterVariable (scr_crosshairscale)
     cvar.Cvar_RegisterVariable (scr_showfps)
     cvar.Cvar_RegisterVariable (scr_clock)
     cvar.Cvar_RegisterVariable (scr_usekfont) 
-    cvar.Cvar_SetCallback (scr_fov, SCR_Callback_refdef)
-    cvar.Cvar_SetCallback (scr_fov_adapt, SCR_Callback_refdef)
-    cvar.Cvar_SetCallback (scr_viewsize, SCR_Callback_refdef)
+
     cvar.Cvar_RegisterVariable (scr_fov)
     cvar.Cvar_RegisterVariable (scr_fov_adapt)
     cvar.Cvar_RegisterVariable (scr_viewsize)
+
+    cvar.Cvar_SetCallback (scr_fov, SCR_Callback_refdef)
+    cvar.Cvar_SetCallback (scr_fov_adapt, SCR_Callback_refdef)
+    cvar.Cvar_SetCallback (scr_viewsize, SCR_Callback_refdef)
+ 
     cvar.Cvar_RegisterVariable (scr_conspeed)
     cvar.Cvar_RegisterVariable (scr_showturtle)                  
     cvar.Cvar_RegisterVariable (scr_showpause)

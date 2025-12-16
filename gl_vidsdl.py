@@ -1,23 +1,34 @@
 #gl_vidsdl.py 
 
+from enum import Enum
+
 import os
+import sys
 import sdl2
 import sdl2.ext
 import ctypes
+import OpenGL
+import OpenGL.GL
 
-import common
-import console
 import cfgfile
 import _cmd
+import common
+import console
 import cvar
-import host
-import keys
-import gl_vidsdl
+import gl_draw
 import gl_screen
+import gl_vidsdl
+import gl_rmisc
+import host
+import in_sdl
+import keys
+import menu
 import quakedef
+import r_alias
+import r_world
+import snd_dma
 import sys_sdl_unix
 import vid
-import menu
 
 MAX_MODE_LIST  = 600 #johnfitz -- was 30 
 MAX_BPPS_LIST  = 5
@@ -62,22 +73,48 @@ modestate : vid.modestate_t = vid.modestate_t.MS_UNINIT
 
 scr_skipupdate = False
 
-gl_mtexable = False;
-gl_packed_pixels = False;
-gl_texture_env_combine = False; #johnfitz
-gl_texture_env_add = False; #johnfitz
-gl_swap_control = False; #johnfitz
-gl_anisotropy_able = False; #johnfitz
-max_anisotropy = 0.0; #johnfitz
-gl_texture_NPOT = False; #ericw
-gl_vbo_able = False; #ericw
-gl_glsl_able = False; #ericw
-gl_max_texture_units = 0; #ericw
-gl_glsl_gamma_able = False; #ericw
-gl_glsl_alias_able = False; #ericw
+gl_mtexable = False
+gl_packed_pixels = False
+gl_texture_env_combine = False #johnfitz
+gl_texture_env_add = False #johnfitz
+gl_swap_control = False #johnfitz
+gl_anisotropy_able = False #johnfitz
+gl_max_anisotropy = 0.0 #johnfitz
+gl_texture_NPOT = False #ericw
+gl_vbo_able = False #ericw
+gl_glsl_able = False #ericw
+gl_max_texture_units = 0 #ericw
+gl_glsl_gamma_able = False #ericw
+gl_glsl_alias_able = False #ericw
 gl_stencilbits = 0
 
 fsaa = 0
+
+class vid_opt_e(Enum):
+    VID_OPT_MODE        = 0
+    VID_OPT_BPP         = 1
+    VID_OPT_REFRESHRATE = 2
+    VID_OPT_FULLSCREEN  = 3
+    VID_OPT_VSYNC       = 4
+    VID_OPT_TEST        = 5
+    VID_OPT_APPLY       = 6
+    VIDEO_OPTIONS_ITEMS = 7
+
+video_options_cursor = 0
+
+class vid_menu_mode():
+    def __init__(self):
+        self.width = 0
+        self.height = 0
+
+vid_menu_modes : list[vid_menu_mode] = [ vid_menu_mode() for i in range(MAX_MODE_LIST)]
+vid_menu_nummodes = 0
+
+vid_menu_bpps = [ 0 for i in range(MAX_BPPS_LIST)]
+vid_menu_numbpps = 0
+
+vid_menu_rates = [ 0 for i in range(MAX_RATES_LIST)]
+vid_menu_numrates = 0
 
 def VID_InitModelist():
     sdlmodes = sdl2.SDL_GetNumDisplayModes(0)
@@ -392,22 +429,234 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
     ClearAllStates()
 
     console.Con_Printf('Video mode %dx%dx%d %dHz (%d-bit z-buffer, %dx FSAA) initialized' % 
-        VID_GetCurrentWidth(),      
+       (VID_GetCurrentWidth(),      
         VID_GetCurrentHeight(),
         VID_GetCurrentBPP(),
         VID_GetCurrentRefreshRate(),
         depthbits,
-        fsaa_obtained)
-
-    
-
-
+        fsaa_obtained))
 
 def ClearAllStates():
     keys.Key_ClearStates()
-    IN_ClearStates()
+    in_sdl.IN_ClearStates()
+
+def GL_MakeNiceExtensionList(gl_ext):
+    global gl_extensions_nice
+
+    gl_extensions_nice = gl_ext.split(' ')
+
+    print(gl_extensions_nice)
+
+    return gl_extensions_nice
+
+def GL_ParseExtensionList(list, name):
+    return name in list
+
+def GL_CheckExtensions():
+    global gl_vbo_able
+    global gl_mtexable
+    global gl_max_texture_units
+    global gl_texture_env_combine
+    global gl_texture_env_add
+    global gl_anisotropy_able
+    global gl_max_anisotropy
+    global gl_texture_NPOT
+    global gl_glsl_able
+    global gl_glsl_gamma_able
+    global gl_packed_pixels
+    global gl_glsl_alias_able
+
+    swap_control = False
+    gl_swap_control = False
+
+    if common.COM_CheckParm('-novbo'):
+        console.Con_Warning('Vertex buffer objects disabled at command line')
+    elif gl_version_major < 1 or ( gl_version_major == 1 and gl_version_minor < 5 ):
+        console.Con_Warning('OpenGL version < 1.5, skipping ARB_vertex_buffer_object check')
+    else:
+        console.Con_Printf('Found: ARB_vertex_buffer_object\n')
+        gl_vbo_able = True
+
+    if common.COM_CheckParm('-nomtex'):
+        console.Con_Warning('Multitexture disabled at command line')
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_multitexture'):
+        gl_mtexable = True
+
+        max_tex_units = ctypes.c_int()
+        OpenGL.GL.glGetInteger(OpenGL.GL.GL_MAX_TEXTURE_UNITS, max_tex_units)
+        gl_max_texture_units = max_tex_units.value
+    else:
+        console.Con_Warning('multitexture not supported ( ext not found )')
+
+    if common.COM_CheckParm('-nocombine'):
+        console.Con_Warning('texture_env_combine disabled at command line')
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_combine'):
+        gl_texture_env_combine = True
+    elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_combine'):
+        gl_texture_env_combine = True
+    else:
+        console.Con_Warning('texture_env_combine not supported')
+
+    if common.COM_CheckParm('-noadd'):
+        console.Con_Warning('texture_env_add disabled at command line')
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_add'):
+        gl_texture_env_add = True
+    elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_add'):
+        gl_texture_env_add = True
+    else:
+        console.Con_Warning('texture_env_add not supported')
+
+    if not gl_swap_control:
+        console.Con_Warning('vert sync not supported')
+    elif sdl2.SDL_GL_GetSwapInterval() == -1:
+        swap_control    = False
+        gl_swap_control = False
+        console.Con_Warning('vert sync not supported')
+    elif int(cvar.Cvar_GetCvar('vid_sync').value) and swap_control != 1 or int(cvar.Cvar_GetCvar('vid_sync').value) and swap_control != 0:
+        gl_swap_control = False
+        console.Con_Warning('vert sync not supported')
+    else:
+        console.Con_Printf('Found: SDL_GL_SetSwapInterval')
+
+    if GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_filter_anisotropic'):
+        test1 = ctypes.c_float()
+        test2 = ctypes.c_float()
+
+        tex = OpenGL.GL.glGenTextures(1)
+        OpenGL.GL.glBindTexture(OpenGL.GL.GL_TEXTURE_2D, tex)
+        OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAX_ANISOTROPY, 1.0)
+        OpenGL.GL.glGetTexParameterfv(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAX_ANISOTROPY, test1)
+        OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAX_ANISOTROPY, 2.0)
+        OpenGL.GL.glGetTexParameterfv(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAX_ANISOTROPY, test2)
+        OpenGL.GL.glDeleteTextures(1, tex)
 
 
+        if test1.value == 1 and test2.value == 2:
+            console.Con_Printf('Found: EXT_texture_filter_anisotropic')
+            gl_anisotropy_able = True
+        else:
+            console.Con_Warning('anisotropic filtering locked by driver, current setting is %f' % test1)
+        
+        
+        max_anisotropy = ctypes.c_float()
+        OpenGL.GL.glGetFloatv(OpenGL.GL.GL_MAX_TEXTURE_MAX_ANISOTROPY, max_anisotropy)
+        gl_max_anisotropy = max_anisotropy.value
+        if ( gl_max_anisotropy < 2):
+            gl_anisotropy_able = False
+            gl_max_anisotropy = 1
+            console.Con_Warning('anisotropic filtering broken: disabled')
+    else:
+        gl_max_anisotropy = 1
+        console.Con_Warning('texture_filter_anisotropic not supported') 
+
+    
+    if common.COM_CheckParm('-notexturenpot'):
+        console.Con_Warning('texture_non_power_of_two disabled at command line')
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_non_power_of_two'):
+        console.Con_Printf('Found: GL_ARB_texture_non_power_of_two')
+        gl_texture_NPOT = True
+    else:
+        console.Con_Warning('texture_non_power_of_two not supported\n') 
+
+    if common.COM_CheckParm('-noglsl'):
+        console.Con_Warning('texture_non_power_of_two disabled at command line')
+    elif gl_version_major >= 2:
+        gl_glsl_able = True
+    else:
+        console.Con_Warning('GLSL not available\n')
+
+    if common.COM_CheckParm('-noglslgamma'):
+        console.Con_Warning('glsl gamma disabled at command line')
+    elif gl_glsl_able:
+        gl_glsl_gamma_able = True
+        console.Con_Printf('enabled: GLSL gamma')
+    else:
+        console.Con_Warning('GLSL gamma not available, using hardware gamma')
+
+    if common.COM_CheckParm('-noglslalias'):
+        console.Con_Warning('glsl alias model rendering disabled at command line')
+    elif gl_glsl_able and gl_vbo_able and gl_max_texture_units >= 3:
+        gl_glsl_alias_able = True
+        console.Con_Printf('enabled: GLSL alias model rendering')
+    else:
+        console.Con_Warning('GLSL alias model rendering not available, using fitz renderer')
+
+    if common.COM_CheckParm('-nopackedpixels'):
+        console.Con_Warning('EXT_packed_pixels disabled at command line')
+    elif sys.byteorder == 'big':
+        console.Con_Warning('EXT_packed_pixels disabled on big endian systems')
+    elif gl_glsl_alias_able:
+        gl_packed_pixels = True
+        console.Con_Printf('Enabled: EXT_packed_pixels')
+
+    if common.COM_CheckParm('-nowarpmipmaps'):
+        console.Con_Warning('glGenerateMipmap disabled at command line')
+    else:
+        if gl_version_major >= 3 or GL_ParseExtensionList(gl_extensions, 'GL_ARB_framebuffer_object'):
+            console.Con_Printf('Found: glGenerateMipmap')
+        elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_framebuffer_object'):
+            console.Con_Printf('Found: glGenerateMipmap')
+        else:
+            console.Con_Warning('glGenerateMipmap not available, liquids wont have mipmaps')
+
+
+def GL_SetupState():
+    OpenGL.GL.glClearColor(0.15, 0.15, 0.15, 0)
+    OpenGL.GL.glCullFace(OpenGL.GL.GL_BACK)
+    OpenGL.GL.glFrontFace(OpenGL.GL.GL_CW)
+    OpenGL.GL.glEnable(OpenGL.GL.GL_TEXTURE_2D)
+    OpenGL.GL.glEnable(OpenGL.GL.GL_ALPHA_TEST)
+    OpenGL.GL.glAlphaFunc(OpenGL.GL.GL_GREATER, 0.666)
+    OpenGL.GL.glPolygonMode(OpenGL.GL.GL_FRONT_AND_BACK, OpenGL.GL.GL_FILL)
+    OpenGL.GL.glShadeModel(OpenGL.GL.GL_FLAT)
+    OpenGL.GL.glHint(OpenGL.GL.GL_PERSPECTIVE_CORRECTION_HINT, OpenGL.GL.GL_NICEST)
+    OpenGL.GL.glBlendFunc(OpenGL.GL.GL_SRC_ALPHA, OpenGL.GL.GL_ONE_MINUS_SRC_ALPHA)
+    OpenGL.GL.glTexEnvf(OpenGL.GL.GL_TEXTURE_ENV, OpenGL.GL.GL_TEXTURE_ENV_MODE, OpenGL.GL.GL_REPLACE)
+    OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MIN_FILTER, OpenGL.GL.GL_NEAREST)
+    OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAG_FILTER, OpenGL.GL.GL_NEAREST)
+    OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_WRAP_S, OpenGL.GL.GL_REPEAT)
+    OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_WRAP_T, OpenGL.GL.GL_REPEAT)
+    OpenGL.GL.glDepthRange(0, 1)
+    OpenGL.GL.glDepthFunc(OpenGL.GL.GL_LEQUAL)
+
+def GL_Init():
+    global gl_vendor, gl_renderer
+    global gl_version, gl_version_major, gl_version_minor
+    global gl_extensions, gl_extensions_nice
+
+    gl_vendor     = OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR).decode('ascii')
+    gl_renderer   = OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER).decode('ascii')
+    gl_version    = OpenGL.GL.glGetString(OpenGL.GL.GL_VERSION).decode('ascii')
+    gl_extensions = OpenGL.GL.glGetString(OpenGL.GL.GL_EXTENSIONS).decode('ascii')
+
+    console.Con_Printf(f'GL_VENDOR: {gl_vendor}\n')
+    console.Con_Printf(f'GL_RENDERER: {gl_renderer}\n')
+    console.Con_Printf(f'GL_VERSION: {gl_version}\n')
+
+    if gl_version is None:
+        gl_version_major = gl_version_minor = 0
+    else:
+        gl_version_major, gl_version_minor, *rest = str(gl_version).split('.')
+        gl_version_major = int(gl_version_major)
+        gl_version_minor = int(gl_version_minor)
+    
+    console.Con_Printf(f'GL_VERSION major: {gl_version_major}\n')
+    console.Con_Printf(f'GL_VERSION minor: {gl_version_minor}\n')
+
+    gl_extensions = GL_MakeNiceExtensionList(gl_extensions)
+
+    GL_CheckExtensions()
+
+    r_alias.GLAlias_CreateShaders()
+    r_world.GLWorld_CreateShaders()
+    gl_rmisc.GL_ClearBufferBindings()
+
+
+def GL_Info_f():
+    console.Con_Printf('GL_VENDOR %s' % gl_vendor )
+    console.Con_Printf('GL_RENDERER %s' % gl_renderer )
+    console.Con_Printf('GL_VERSION %s' % gl_version )
+    console.Con_Printf('GL_EXTENSIONS %s' % '\n'.join(gl_extensions_nice) )
 
 def VID_Init():
     import cvar
@@ -555,7 +804,7 @@ def VID_Init():
     _vid.maxwarpwidth = WARP_WIDTH
     _vid.maxwarpheight = WARP_HEIGHT
     _vid.colormap = host.host_colormap
-    _vid.fullbright = 256 - 0;
+    _vid.fullbright = 256 - 0; # vid.fullbright = 256 - LittleLong (*((int *)vid.colormap + 2048));
 
     VID_SetMode(width, height, refreshrate, bpp, fullscreen)
 
@@ -572,8 +821,297 @@ def VID_Init():
     VID_Menu_Init()
     
     global vid_locked
-
     vid_locked = True
+
+def VID_Menu_Init():
+    global vid_menu_nummodes
+    
+    i = j = h = w = 0
+    
+    for i in range(nummodes):
+        w = modelist[i].width
+        h = modelist[i].height
+
+        for j in range(vid_menu_nummodes):
+            if vid_menu_modes[i].width == w and vid_menu_modes[i].height == h:
+                break
+
+        if j == vid_menu_nummodes:
+            vid_menu_modes[j].width = w
+            vid_menu_modes[j].height = h
+            vid_menu_nummodes += 1
+
+def VID_Gamma_f():
+    if gl_glsl_gamma_able:
+        return
+
+    # shouldn't get here
+    raise NotImplementedError
+
+def VID_Gamma_Init():
+    import cvar
+
+    vid_gamma    = {'name':"gamma",    'value':"1", 'flags': cvar.CVAR_ARCHIVE}; #johnfitz -- moved here from view.c
+    vid_contrast = {'name':"contrast", 'value':"1", 'flags': cvar.CVAR_ARCHIVE}; #QuakeSpasm, MarkV
+
+    cvar.Cvar_RegisterVariable(vid_gamma)
+    cvar.Cvar_RegisterVariable(vid_contrast)
+    cvar.Cvar_SetCallback(vid_gamma,    VID_Gamma_f)
+    cvar.Cvar_SetCallback(vid_contrast, VID_Gamma_f)
+
+    if gl_glsl_gamma_able:
+        return
+
+    raise NotImplementedError
+
+def VID_Menu_RebuildBppList():
+    global vid_menu_numbpps
+    global vid_menu_bpps
+
+    vid_menu_numbpps = 0
+
+    for i in range(nummodes):
+        if vid_menu_numbpps >= MAX_BPPS_LIST:
+            break
+        if modelist[i].width != cvar.Cvar_GetCvar('vid_width').value or modelist[i].height != cvar.Cvar_GetCvar('vid_height').value:
+            continue
+
+        b = modelist[i].bpp
+
+        for j in range(vid_menu_numbpps):
+            if vid_menu_bpps[j] == b:
+                break
+        
+        if j == vid_menu_numbpps:
+            vid_menu_bpps[j] = b
+            vid_menu_numbpps += 1
+
+    if vid_menu_numbpps == 0:
+        cvar.Cvar_SetValueQuick('vid_bpp', modelist[0].bpp)
+        return
+
+
+    for i in range(vid_menu_numbpps):
+        if vid_menu_bpps[i] == int(cvar.Cvar_GetCvar('vid_bpp').value):
+            break
+
+    if i == vid_menu_numbpps:
+        cvar.Cvar_SetValueQuick('vid_bpp', vid_menu_bpps[0])
+
+
+def VID_Menu_RebuildRateList():
+    global vid_menu_numrates
+    global vid_menu_rates
+
+    vid_menu_numrates = 0
+
+    for i in range(nummodes):
+        if modelist[i].width != cvar.Cvar_GetCvar('vid_width').value or \
+            modelist[i].height != cvar.Cvar_GetCvar('vid_height').value or \
+            modelist[i].bpp != cvar.Cvar_GetCvar('vid_bpp').value:
+            continue
+
+        r = modelist[i].refreshrate
+
+        for j in range(vid_menu_numrates):
+            if vid_menu_rates[j] == r:
+                break
+        
+        if j == vid_menu_numrates:
+            vid_menu_rates[j] = r
+            vid_menu_numrates += 1
+        
+    if vid_menu_numrates == 0:
+        cvar.Cvar_SetValue('vid_refreshrate', modelist[0].refreshrate)
+        return
+
+    for i in range(vid_menu_numrates):
+        if vid_menu_rates[i] == int(cvar.Cvar_GetCvar('vid_refreshrate').value):
+            break
+
+    if i == vid_menu_numrates:
+        cvar.Cvar_SetValue('vid_refreshrate', vid_menu_rates[0])
+
+def VID_MenuDraw():
+    y = 4
+
+    p = gl_draw.Draw_CachePic('gfx/qplaque.lmp')
+    menu.M_DrawTransPic(16, y, p)
+
+    p = gl_draw.Draw_CachePic('gfx/p_option.lmp')
+    menu.M_DrawPic ( ( 320 - p.width) / 2, y, p)
+
+    y += 28
+
+    raise NotImplementedError
+    
+def VID_Menu_ChooseNextMode(dir):
+    if vid_menu_nummodes:
+        for i in range(vid_menu_nummodes):
+            if vid_menu_modes[i].width == cvar.Cvar_GetCvar('vid_width').value and vid_menu_modes[i].height == cvar.Cvar_GetCvar('vid_height').value:
+                break
+        if i == vid_menu_nummodes:
+            i = 0
+        else:
+            i += dir
+            if i >= vid_menu_nummodes:
+                i = 0
+            elif i < 0:
+                i = vid_menu_nummodes - 1
+
+        cvar.Cvar_SetValueQuick('vid_width', vid_menu_modes[i].width)
+        cvar.Cvar_SetValueQuick('vid_height', vid_menu_modes[i].height)
+
+        VID_Menu_RebuildBppList()
+        VID_Menu_RebuildRateList()
+
+def VID_Menu_ChooseNextBPP(dir):
+    if vid_menu_numbpps:
+        for i in range(vid_menu_numbpps):
+            if vid_menu_bpps[i] == cvar.Cvar_GetCvar('vid_bpp').value:
+                break
+        if i == vid_menu_numbpps:
+            i = 0
+        else:
+            i += dir
+            if i >= vid_menu_numbpps:
+                i = 0
+            elif i < 0:
+                i = vid_menu_numbpps - 1
+
+        cvar.Cvar_SetValueQuick('vid_bpp', vid_menu_bpps[i])
+
+
+def VID_Menu_ChooseNextRate(dir):
+    if vid_menu_numrates:
+        for i in range(vid_menu_numrates):
+            if vid_menu_rates[i] == cvar.Cvar_GetCvar('vid_refreshrate').value:
+                break
+        if i == vid_menu_numrates:
+            i = 0
+        else:
+            i += dir
+            if i >= vid_menu_numrates:
+                i = 0
+            elif i < 0:
+                i = vid_menu_numrates - 1
+
+        cvar.Cvar_SetValueQuick('vid_refreshrate', vid_menu_rates[i])
+
+def VID_MenuKey(key):
+    global video_options_cursor
+    
+    match key:
+        case keys.K_ESCAPE | keys.K_BBUTTON:
+            VID_SyncCvars()
+            snd_dma.S_LocalSound('misc/menu1.wav')
+            menu.M_Menu_Options_f()
+        case keys.K_UPARROW:
+            snd_dma.S_LocalSound('misc/menu1.wav')
+            video_options_cursor -= 1
+            if video_options_cursor < 0:
+                video_options_cursor = vid_opt_e.VIDEO_OPTIONS_ITEMS - 1
+        case keys.K_DOWNARROW:
+            snd_dma.S_LocalSound('misc/menu1.wav')
+            video_options_cursor += 1
+            if video_options_cursor > vid_opt_e.VIDEO_OPTIONS_ITEMS:
+                video_options_cursor = 0
+        case keys.K_LEFTARROW:
+            snd_dma.S_LocalSound('misc/menu3.wav')
+            match video_options_cursor:
+                case vid_opt_e.VID_OPT_MODE:
+                    VID_Menu_ChooseNextMode(1)
+                case vid_opt_e.VID_OPT_BPP:
+                    VID_Menu_ChooseNextBPP(1)
+                case vid_opt_e.VID_OPT_REFRESHRATE:
+                    VID_Menu_ChooseNextRate(1)
+                case vid_opt_e.VID_OPT_FULLSCREEN:
+                    Cbuf_AddText('toggle vid_fullscreen\n')
+                case vid_opt_e.VID_OPT_VSYNC:
+                    Cbuf_AddText('toggle vid_vsync\n')
+        case keys.K_RIGHTARROW:
+            snd_dma.S_LocalSound('misc/menu3.wav')
+            match video_options_cursor:
+                case vid_opt_e.VID_OPT_MODE:
+                    VID_Menu_ChooseNextMode(-1)
+                case vid_opt_e.VID_OPT_BPP:
+                    VID_Menu_ChooseNextBPP(-1)
+                case vid_opt_e.VID_OPT_REFRESHRATE:
+                    VID_Menu_ChooseNextRate(-1)
+                case vid_opt_e.VID_OPT_FULLSCREEN:
+                    Cbuf_AddText('toggle vid_fullscreen\n')
+                case vid_opt_e.VID_OPT_VSYNC:
+                    Cbuf_AddText('toggle vid_vsync\n')
+ 
+
+        case keys.K_ENTER | keys.K_KP_ENTER | keys.K_ABUTTON:
+            m_entersound = True
+            match video_options_cursor:
+                case vid_opt_e.VID_OPT_MODE:
+                    VID_Menu_ChooseNextMode(1)
+                case vid_opt_e.VID_OPT_BPP:
+                    VID_Menu_ChooseNextBPP(1)
+                case vid_opt_e.VID_OPT_REFRESHRATE:
+                    VID_Menu_ChooseNextRate(1)
+                case vid_opt_e.VID_OPT_FULLSCREEN:
+                    Cbuf_AddText('toggle vid_fullscreen\n')
+                case vid_opt_e.VID_OPT_VSYNC:
+                    Cbuf_AddText('toggle vid_vsync\n')
+                case vid_opt_e.VID_OPT_APPLY:
+                    Cbuf_AddText('vid_restart\n')
+                    keys.key_dest = keys.keydest_t.key_game
+                    menu.m_state = menu.m_state_e.m_none
+                    IN_Activate()
+
+ 
+
+
+
+
+
+                
+
+
+
+                
+
+ 
+            
+
+
+            
+
+
+def VID_Menu_f():
+    in_sdl.IN_Deactivate(modestate == vid.modestate_t.MS_WINDOWED)
+    keys.key_dest = keys.keydest_t.key_menu
+    menu.m_state = menu.m_state_e.m_video
+    menu.m_entersound = True
+
+    VID_SyncCvars()
+
+    VID_Menu_RebuildBppList()
+    VID_Menu_RebuildRateList()
+
+def VID_SyncCvars():
+    global vid_changed
+    if draw_context:
+        if not VID_GetDesktopFullscreen():
+            cvar.Cvar_SetValueQuick('vid_width', VID_GetCurrentWidth())
+            cvar.Cvar_SetValueQuick('vid_height', VID_GetCurrentHeight())
+        
+        cvar.Cvar_SetValueQuick('vid_refreshrate', VID_GetCurrentRefreshRate())
+        cvar.Cvar_SetValueQuick('vid_bpp', VID_GetCurrentBPP())
+        cvar.Cvar_SetValueQuick('vid_fullscreen', '1' if VID_GetFullscreen() else "0")
+        cvar.Cvar_SetValueQuick('vid_vsync', '1' if VID_GetVSync() else "0")
+    
+    vid_changed = False
+
+    
+
+
+
+
 
     
        
