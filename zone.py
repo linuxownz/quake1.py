@@ -233,7 +233,7 @@ def Z_Free(ptr):
 
 
 def Memory_Init(buf, total_size):
-    # Setup Hunk limits using the TOTAL buffer size
+    # 1. Setup Hunk limits using the TOTAL buffer size
     GlobalMemory.hunk_base = memoryview(buf)
     GlobalMemory.hunk_size = total_size
     GlobalMemory.hunk_low_used = 0
@@ -241,7 +241,8 @@ def Memory_Init(buf, total_size):
 
     Cache_Init()
 
-    # Default size for the dynamic zone (e.g., 4MB from your DYNAMIC_SIZE)
+    # 2. Set the default size for the dynamic zone (heap)
+    # We use our constant, but allow the command line to override it
     zonesize = DYNAMIC_SIZE
 
     import common
@@ -249,19 +250,20 @@ def Memory_Init(buf, total_size):
     if p:
         if p < common.com_argc - 1:
             try:
+                # Convert KB to Bytes
                 zonesize = int(common.com_argv[p+1]) * 1024
             except ValueError:
                 print("Warning: Invalid -zone value, using default.")
         else:
-            # You'll need to define or import Sys_Error
             print('Memory_Init: must specify size in KB after -zone')
 
-    # Carve the zone out of the hunk
-    # GlobalMemory.mainzone will hold the memoryview slice
-    GlobalMemory.mainzone = Hunk_AllocName(zonesize, 'zone')
+    # 3. Carve the zone out of the hunk base
+    # This moves hunk_low_used forward by 'zonesize'
+    zone_buf = Hunk_AllocName(zonesize, 'zone')
     
-    # Initialize the ZoneManager logic within that slice
-    Memory_InitZone(GlobalMemory.mainzone, zonesize)
+    # 4. Initialize the ZoneManager logic within that slice
+    Memory_InitZone(zone_buf, zonesize)
 
     import _cmd
-    _cmd.Cmd_AddCommand('hunk_print', Hunk_Print_f)   
+    _cmd.Cmd_AddCommand('hunk_print', Hunk_Print_f)
+
