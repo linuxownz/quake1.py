@@ -6,6 +6,7 @@ import os
 import atexit
 import sdl2
 import sdl2.ext
+import ctypes
 
 #from common import COM_InitArgv
 import common
@@ -15,19 +16,6 @@ import gl_vidsdl
 import host
 import sys_sdl_unix
 import sys_sdl_unix as unix
-
-class quakeparms_t:
-    def __init__(self):
-        self.basedir = '.'
-        self.userdir = '.'
-        self.argc = 0
-        self.argv = []
-
-parms : quakeparms_t = quakeparms_t()
-parms.basedir = os.getcwd()
-parms.userdir = os.getcwd()
-parms.argc = len(sys.argv)
-parms.argv = sys.argv
 
 def Sys_AtExit():
     sdl2.SDL_Quit()
@@ -47,6 +35,10 @@ def Sys_InitSDL():
     atexit.register( Sys_AtExit )
 
 def main():
+    host.membase = bytearray(host.memsize)
+
+    if host.membase is None:
+        Sys_Error("failed to alloc %d bytes of memory" % host.memsize)
 
     common.COM_InitArgv()
     Sys_InitSDL()

@@ -7,7 +7,7 @@ import sdl2
 import sdl2.ext
 import ctypes
 
-import cvar
+# import cvar
 import keys
 import common
 import console
@@ -20,14 +20,7 @@ joy_active_controller: sdl2.SDL_GameController = None
 
 no_mouse = False
 
-buttonremap = [
-    keys.K_MOUSE1,
-    keys.K_MOUSE3,
-    keys.K_MOUSE2,
-    keys.K_MOUSE4,
-    keys.K_MOUSE5
-]
-
+buttonremap = []
 total_dx = 0
 total_dy = 0
 
@@ -48,8 +41,17 @@ def IN_SDL2_FilterMouseEvents(userdata, event: sdl2.SDL_Event):
 def IN_Init():
     global textmode
     global no_mouse
+    global buttonremap
 
-    #import cvar
+    buttonremap = [
+        keys.K_MOUSE1,
+        keys.K_MOUSE3,
+        keys.K_MOUSE2,
+        keys.K_MOUSE4,
+        keys.K_MOUSE5
+    ]
+
+    import cvar
 
     in_debugkeys             = { 'name':'in_debugkeys',             'value':'0',     'flags':cvar.CVAR_NONE}
     joy_deadzone_look        = { 'name':"joy_deadzone_look",        'value':"0.175", 'flags':cvar.CVAR_ARCHIVE }

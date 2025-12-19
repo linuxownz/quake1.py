@@ -426,7 +426,7 @@ def Key_Init():
 
     global key_blinktime
 
-    from main_sdl import parms
+    #from main_sdl import parms
 
     History_Init()
 

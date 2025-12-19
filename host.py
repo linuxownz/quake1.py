@@ -1,6 +1,7 @@
 #host.py
-
-from main_sdl import parms
+import os
+import sys
+import ctypes
 
 import chase
 import client
@@ -40,6 +41,17 @@ host_framecount = 0
 host_client : client_t = None
 
 host_colormap : bytes = b''
+
+parms : quakedef.quakeparms_t = quakedef.quakeparms_t()
+parms.basedir = os.getcwd()
+parms.userdir = os.getcwd()
+parms.argc = len(sys.argv)
+parms.argv = sys.argv
+
+DEFAULT_MEMORY = ( 256 * 1024 * 1024 )
+
+membase = None
+memsize = DEFAULT_MEMORY
 
 def Max_Fps_f(cvar:cvar_t):
     if cvar.value > 72:
@@ -167,7 +179,7 @@ def Host_InitLocal():
 
 
 def Host_Init():
-    zone.Memory_Init()
+    zone.Memory_Init(membase, memsize)
 
     _cmd.Cbuf_Init()
     _cmd.Cmd_Init()

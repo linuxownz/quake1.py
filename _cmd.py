@@ -2,14 +2,34 @@
 from __future__ import annotations
 from enum import Enum
 
+MAX_ALIAS_NAME = 32
+CMDLINE_LENGTH = 256
+MAX_ARGS       = 80
+
+cmd_argc = 0
+cmd_argv : list[str] = []
+cmd_null_string = ''
+cmd_args = ''
+
+class cmdalias_t():
+    def __init__(self, name, value, next):
+        self.name = name
+        self.value = value
+        self.next = next
+
+cmd_alias : cmdalias_t = None
+
+cmd_wait = False
+
 cmd_text = ''
 
-cmd_functions : List[cmd_function] = []
+cmd_functions : list[cmd_function] = []
 
 class cmd_function:
-    def __init__(self, name, function):
+    def __init__(self, name, function): #, next):
         self.name = name
         self.function = function
+        # self.next = next # why did I add this?
 
 class cmd_source_t(Enum):
     src_client = 0
@@ -75,3 +95,11 @@ def Cmd_Init():
     Cmd_AddCommand('find', Cmd_Apropos_f)
 
     Cmd_List_f()
+
+def Cmd_Argc():
+    return cmd_argc
+
+def Cmd_Argv(arg) -> str:
+    if arg < 0 or arg > cmd_argc:
+        return ''
+    return cmd_argv[arg]

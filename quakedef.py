@@ -141,8 +141,9 @@ class quakeparms_t():
         self.userdir = ''
         self.argc = 0
         self.argv = []
-        self.membase = 0
-        self.numcpus = 1
+        #self.membase = 0
+        #self.memsize = 0
+        #self.numcpus = 1
         self.errstate = 0
 
 # start of every frame, never reset

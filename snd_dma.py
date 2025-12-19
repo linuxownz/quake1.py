@@ -2,9 +2,14 @@
 
 import sdl2.sdlmixer
 
+import _cmd
+import cvar
+import common
 import bspfile
 import console
 import q_sound
+import snd_mix
+import snd_sdl
 
 snd_channels : list[q_sound.channel_t] = [ q_sound.channel_t() for _ in range (q_sound.MAX_CHANNELS)]
 total_channels = 0
@@ -30,7 +35,7 @@ s_rawsamples : list[q_sound.portable_samplepair_t] = [ q_sound.portable_samplepa
 
 MAX_SFX = 1024
 
-known_sfx : q_sound.sfx_t = None
+known_sfx : list[q_sound.sfx_t] = []
 num_sfx = 0
 
 ambient_sfx : list[q_sound.sfx_t] = [q_sound.sfx_t() for _ in range(bspfile.NUM_AMBIENTS)]
@@ -59,6 +64,130 @@ def S_StopAllSounds(clear):
     if clear:
         S_ClearBuffer()
 
+
+
+
+S_Play_hash = 345
+def S_Play():
+    global S_Play_hash
+    i = 1
+
+    while i < common.Cmd_Argc():
+        name = common.Cmd_Argv(i)
+
+        if not name.endswith('.wav'):
+            name += '.wav'
+        sfx = S_PrecacheSound(name)
+
+        S_Play_hash += 1
+        S_StartSound(S_Play_hash, 0, sfx, listener_origin, 1.0, 1.0)
+        i += 1
+
+
+S_PlayVol_hash = 543
+def S_PlayVol():
+    global S_PlayVol_hash
+    i = 1
+    while i < _cmd.Cmd_Argc():
+        name = _cmd.Cmd_Argv(i)
+        if name.count('.') == 0:
+            name += '.wav'
+
+        sfx = S_PrecacheSound(name)
+        vol = float(_cmd.Cmd_Argv(i+1))
+        S_PlayVol_hash += 1
+        S_StartSound(S_PlayVol_hash, sfx, listener_origin, vol, 1.0)
+        i += 2
+
+def S_StopAllSoundsC():
+    S_StopAllSounds(True)
+
+def S_SoundList():
+    total = 0
+
+    raise NotImplementedError
+
+    i = 0
+    for sfx in known_sfx:
+        sc = 1 # ????
+
+def S_SoundInfo_f():
+    if not sound_started or shm is None:
+        console.Con_Printf('sound system not started')
+        return
+
+    console.Con_Printf("%d bit, %s, %d Hz\n" % shm.samplebits, 'stereo' if shm.channels == 2 else "mono", shm.speed)
+    console.Con_Printf("%5d samples\n" % shm.samples);
+    console.Con_Printf("%5d samplepos\n" % shm.samplepos);
+    console.Con_Printf("%5d submission_chunk\n" % shm.submission_chunk);
+    console.Con_Printf("%5d total_channels\n" % total_channels);
+    console.Con_Printf("%p dma buffer\n" % shm.buffer);
+
+def SND_Callback_sfxvolume(var):
+    SND_InitScaleTable()
+
+def SND_Callback_snd_filterquality(var):
+    snd_filterquality = int(cvar.Cvar_GetCvar('snd_filterquality').value)
+    if snd_filterquality < 1 or snd_filterquality > 5:
+        console.Con_Printf('snd_filterquality must be between 1 and 5\n')
+        cvar.Cvar_SetQuickByName('snd_filterquality', SND_FILTERQUALITY_DEFAULT)
+
+def S_FindName(name):
+    global num_sfx
+    if not name:
+        Sys_Error('S_FindName : name is Null')
+    
+    i = 0
+    for i in range(num_sfx):
+        if known_sfx[i].name == name:
+            return known_sfx[i]
+
+    print (i)
+
+    if num_sfx == MAX_SFX:
+        Sys_Error('S_FindName: out of sfx_t')
+
+    sfx = known_sfx[i]
+    sfx.name = name
+    num_sfx += 1
+
+    return sfx
+
+def S_PrecacheSound(name):
+    nosound  = int(cvar.Cvar_GetCvar('nosound').value)
+    precache = int(cvar.Cvar_GetCvar('precache').value)
+
+    if not sound_started or nosound:
+        return None
+
+    sfx = S_FindName(name)
+
+    if precache:
+        S_LoadSound(sfx)
+
+    return sfx
+
+def Snd_InitScaletable():
+    sfxvolume = float(cvar.Cvar_GetCvar('volume').value)
+
+    for i in range(32):
+        scale = i * 8 * 256 * sfxvolume
+        for j in range(256):
+            snd_mix.snd_scaletable[i][j] = (j if j < 128 else j - 256) * scale
+
+def S_Startup():
+    global sound_started
+
+    if not snd_initialized:
+        return
+
+    sound_started = snd_sdl.SNDDMA_Init(sn)
+
+    if not sound_started:
+        console.Con_Printf('failed to init sound')
+    else:
+        console.Con_Printf("Audio: %d bit, %s, %d Hz\n" % ( shm.samplebits, 'stereo' if shm.channels == 2 else "mono", shm.speed))
+    
 def S_Init():
     global known_sfx
     global num_sfx
@@ -107,11 +236,11 @@ def S_Init():
     console.Con_Printf('\nSound Initialization\n')
 
     import _cmd
-    _cmd.Cmd_AddCommand("play",      S_Play); 
-    _cmd.Cmd_AddCommand("playvol",   S_PlayVol);
-    _cmd.Cmd_AddCommand("stopsound", S_StopAllSoundsC);
-    _cmd.Cmd_AddCommand("soundlist", S_SoundList);
-    _cmd.Cmd_AddCommand("soundinfo", S_SoundInfo_f);
+    _cmd.Cmd_AddCommand("play",      S_Play) 
+    _cmd.Cmd_AddCommand("playvol",   S_PlayVol)
+    _cmd.Cmd_AddCommand("stopsound", S_StopAllSoundsC)
+    _cmd.Cmd_AddCommand("soundlist", S_SoundList)
+    _cmd.Cmd_AddCommand("soundinfo", S_SoundInfo_f)
 
     i = common.COM_CheckParm('-sndspeed')
     if i and i < common.com_argc - 1:

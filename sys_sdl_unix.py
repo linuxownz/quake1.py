@@ -28,13 +28,13 @@ def Sys_GetBasedir():
     __cwd = os.path.dirname(script_path)
     print(f"cwd {__cwd}")
 
-    main_sdl.parms.basedir = __cwd
+    host.parms.basedir = __cwd
 
 def Sys_GetUserDir():
     global __userdir
     __userdir = os.getenv("HOME")
     print(f"users' userdir is {__userdir}")
-    main_sdl.parms.basedir = __userdir
+    host.parms.basedir = __userdir
 
 def Sys_mkdir():
     print("Sys_mkdir pass")
