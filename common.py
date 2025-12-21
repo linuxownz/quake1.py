@@ -243,11 +243,42 @@ def COM_LoadFile(path):
 
     return sys_sdl_unix.Sys_FileRead(handle, filelen)
 
-def COM_LoadMallocFile(path):
-    return COM_LoadFile(path)
+def COM_LoadMallocFile(filename):
+    h, size, path_id = COM_FindFile(filename)
+    if h is None or size <= 0:
+        return None
 
-def COM_LoadHunkFile(path):
-    return COM_LoadFile(path)
+    # Allocate from the DYNAMIC/FREEABLE Zone
+    import zone
+    buf = zone.Z_Malloc(size)
+
+    # Read the data into our managed memory
+    data = sys_sdl_unix.Sys_FileRead(h, size)
+    buf[:size] = data
+
+    # If it's a loose file, close it so we don't leak handles
+    if not file_from_pak:
+        sys_sdl_unix.Sys_FileClose(h)
+        
+    return buf
+
+def COM_LoadHunkFile(filename):
+    h, size, path_id = COM_FindFile(filename)
+    if h is None or size <= 0:
+        return None
+
+    # Allocate from PERMANENT Hunk space
+    import zone
+    buf = zone.Hunk_AllocName(size, filename)
+
+    data = sys_sdl_unix.Sys_FileRead(h, size)
+    buf[:size] = data
+
+    if not file_from_pak:
+        sys_sdl_unix.Sys_FileClose(h)
+        
+    return buf
+
 
 def COM_LoadPackFile(packfile) -> pack_t:
     (handle, filelength) = sys_sdl_unix.Sys_FileOpenRead(packfile)
@@ -683,10 +714,7 @@ def COM_FindFile(filename) -> (io.FileIO, int, int):
     handle = None
 
     search = com_searchpaths
-    while True: 
-
-        if not search:
-            break
+    while search: 
 
         if search.pack:
             pak = search.pack
@@ -694,15 +722,14 @@ def COM_FindFile(filename) -> (io.FileIO, int, int):
 
             for i in range(pak.numfiles):
                 print(pak.files[i].name)
-                if filename != pak.files[i].name:
-                    continue
+                if filename.lower() == pak.files[i].name.lower():
 
-                com_filesize = pak.files[i].filelen
-                file_from_pak = True
-                path_id = search.path_id
-                handle = pak.handle
-                sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
-                return (handle, com_filesize, path_id )
+                    com_filesize = pak.files[i].filelen
+                    file_from_pak = True
+                    path_id = search.path_id
+                    handle = pak.handle
+                    sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
+                    return (handle, com_filesize, path_id )
    
         else: # check file in directory tree
             if not cvar.Cvar_GetCvar('registered').value:
@@ -712,15 +739,14 @@ def COM_FindFile(filename) -> (io.FileIO, int, int):
 
             netpath = f'{search.filename}/{filename}'
 
-            if not os.path.isfile(netpath):
-                search  = search.next
-                continue
-
-            path_id = search.path_id
-            handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
-            return ( handle, length, path_id)
+            if os.path.isfile(netpath):
+                path_id = search.path_id
+                handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
+                return ( handle, length, path_id)
     
         search  = search.next
+
+    return ( None, 0, 0 )
 
     pass
     
