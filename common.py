@@ -12,6 +12,7 @@ import _cmd
 import cvar
 import io
 import main_sdl
+import net_main
 
 import sys_sdl_unix
 import console
@@ -34,7 +35,6 @@ cmdline    = {'name': 'cmdline',    'value':  '', 'flags': cvar.CVAR_ROM}
 
 com_modified = False
 com_filesize = 0
-file_from_pak = False
 com_cmdline = '.'
 
 com_token = ''
@@ -43,6 +43,10 @@ com_argv = []
 
 com_gamedir = '.'
 com_basedir = '.'
+
+
+msg_readcount = 0
+msg_badread = False
 
 pop = [
     0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
@@ -123,11 +127,11 @@ def ShortNoSwap(l):
     return l
 
 def LongSwap(l):
-    b1 = l&255;                                              
-    b2 = (l>>8)&255;                                         
-    b3 = (l>>16)&255;                                        
-    b4 = (l>>24)&255;                                        
-                                                         
+    b1 = l&255;
+    b2 = (l>>8)&255;
+    b3 = (l>>16)&255;
+    b4 = (l>>24)&255;
+
     return (b1<<24) + (b2<<16) + (b3<<8) + b4;
 
 def LongNoSwap(l):
@@ -203,7 +207,7 @@ def COM_Game_f():
     if Cmd_Argc() <= 1:
         Con_Printf(f"com_gamedir {com_gamedir}")
         return
-    
+
     p = Cmd_Argv(1)
     p2 = Cmd_Argv(2)
 
@@ -237,14 +241,22 @@ def COM_FileBase(path):
     return os.path.basename(path).split('.')[0]
 
 def COM_LoadFile(path):
-    handle, filelen, pathid = COM_OpenFile(path)
-    if handle == -1:
+    # Unpack the 4th variable locally
+    handle, filelen, pathid, is_pak = COM_OpenFile(path)
+
+    if handle is None or handle == -1:
         return None
 
-    return sys_sdl_unix.Sys_FileRead(handle, filelen)
+    data = sys_sdl_unix.Sys_FileRead(handle, filelen)
+
+    # Use the LOCAL is_pak variable
+    if not is_pak:
+        sys_sdl_unix.Sys_FileClose(handle)
+
+    return data
 
 def COM_LoadMallocFile(filename):
-    h, size, path_id = COM_FindFile(filename)
+    h, size, path_id, is_pak = COM_FindFile(filename)
     if h is None or size <= 0:
         return None
 
@@ -257,13 +269,13 @@ def COM_LoadMallocFile(filename):
     buf[:size] = data
 
     # If it's a loose file, close it so we don't leak handles
-    if not file_from_pak:
+    if not is_pak:
         sys_sdl_unix.Sys_FileClose(h)
-        
+
     return buf
 
 def COM_LoadHunkFile(filename):
-    h, size, path_id = COM_FindFile(filename)
+    h, size, path_id, is_pak = COM_FindFile(filename)
     if h is None or size <= 0:
         return None
 
@@ -274,9 +286,9 @@ def COM_LoadHunkFile(filename):
     data = sys_sdl_unix.Sys_FileRead(h, size)
     buf[:size] = data
 
-    if not file_from_pak:
+    if not is_pak:
         sys_sdl_unix.Sys_FileClose(h)
-        
+
     return buf
 
 
@@ -304,7 +316,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
 
     if dirlen < 0 or dirofs < 0:
         Sys_Error(f'invalid packfile {packfile} {dirlen} {dirofs}')
-    
+
     if numpackfiles == 0:
         Sys_Printf(f'Warning packfile {packfile} has no files')
         Sys_FileClose(handle)
@@ -327,7 +339,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
     for _ in range(num_entries):
         entry_data = sys_sdl_unix.Sys_FileRead(handle,struct.calcsize(PAK_ENTRY_FORMAT))
         name_bytes, file_offset, file_size = struct.unpack(PAK_ENTRY_FORMAT, entry_data)
-            
+
         try:
             name = name_bytes.strip(b'\x00').decode('ascii')
         except:
@@ -344,7 +356,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
     pack = pack_t(packfile, handle, len(newfiles), newfiles)
     return pack
 
-    
+
 
 def COM_AddGameDirectory(base, dir):
     global com_searchpaths
@@ -366,7 +378,7 @@ def COM_AddGameDirectory(base, dir):
 
     # _add_path:
     while True:
-        search = searchpath_t(path_id, com_gamedir, None, com_searchpaths) 
+        search = searchpath_t(path_id, com_gamedir, None, com_searchpaths)
 
         com_searchpaths = search
 
@@ -382,26 +394,26 @@ def COM_AddGameDirectory(base, dir):
                     base = main_sdl.parms.userdir
                 qspak = COM_LoadPackFile(f'{base}/quakespasm.pak')
                 com_modified = old
-            
+
             if pak:
                 search = searchpath_t(path_id, '', pak, com_searchpaths)
                 com_searchpaths = search
-            
+
             if qspak:
                 search = searchpath_t(path_id, f'{base}/quakespasm.pak', qspak, com_searchpaths)
                 com_searchpaths = search
-            
+
             if not pak:
                 break
         if not pak:
             break
-    
+
         if not been_here and main_sdl.parms.userdir != main_sdl.parms.basedir:
             been_here = True
             com_gamedir = f'{main_sdl.parms.userdir}/{dir}'
             sys_sdl_unix.Sys_mkdir(com_gamedir)
             # goto _add_path
-        
+
         break
     pass
 
@@ -409,29 +421,35 @@ def COM_AddGameDirectory(base, dir):
     while s:
         print (s)
         s = s.next
-    
+
     #breakpoint()
     pass
-    
+
 def COM_CheckRegistered():
-    (handle, filelen, path_id) = COM_OpenFile('gfx/pop.lmp')
-    if handle == -1:
-        Cvar_SetROM('registered', '0')
-    
+    # Unpack 4 values
+    handle, filelen, path_id, is_pak = COM_OpenFile('gfx/pop.lmp')
+
+    if handle == -1 or handle is None:
+        cvar.Cvar_SetROM('registered', '0')
+        return
+
     data = sys_sdl_unix.Sys_FileRead(handle, 256)
-    COM_CloseFile(handle)
+
+    # Use the local flag
+    if not is_pak:
+        sys_sdl_unix.Sys_FileClose(handle)
 
     if len(data) != 256:
         sys_sdl_unix.Sys_Error('pop.lmp is corrupt')
 
-    print(data)
+    #print(data)
 
     datapos = 0
     for i in range(128):
         short = pop[i]
         sdata1 = struct.unpack('>H', data[datapos:datapos + 2])[0]
         datapos += 2
-        
+
         if short != sdata1:
             Sys_Error('Corrupted data file')
 
@@ -486,7 +504,7 @@ def COM_CheckParm(parm) -> int:
             continue
         if parm == com_argv[i]:
             return i
-    
+
     return 0
 
 
@@ -525,7 +543,7 @@ def FS_fseek(fh:_fshandle_t, offset, whence) -> int:
 
     if offset > fh.length:
         offset = fh.length
-    
+
     fh.pos = fh.file.seek(fh.start + offset, io.SEEK_SET)
 
     assert(fh.pos == offset)
@@ -581,7 +599,7 @@ def FS_fgetc(fh:_fshandle_t) -> str:
     return fh.file.read(1)
 
 def FS_fgets(size, fh:_fshandle_t) -> str:
-    
+
     if FS_feof(fh):
         return None
 
@@ -592,9 +610,9 @@ def FS_fgets(size, fh:_fshandle_t) -> str:
     fh.pos = fh.file.tell() - fh.start
 
     return data
-    
+
 def FS_fgetl(fh:_fshandle_t) -> str:
-    
+
     if FS_feof(fh):
         return None
 
@@ -602,7 +620,7 @@ def FS_fgetl(fh:_fshandle_t) -> str:
     fh.pos = fh.file.tell() - fh.start
 
     return data
- 
+
 
 def FS_filelength(fh:_fshandle_t):
     if fh is None:
@@ -622,10 +640,10 @@ def Host_Tell_f():
     if _cmd.cmd_source == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     if Cmd_Argc() < 3:
         return
-    
+
     text = Cmd_Args()
 
     text.replace('"', '')
@@ -644,7 +662,7 @@ def Host_Tell_f():
         break
 
     host_client = save
-    
+
 def Host_Color_f():
     raise NotImplementedError
 
@@ -652,11 +670,11 @@ def Host_Kill_f():
     if _cmd.cmd == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     if sv_player.v.health <= 0:
         SV_ClientPrintf('cant suicide -- already dead')
         return
-    
+
     pr_global_struct.time = sv.time
     pr_global_struct.self = EDICT_TO_PROG(sv_player)
     PR_ExecuteProgram(pr_global_struct.ClientKill)
@@ -680,7 +698,7 @@ def Host_Pause_f():
             SV_BroadcastPrintf(f'{PR_GetString(sv_player.v.netname)} paused the game')
         else:
             SV_BroadcastPrintf(f'{PR_GetString(sv_player.v.netname)} unpaused the game')
-            
+
         MSG_WriteByte(sv.reliable_datagram, svc_setpause)
         MSG_WriteByte(sv.reliable_datagram, sv.paused)
 
@@ -702,68 +720,45 @@ LittleShort = ShortNoSwap
 BigLong     = LongSwap
 LittleLong  = LongNoSwap
 BigFloat    = FloatSwap
-LittleFloat = FloatNoSwap       
+LittleFloat = FloatNoSwap
 
-#static                                     returns file, handle, path_id
-def COM_FindFile(filename) -> (io.FileIO, int, int):
-    global file_from_pak
-
-    pak:pack_t = None
-    file_from_pak = False
-    path_id = 0
-    handle = None
+def COM_FindFile(filename) -> (io.FileIO, int, int, bool): # Added bool
 
     search = com_searchpaths
-    while search: 
-
+    while search:
         if search.pack:
             pak = search.pack
-            # print (pak.filename, pak.numfiles)
-
             for i in range(pak.numfiles):
-                print(pak.files[i].name)
                 if filename.lower() == pak.files[i].name.lower():
-
+                    # Localize the logic
                     com_filesize = pak.files[i].filelen
-                    file_from_pak = True
                     path_id = search.path_id
                     handle = pak.handle
                     sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
-                    return (handle, com_filesize, path_id )
-   
-        else: # check file in directory tree
-            if not cvar.Cvar_GetCvar('registered').value:
-                if '/' in filename:
-                    search  = search.next
-                    continue
-
+                    return (handle, com_filesize, path_id, True) # Return True for PAK
+        else:
             netpath = f'{search.filename}/{filename}'
-
             if os.path.isfile(netpath):
                 path_id = search.path_id
                 handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
-                return ( handle, length, path_id)
-    
-        search  = search.next
+                return (handle, length, path_id, False) # Return False for loose file
 
-    return ( None, 0, 0 )
+        search = search.next
+    return (None, 0, 0, False)
 
-    pass
-    
 
 def COM_FileIOFromHandle(handle) -> io.FileIO:
     import sys_sdl_unix
     return sys_sdl_unix.sys_handles[handle]
 
 def COM_FileExists(filename, path_id) -> bool:
-    (filelength) = COM_FindFile(filename)
-    return filelength >= 0
+    h, size, path_id, is_pak = COM_FindFile(filename)
+    return size >= 0
 
 
 def COM_OpenFile(filename):
     # wants handle, path_id
-    (handle, filelen, path_id) = COM_FindFile(filename)
-    return (handle, filelen, path_id)
+    return COM_FindFile(filename)
 
 def COM_CloseFile(handle):
     global com_searchpaths
@@ -773,11 +768,40 @@ def COM_CloseFile(handle):
     while search:
         if search.pack and search.pack.handle == handle:
             return # dont really close a pack file
-    
+
     Sys_FileClose(handle)
 
-def COM_FOpenFile(filename) -> (int, int, int):
+def COM_FOpenFile(filename) -> (int, int, int, bool):
     return COM_FindFile(filename)
 
 def COM_FileGetExtension(file):
     raise NotImplementedError
+
+def COM_AddExtension(name, ext):
+    return name + ext
+
+def MSG_BeginReading():
+    global msg_readcount
+    global msg_badread
+
+    msg_readcount = 0
+    msg_badread = False
+
+def MSG_ReadByte():
+    global msg_readcount
+    global msg_badread
+
+    if msg_readcount+1 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    c = net_main.net_message.data[msg_readcount]
+    msg_readcount += 1
+
+    return c
+
+def COM_SkipPath(pathname):
+    return os.path.basename(pathname)
+
+def COM_StripExtension(name):
+    return os.path.splitext(name)[0]

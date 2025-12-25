@@ -1,4 +1,4 @@
-#menu.py 
+#menu.py
 
 from enum import Enum
 from random import randint
@@ -7,8 +7,10 @@ import _cmd
 import console
 import cl_main
 import cvar
+import in_sdl
 import keys
 import gl_vidsdl
+import vid
 
 import sv_main
 
@@ -93,12 +95,12 @@ def M_ToggleMenu_f():
         keys.key_dest = keys.keydest_t.key_game
         m_state = m_state_e.m_none
         return
-    
+
     if keys.key_dest == keys.keydest_t.key_console:
         console.Con_ToggleConsole_f()
     else:
         M_Menu_Main_f()
-    
+
 
 def M_Menu_Main_f():
     global m_save_demonum
@@ -106,9 +108,10 @@ def M_Menu_Main_f():
     global m_state
 
     if keys.key_dest != keys.keydest_t.key_menu:
-        m_save_demonum = -1
+        m_save_demonum = cl_main.cls.demonum
+        cl_main.cls.demonum = -1
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_main
     m_entersound = True
@@ -117,7 +120,7 @@ def M_Menu_SinglePlayer_f():
     global m_entersound
     global m_state
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_singleplayer
     m_entersound = True
@@ -125,7 +128,7 @@ def M_Menu_SinglePlayer_f():
 def M_Menu_MultiPlayer_f():
     global m_state, m_entersound
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_multiplayer
     m_entersound = True
@@ -211,7 +214,7 @@ def M_Menu_Quit_f():
 
     if m_state == m_state_e.m_quit:
         return
-    
+
     wasInMenus = (keys.key_dest == keys.keydest_t.key_menu)
     IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu

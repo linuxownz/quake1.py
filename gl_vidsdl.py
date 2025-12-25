@@ -474,7 +474,7 @@ def GL_CheckExtensions():
     elif gl_version_major < 1 or ( gl_version_major == 1 and gl_version_minor < 5 ):
         console.Con_Warning('OpenGL version < 1.5, skipping ARB_vertex_buffer_object check')
     else:
-        console.Con_Printf('Found: ARB_vertex_buffer_object\n')
+        console.Con_Printf('Found: ARB_vertex_buffer_object')
         gl_vbo_able = True
 
     if common.COM_CheckParm('-nomtex'):
@@ -619,6 +619,21 @@ def GL_SetupState():
     OpenGL.GL.glDepthRange(0, 1)
     OpenGL.GL.glDepthFunc(OpenGL.GL.GL_LEQUAL)
 
+    OpenGL.GL.glClearColor(0.15, 0.15, 0.15, 1.0)
+    OpenGL.GL.glEnable(OpenGL.GL.GL_DEPTH_TEST) # Ensure depth testing is ON
+    OpenGL.GL.glDepthFunc(OpenGL.GL.GL_LEQUAL)
+    
+    OpenGL.GL.glEnable(OpenGL.GL.GL_CULL_FACE)
+    OpenGL.GL.glCullFace(OpenGL.GL.GL_BACK)
+    OpenGL.GL.glFrontFace(OpenGL.GL.GL_CW) # Quake uses clockwise winding
+    
+    OpenGL.GL.glEnable(OpenGL.GL.GL_TEXTURE_2D)
+    OpenGL.GL.glShadeModel(OpenGL.GL.GL_SMOOTH) # Better for lightmaps
+    
+    # Standard Quake alpha testing for fences/grates
+    OpenGL.GL.glEnable(OpenGL.GL.GL_ALPHA_TEST)
+    OpenGL.GL.glAlphaFunc(OpenGL.GL.GL_GREATER, 0.5)
+
 def GL_Init():
     global gl_vendor, gl_renderer
     global gl_version, gl_version_major, gl_version_minor
@@ -629,9 +644,9 @@ def GL_Init():
     gl_version    = OpenGL.GL.glGetString(OpenGL.GL.GL_VERSION).decode('ascii')
     gl_extensions = OpenGL.GL.glGetString(OpenGL.GL.GL_EXTENSIONS).decode('ascii')
 
-    console.Con_Printf(f'GL_VENDOR: {gl_vendor}\n')
-    console.Con_Printf(f'GL_RENDERER: {gl_renderer}\n')
-    console.Con_Printf(f'GL_VERSION: {gl_version}\n')
+    console.Con_Printf(f'GL_VENDOR: {gl_vendor}')
+    console.Con_Printf(f'GL_RENDERER: {gl_renderer}')
+    console.Con_Printf(f'GL_VERSION: {gl_version}')
 
     if gl_version is None:
         gl_version_major = gl_version_minor = 0
@@ -640,8 +655,8 @@ def GL_Init():
         gl_version_major = int(gl_version_major)
         gl_version_minor = int(gl_version_minor)
     
-    console.Con_Printf(f'GL_VERSION major: {gl_version_major}\n')
-    console.Con_Printf(f'GL_VERSION minor: {gl_version_minor}\n')
+    console.Con_Printf(f'GL_VERSION major: {gl_version_major}')
+    console.Con_Printf(f'GL_VERSION minor: {gl_version_minor}')
 
     gl_extensions = GL_MakeNiceExtensionList(gl_extensions)
 
@@ -1072,8 +1087,19 @@ def VID_MenuKey(key):
                 
 
 
+def VID_Shutdown():
+    global gl_context
+    global draw_context
 
-                
+    if vid_initialized:
+        #VID_Gamma_Shutdown()
+        sdl2.SDL_GL_DeleteContext(gl_context)
+        gl_context = None
+        sdl2.SDL_DestroyWindow(draw_context)
+
+        sdl2.SDL_QuitSubSystem(sdl2.SDL_INIT_VIDEO)
+        draw_context = None
+        #PL_VID_Shutdown()
 
  
             
@@ -1107,23 +1133,18 @@ def VID_SyncCvars():
     
     vid_changed = False
 
-    
 
-
-
-
-
-    
+def VID_SwapBuffers():
+    global draw_context
+    sdl2.SDL_GL_SwapWindow(draw_context)
        
  
 
 def VID_IsMinimized():
-    global window
-    return sdl2.video.SDL_GetWindowFlags(window.sdlwindow) & sdl2.SDL_WINDOW_SHOWN
+    return sdl2.video.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_SHOWN
 
 def VID_HasMouseOrInputFocus():
-    global window
-    flags = sdl2.video.SDL_GetWindowFlags(window.sdlwindow)
+    flags = sdl2.video.SDL_GetWindowFlags(draw_context)
 
     if flags & sdl2.SDL_WINDOW_INPUT_FOCUS or flags & sdl2.SDL_WINDOW_MOUSE_FOCUS:
         return True

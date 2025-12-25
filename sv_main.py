@@ -1,4 +1,4 @@
-#sv_main.py 
+#sv_main.py
 
 import _cmd
 import common
@@ -14,8 +14,8 @@ import sv_phys
 import sv_user
 import sys_sdl_unix
 
-sv : server_t        = server.server_t()
-svs: server_static_t = server.server_static_t()
+sv : server.server_t        = server.server_t()
+svs: server.server_static_t = server.server_static_t()
 
 localmodels = []
 
@@ -48,7 +48,7 @@ def SV_Init():
     cvar.Cvar_RegisterVariable(sv_maxvelocity)
     cvar.Cvar_RegisterVariable(sv_gravity)
     cvar.Cvar_RegisterVariable(sv_friction)
-    
+
     cvar.Cvar_SetCallback(sv_gravity, host.Host_Callback_Notify)
     cvar.Cvar_SetCallback(sv_friction, host.Host_Callback_Notify)
 
@@ -80,7 +80,7 @@ def SV_Init():
 
     if i != 0 and i < com_argc - 1:
         sv_protocol = int(com_argv[i + 1])
-    
+
     p = ''
     match sv_protocol:
         case protocol.PROTOCOL_NETQUAKE:

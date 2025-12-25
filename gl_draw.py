@@ -1,5 +1,6 @@
 #gl_draw.py 
 
+import OpenGL.GL as gl
 import struct
 
 import wad
@@ -84,7 +85,7 @@ class glpic_t():
 currentcanvas : screen.canvastype = screen.canvastype.CANVAS_NONE 
 
 class cachepic_t():
-    unpack_string = f'<{MAX_QPATH}s{wad.qpic_t.unpack_string}32B'
+    #unpack_string = f'<{MAX_QPATH}s{wad.qpic_t.unpack_string}32B'
     def __init__(self):
         self.name = ''
         self.pic : wad.qpic_t = None
@@ -242,7 +243,7 @@ def Draw_PicFromWad(name):
         gl.sl = x/BLOCK_WIDTH
         gl.sh = (x + p.width)/BLOCK_WIDTH
         gl.tl = y/BLOCK_WIDTH
-        gl.sh = (y + p.height)/BLOCK_WIDTH
+        gl.th = (y + p.height)/BLOCK_WIDTH
     else:
         texturename = wad.WADFILENAME + ':' + name 
 
@@ -297,4 +298,68 @@ def Draw_Init():
 
     Draw_LoadPics()
 
+def Draw_Character(x, y, num):
+    global char_texture
+    if not char_texture:
+        return
+
+    # THE MISSING MATH:
+    # Quake's conchars is a 16x16 grid. 
+    # Row and Column are derived from the ASCII value (num)
+    row = (num >> 4) & 0xF
+    col = num & 0xF
     
+    # Map to UV coordinates (0.0 to 1.0)
+    # Each cell is 1/16th of the texture (0.0625)
+    s1 = col * 0.0625
+    t1 = row * 0.0625
+    s2 = s1 + 0.0625
+    t2 = t1 + 0.0625
+
+    # --- RENDER STATE ---
+    gl.glEnable(gl.GL_BLEND)
+    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+    gl.glEnable(gl.GL_TEXTURE_2D)
+    gl.glBindTexture(gl.GL_TEXTURE_2D, char_texture.texnum)
+    
+    # White ensures the font isn't tinted
+    gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+
+    gl.glEnable(gl.GL_ALPHA_TEST)
+    gl.glAlphaFunc(gl.GL_GREATER, 0.0) # Only draw pixels with alpha > 0
+
+    gl.glBegin(gl.GL_QUADS)
+    gl.glTexCoord2f(s1, t1); gl.glVertex2f(x, y)
+    gl.glTexCoord2f(s2, t1); gl.glVertex2f(x + 8, y)
+    gl.glTexCoord2f(s2, t2); gl.glVertex2f(x + 8, y + 8)
+    gl.glTexCoord2f(s1, t2); gl.glVertex2f(x, y + 8)
+    gl.glEnd()
+
+def Draw_String(x, y, text):
+    """Draws a line of text using the conchars font."""
+    for i, char in enumerate(text):
+        # ord() gets the ASCII integer value of the character
+        Draw_Character(x + (i * 8), y, ord(char)) 
+
+
+def Draw_Fill(x, y, w, h, color_index):
+    gl.glDisable(gl.GL_TEXTURE_2D)
+    gl.glEnable(gl.GL_BLEND)
+    
+    # Check if this is the console background (usually index 200-ish)
+    if color_index >= 200:
+        # Dark grey with 60% opacity (0.6)
+        gl.glColor4f(0.15, 0.15, 0.15, 0.6) 
+    else:
+        # Fallback for other UI elements
+        gl.glColor4f(0.5, 0.5, 0.5, 1.0)
+
+    gl.glBegin(gl.GL_QUADS)
+    gl.glVertex2f(x, y)
+    gl.glVertex2f(x + w, y)
+    gl.glVertex2f(x + w, y + h)
+    gl.glVertex2f(x, y + h)
+    gl.glEnd()
+    
+    gl.glEnable(gl.GL_TEXTURE_2D)
+    gl.glColor4f(1.0, 1.0, 1.0, 1.0) # Reset to white for next draw

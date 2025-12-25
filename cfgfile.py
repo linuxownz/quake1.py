@@ -1,4 +1,4 @@
-#cfgfile.py  
+#cfgfile.py
 
 from __future__ import annotations
 
@@ -18,14 +18,14 @@ def CFG_OpenConfig(cfg_name) -> bool:
 
     CFG_CloseConfig()
 
-    (handle, length, path_id ) = common.COM_FOpenFile(cfg_name)
+    (handle, length, path_id, is_pak ) = common.COM_FOpenFile(cfg_name)
 
     f = common.COM_FileIOFromHandle(handle)
 
     if length == -1:
         return -1
 
-    cfg_file = common._fshandle_t(f, common.file_from_pak, f.tell(), length, 0)
+    cfg_file = common._fshandle_t(f, is_pak, f.tell(), length, 0)
 
     return 0
 
@@ -55,7 +55,7 @@ def CFG_ReadCvars(vars):
 
         if buff[-1] != '"':
             continue
-        
+
         for var in vars:
             if var in buff:
                 arg = buff.split()[1]
@@ -63,14 +63,14 @@ def CFG_ReadCvars(vars):
                 cvar.Cvar_Set(var, arg)
                 j += 1
                 break
-            
+
         if j == num_vars:
             break
 
     assert ( j == num_vars )
 
     common.FS_rewind(cfg_file)
-        
+
 def CFG_ReadCvarOverrides(vars):
     num_vars = len(vars)
 
@@ -85,5 +85,5 @@ def CFG_ReadCvarOverrides(vars):
         if j != 0 and j < com_argc - 1:
             if not com_argv[j + 1].startswith('-') and not com_argv[j + 1].startswith('+'):
                 Cvar_Set(vars[i], com_argv[j+1])
-            
+
 

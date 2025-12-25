@@ -1,4 +1,4 @@
-#net_main.py 
+#net_main.py
 
 import cl_main
 import _cmd
@@ -32,7 +32,7 @@ slistLocal      = True
 slistStartTime = 0.0
 slistLastShown = 0
 
-net_message = b'' # sizebuf_t TODO
+# net_message : common.sizebuf_s = common.sizebuf_s()
 net_activeconnections = 0
 
 messagesSent = 0
@@ -58,7 +58,7 @@ def NET_Slist_f():
 
     if slistInProgress:
         return
-    
+
     if not slistSilent:
         console.Con_Printf('Looking for Quake servers...\n')
         PrintSlistHeader()
@@ -67,7 +67,7 @@ def NET_Slist_f():
     SchedulePollProcedure(slistSendProcedure, 0.1)
 
     hostCacheCount = 0
-    
+
 def NET_Listen_f():
     global listening
 
@@ -80,9 +80,9 @@ def NET_Listen_f():
     for net_driverlevel in range(net_numdrivers):
         if net_drivers[net_driverlevel].initialized == False:
             continue
-        net_drivers[net_driverlevel].Listen(listening) # this is different from dfunc define 
+        net_drivers[net_driverlevel].Listen(listening) # this is different from dfunc define
 
-    
+
 def MaxPlayers_f():
     if _cmd.Cmd_Argc() != 2:
         console.Con_Printf(f'maxplayers is {sv_main.svs.maxclients}\n')
@@ -94,7 +94,7 @@ def MaxPlayers_f():
     n = int(_cmd.Cmd_Argv(1))
     if n < 1:
         n = 1
-    
+
     if n > sv_main.svs.maxclientslimit:
         n = sv_main.svs.maxclientslimit
         console.Con_Printf(f'maxplayers set to {n}')
@@ -128,7 +128,7 @@ def NET_Port_f():
     if listening:
         Cbuf_AddText('listen 0\n')
         Cbuf_AddText('listen 1\n')
-        
+
 
 def NET_Init():
     global net_hostport
@@ -137,6 +137,10 @@ def NET_Init():
     global listening
     global net_freeSockets
     global net_drivers
+    global net_message
+
+    import common
+    net_message = common.sizebuf_s()
 
     i = common.COM_CheckParm('-port')
     if i == 0:
@@ -154,7 +158,7 @@ def NET_Init():
 
     if cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
         net_numsockets += 1
-    
+
     if common.COM_CheckParm('-listen') or cl_main.cls.state == cl_main.cactive_t.ca_dedicated:
         listening = True
 
@@ -194,4 +198,3 @@ def NET_Init():
         console.Con_DPrintf(f'tcp/ip address {my_tcpip_address}')
 
 
-    

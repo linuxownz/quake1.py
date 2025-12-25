@@ -1,4 +1,4 @@
-#cvar.py 
+#cvar.py
 
 import _cmd
 import console
@@ -7,7 +7,7 @@ import host
 CVAR_NONE       = 0
 CVAR_ARCHIVE    = 1 << 0
 CVAR_NOTIFY     = 1 << 1
-CVAR_SERVERINFO = 1 << 2 
+CVAR_SERVERINFO = 1 << 2
 CVAR_USERINFO   = 1 << 3
 CVAR_CHANGED    = 1 << 4
 CVAR_ROM        = 1 << 6
@@ -67,8 +67,9 @@ def Cvar_FindVar(name) -> cvar_t:
 
 def Cvar_RegisterVariable(variable):
     name   = variable['name']
-    flags  = variable['flags']
-    value  = variable['value']
+    flags  = variable.get('flags', CVAR_NONE)
+    value  = variable.get('value')
+    initial_str = str(variable.get('value', '0'))
     string = variable.get('string')
     default_string = variable.get('default_string')
     callback = variable.get('callback')
@@ -76,7 +77,13 @@ def Cvar_RegisterVariable(variable):
     # reminder to implement
     if callback:
         raise NotImplementedError
-    
+
+    initial_val = 0.0
+    try:
+        initial_val = float(initial_str)
+    except ValueError:
+        pass
+
     if Cvar_FindVar(name):
         console.Con_Printf(f'Cvar_RegisterVariable: cant register variable {name}, already defined')
         return
@@ -85,10 +92,17 @@ def Cvar_RegisterVariable(variable):
         console.Con_Printf(f'Cvar_RegisterVariable {name} is a command')
         return
 
-    flags |= CVAR_REGISTERED
-    
-    __cvars.append(cvar_t(name, string, flags, value, default_string, callback))
-    
+    new_cvar = cvar_t(
+        name=name,
+        string=initial_str, # This must NOT be None
+        flags=flags | CVAR_REGISTERED,
+        value=initial_val,
+        default_string=initial_str,
+        callback=variable.get('callback')
+    )
+
+    __cvars.append(new_cvar)
+
 def Cvar_GetCvar(name) -> cvar_t:
     for cvar in __cvars:
         if cvar.name == name:
@@ -110,33 +124,35 @@ def Cvar_SetCallback(Cvar:dict, callback):
         cvar.flags &= ~CVAR_CALLBACK
 
 
-def Cvar_SetQuick(Cvar : cvar_t, value):
+def Cvar_SetQuick(Cvar: cvar_t, value: str):
 
-    flags = Cvar.flags
-
-    if flags & ( CVAR_ROM | CVAR_LOCKED):
-        return
-    if not ( flags & CVAR_REGISTERED ):
+    if Cvar.string == value:
         return
 
-    if Cvar.string is not None:
-        Cvar.string = value
-    else:
-        if Cvar.string == value:
-            return # no change
 
-        Cvar.flags |= CVAR_CHANGED
-        Cvar.string = value
+    if Cvar.flags & (CVAR_ROM | CVAR_LOCKED):
+        return
+    if not (Cvar.flags & CVAR_REGISTERED):
+        return
 
-    Cvar.value = Cvar.string
+    # Quake converts to string first, then updates the float value
+    Cvar.string = str(value)
 
-    if not Cvar.default_string:
-        Cvar.default_string = Cvar.string
-    elif not host.host_initialized:
+    try:
+        Cvar.value = float(Cvar.string)
+    except ValueError:
+        Cvar.value = 0.0
+
+    Cvar.flags |= CVAR_CHANGED
+
+    if not Cvar.default_string or not host.host_initialized:
         Cvar.default_string = Cvar.string
 
     if Cvar.callback:
-        Cvar.callback(Cvar)
+        try:
+            Cvar.callback(Cvar)
+        except TypeError:
+            Cvar.callback()
 
 def Cvar_SetQuickByName(name, value):
     var = Cvar_FindVar(name)
@@ -156,7 +172,7 @@ def Cvar_SetValueQuick(cvarname, value):
     value = str(value)
 
     Cvar_SetQuick(var, value)
-    
+
 
 def Cvar_Set(varname, value):
     var = Cvar_FindVar(varname)
@@ -165,12 +181,14 @@ def Cvar_Set(varname, value):
         console.Con_Printf(f'Cvar_Set: variable {varname} not found!')
         return
 
+    value = value.strip().strip('"')
+
     Cvar_SetQuick(var, value)
 
 def Cvar_SetValue(varname, value:float):
     value = str(value)
     Cvar_Set(varname, value)
-    
+
 def Cvar_SetROM(varname, value:str):
     var = Cvar_FindVar(varname)
     if var is not None:
@@ -185,7 +203,26 @@ def Cvar_SetValueROM(varname, value:float):
         Cvar_SetValueQuick(var, value)
         var.flags |= CVAR_ROM
 
-   
+
+def Cvar_Command(args: list[str]) -> bool:
+    """
+    Checks if the first argument is a registered Cvar.
+    If it is, it either prints the value or sets it.
+    Returns True if handled, False if not a Cvar.
+    """
+    v = Cvar_FindVar(args[0])
+    if not v:
+        return False
+
+    # If only the name was typed (e.g., "sensitivity")
+    if len(args) == 1:
+        console.Con_Printf(f'"{v.name}" is "{v.string}"\n')
+        return True
+
+    # If a value was provided (e.g., "sensitivity 5")
+    # We use index 1 as the new value
+    Cvar_Set(v.name, args[1])
+    return True
 
 
 
@@ -201,7 +238,5 @@ def Cvar_SetValueROM(varname, value:float):
 
 
 
-    
-    
-    
-    
+
+

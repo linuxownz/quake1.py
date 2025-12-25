@@ -1,14 +1,20 @@
-#host_cmd.py 
+#host_cmd.py
 
 import os
 
+import cl_main
+import client
+import console
 import common
 import sv_main
+import menu
 import _cmd
 import net_main
 import host
 import quakedef
 import host_cmd
+import keys
+import sys_sdl_unix
 
 class filelist_item_t:
     def __init__(self, name, path_id, next: filelist_item_t):
@@ -30,17 +36,17 @@ def FileList_Add(name, _list: filelist_item_t, path_id):
         item = item.next
 
     item = filelist_item_t(name, path_id, None)
-    
+
     if _list is None:
         _list = item
     else:
         _list.next = item
-        
+
 def ExtraMaps_Add(name, _list: filelist_item_t, path_id):
     FileList_Add(name, _list, path_id)
 
 def Host_Maps_f():
-    if Cmd_Argc() > 1:
+    if _cmd.Cmd_Argc() > 1:
         ExtraMaps_List(Cmd_Argv(1))
     else:
         ExtraMaps_List(None)
@@ -88,14 +94,14 @@ def Host_Status_f():
     else:
         print_fn = host.SV_ClientPrintf
 
-    
+
     print_fn(f'host:     {cvar.Cvar_VariableString('hostname')}')
     print_fn(f'version: {1.0}')
 
     if tcpipAvailable:
         print_fn(f'tcp/ip:   {net_main.my_tcpip_address}')
-        
-    print_fn(f'map:    {sv.name}')    
+
+    print_fn(f'map:    {sv.name}')
     print_fn(f'players: {net_activeconnections} active ({svs.maxclients} max) ')
 
     j = 1
@@ -117,25 +123,25 @@ def Host_Status_f():
         print_fn(f'{j} {client.name} {client.edict.v.frags} {hours}:{minutes}:{seconds}' )
 
         print_fn(f'{NET_QSocketGetAddressString(client.netconnection)}')
-    
-def Host_Quit_f():
-    if key_dest != key_console and cls.state != ca_dedicated:
-        M_Menu_Quit_f()
-        return
-    
-    CL_Disconnect()
-    Host_ShutdownServer(False)
 
-    Sys_Quit()
+def Host_Quit_f():
+    if keys.key_dest != keys.keydest_t.key_console and client.cls.state != client.cactive_t.ca_dedicated:
+        menu.M_Menu_Quit_f()
+        return
+
+    cl_main.CL_Disconnect()
+    #host.Host_ShutdownServer(False)
+
+    sys_sdl_unix.Sys_Quit()
 
 def Host_God_f():
     if _cmd.cmd == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     if pr_global_struct.deathmatch:
         return
-    
+
     match Cmd_Arvc():
         case 1:
             sv_player.v.flags = int(sv_player.v.flags) ^ FL_GODMODE
@@ -152,16 +158,16 @@ def Host_God_f():
                 SV_ClientPrintf('godmode OFF\n')
         case _:
             console.Con_Printf('god [value] : toggle god mode 0=off, 1=on\n')
- 
+
 def Host_Notarget_f():
 
     if _cmd.cmd == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     if pr_global_struct.deathmatch:
         return
-    
+
     match Cmd_Arvc():
         case 1:
             sv_player.v.flags = int(sv_player.v.flags) ^ FL_NOTARGET
@@ -178,15 +184,15 @@ def Host_Notarget_f():
                 SV_ClientPrintf('notarget OFF\n')
         case _:
             console.Con_Printf('notarget [value] : toggle notarget mode 0=off, 1=on\n')
-    
+
 def Host_Fly_f():
     if _cmd.cmd == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     if pr_global_struct.deathmatch:
         return
- 
+
     match (Cmd_Argc):
         case 1:
             if sv_player.v.movetype != MOVETYPE_FLY:
@@ -228,7 +234,7 @@ def Host_Map_f():
 
     if cls.state != ca_dedicated:
         IN_Activate()
-    
+
     key_dest = key_game
     SCR_BeginLoadingPlaque()
 
@@ -255,7 +261,7 @@ def Host_Restart_f():
 
     if _cmd.cmd_source != src_command:
         return
-    
+
     SV_SpawnServer(sv.name)
 
     if not sv.active:
@@ -369,10 +375,10 @@ def Host_Noclip_f():
                 SV_ClientPrintf('noclip OFF\n')
         case _:
             console.Con_Printf('noclip [0/1]')
-        
+
 def Host_SetPos_f():
     raise NotImplementedError
-    
+
 def Host_Say_f():
     Host_Say(False)
 
@@ -416,7 +422,7 @@ def Host_Kill_f():
         return
 
     if sv_player.v.health <= 0:
-        SV_ClientPrintf('cant suicide -- already dead\n') 
+        SV_ClientPrintf('cant suicide -- already dead\n')
         return
 
     pr_global_struct.time = sv_time
@@ -428,7 +434,7 @@ def Host_Pause_f():
         cls.demopaused = not cls.demopaused
         cl.paused = cls.demopaused
         return
-    
+
     if _cmd.cmd_source == src_command:
         Cmd_ForwardToServer()
         return
@@ -453,7 +459,7 @@ def Host_Spawn_f():
     if _cmd.cmd_source == src_command:
         console.Con_Printf('spawn not valid from console\n')
         return
-    
+
     if host_client.spawned:
         console.Con_Printf('spawn not valid, already spawned\n')
 
@@ -514,7 +520,7 @@ def Host_Kick_f():
                 continue
             if host_client.name == Cmd_Argv(1):
                 break
- 
+
     if i < svs.maxclients:
         if _cmd.cmd_source == src_command:
             if cls.state == ca_dedicated:
@@ -551,7 +557,7 @@ def Host_Ping_f():
     if _cmd.cmd_source == src_command:
         Cmd_ForwardToServer()
         return
-    
+
     SV_ClientPrintf('client ping times:\n')
 
     for client in svs.clients:
@@ -560,7 +566,7 @@ def Host_Ping_f():
 
         for j in client.ping_times:
             total += client.ping_times
-        
+
         total /= NUM_PING_TIMES
 
         SV_ClientPrintf(f'{total*1000} {client.name}')
@@ -572,7 +578,7 @@ def Host_Loadgame_f():
     if Cmd_Argc() != 2:
         console.Con_Printf('load <savename> : load a game\n')
         return
-            
+
     if Cmd_Argv(1).contains('..'):
         console.Con_Printf('load <savename> : relative pathnames are not allowed\n')
         return
@@ -588,7 +594,7 @@ def Host_Loadgame_f():
 
     # disabled in original source
     #SCR_BeginLoadingPlaque()
-    
+
     console.Con_Printf(f'loading game from {name}\n')
 
     if start:
@@ -665,7 +671,7 @@ def Host_Loadgame_f():
 
         entnum += 1
 
-     
+
     for i in range(sv.num_edicts):
         ED_Free(EDICT_NUM(i))
 
@@ -691,7 +697,7 @@ def Host_Savegame_f():
 
     if _cmd.cmd_source != src_command:
         return
-    
+
     if not sv.active:
         console.Con_Printf('not playing a local game\n')
         return
@@ -715,7 +721,7 @@ def Host_Savegame_f():
     if '..' in Cmd_Argv(1):
         console.Con_Printf('relative pathname are not allowed\n')
         return
-    
+
     for client in svs.maxclients:
         if client.active and client.edict.v.health <= 0:
             console.Con_Printf('cant save game with dead player\n')
@@ -759,7 +765,7 @@ def Host_Savegame_f():
 
 
 def Host_Give_f():
-    if _cmd.cmd_source == src_command:
+    if _cmd.cmd_source == _cmd.cmd_source.src_command:
         Cmd_ForwardToServer()
         return
 
@@ -768,7 +774,7 @@ def Host_Give_f():
 
     t = Cmd_Argv(1)
     v = int(Cmd_Argv(2))
-    
+
     match(t[0]):
         case x if 0 <= x <= 9:
             if hipnotic:
@@ -840,7 +846,7 @@ def Host_Give_f():
                         sv_player.v.ammo_cells = v
             else:
                 sv_player.v.ammo_cells = v
-        
+
         case 'p':
             if rogue:
                 val = GetEdictFieldValue(sv_player, 'ammo_plasma')
@@ -863,7 +869,7 @@ def Host_Give_f():
                 sv_player.v.armorvalue = v
                 sv_player.v.items = sv_player.v.items - int(sv_player.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR1
 
-            
+
     match sv_player.v.weapon:
         case quakedef.IT_SHOTGUN | quakedef.IT_SUPER_SHOTGUN:
             sv_player.v.currentammo = sv_player.v.ammo_shells
@@ -884,28 +890,30 @@ def Host_Give_f():
                 sv_player.v.currentammo = sv_player.v.ammo_rockets
 
 def Host_Startdemos_f():
-    if cls.state == ca_dedicated:
+    if cl_main.cls.state == cl_main.cactive_t.ca_dedicated:
         return
 
-    c = Cmd_Argc() - 1
-    if c > MAX_DEMOS:
-        console.Con_Printf(f'max {MAX_DEMOS} demos in demoloop')        
-        c = MAX_DEMOS
+    c = _cmd.Cmd_Argc() - 1
+    if c > client.MAX_DEMOS:
+        console.Con_Printf(f'max {client.MAX_DEMOS} demos in demoloop')
+        c = client.MAX_DEMOS
 
     console.Con_Printf(f'{c} demos in loop')
 
-    for i in range(c+1):
-        cls.demos[i-1] = Cmd_Argv(i)
+    for i in range(1, c+1):
+        cl_main.cls.demos.insert(i-1,_cmd.Cmd_Argv(i))
 
-    if not sv_active and cls.demonum != -1 and not cls.demoplayback:
-        cls.demonum = 0
-        if not fitzmode and not cl_startdemos.value:
-            cls.demonum = -1
-            Cbuf_InsertText('menu_main\n')
+    import cvar
+    cl_startdemos = int(cvar.Cvar_GetCvar('cl_startdemos').value)
+    if not sv_main.sv.active and cl_main.cls.demonum != -1 and not cl_main.cls.demoplayback:
+        cl_main.cls.demonum = 0
+        if not common.fitzmode and not cl_startdemos:
+            cl_main.cls.demonum = -1
+            _cmd.Cbuf_InsertText('menu_main\n')
             return
-        CL_NextDemo()
+        cl_main.CL_NextDemo()
     else:
-        cls.demonum = -1
+        cl_main.cls.demonum = -1
 
 def Host_Demos_f():
     if cls.state == ca_dedicated:
@@ -1046,7 +1054,6 @@ def DemoList_Init():
                     if common.COM_FileGetExtension(search.pack.files[i].name) == 'dem':
                         demname = common.COM_StripExtension(search.pack.files[i].name)
                         FileList_Add(demname, demolist, search.path_id)
-        
+
         search = search.next
 
-         

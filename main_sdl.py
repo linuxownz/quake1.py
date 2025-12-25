@@ -9,9 +9,11 @@ import sdl2.ext
 import ctypes
 
 #from common import COM_InitArgv
+
 import common
 import console
 import client
+import cl_main
 import gl_vidsdl
 import host
 import sys_sdl_unix
@@ -35,6 +37,7 @@ def Sys_InitSDL():
     atexit.register( Sys_AtExit )
 
 def main():
+    import cvar
     host.membase = bytearray(host.memsize)
 
     if host.membase is None:
@@ -52,10 +55,11 @@ def main():
     oldtime = sys_sdl_unix.Sys_DoubleTime()
     if sys_sdl_unix.Sys_IsDedicated():
         while True:
+            sys_ticrate = int(cvar.Cvar_GetCvar('sys_ticrate').value)
             newtime = sys_sdl_unix.Sys_DoubleTime()
             time = newtime - oldtime
 
-            while time < sys_ticrate.value:
+            while time < sys_ticrate:
                 sdl2.SDL_Delay(1)
                 newtime = sys_sdl_unix.Sys_DoubleTime()
                 time = newtime - oldtime
@@ -64,22 +68,23 @@ def main():
             oldtime = newtime
 
     else:
+        sys_throttle = float(cvar.Cvar_GetCvar('sys_throttle').value)
         while True:
-            if not gl_vidsdl.VID_HasMouseOrInputFocus() or cl.paused:
+            if not gl_vidsdl.VID_HasMouseOrInputFocus() or cl_main.cl.paused:
                 sdl2.SDL_Delay(16)
 
             if gl_vidsdl.VID_IsMinimized():
-                scr_skipupdate = True
+                gl_vidsdl.scr_skipupdate = True
                 sdl2.SDL_Delay(32)
             else:
-                scr_skipupdate = False
+                gl_vidsdl.scr_skipupdate = False
 
             newtime = sys_sdl_unix.Sys_DoubleTime()
-            time = newtime = oldtime
+            time = newtime - oldtime
 
             host.Host_Frame(time)
 
-            if time < sys_throttle.value and not client.cls.timedemo:
+            if time < sys_throttle and not cl_main.cls.timedemo:
                 sdl2.SDL_Delay(1)
 
             oldtime = newtime

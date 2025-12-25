@@ -5,7 +5,15 @@ import common
 import zone
 
 # WAD2 Lump structure is 32 bytes
+WADFILENAME = 'gfx.wad'
 WAD_LUMP_FORMAT = "<IIIbbh16s"
+
+class qpic_t:
+    def __init__(self, width, height, data=None):
+        self.width = width
+        self.height = height
+        self.data = data # This will store the 8-bit indexed pixels
+
 
 class lumpinfo_t:
     def __init__(self, name, filepos, size, type):
@@ -48,28 +56,25 @@ def W_LoadWadFile(filename):
     print(f"W_LoadWadFile: {filename} loaded with {len(lumpinfo)} lumps")
 
 def W_GetLumpName(name):
-    """Returns the data for a lump by searching for its name."""
+    """Returns (data, filepos) for a lump by name."""
     name = name.upper()
     for i, lump in enumerate(lumpinfo):
         if lump.name == name:
             return W_GetLumpNum(i)
     
-    common.sys_sdl_unix.Sys_Error(f"W_GetLumpName: {name} not found")
+    # Instead of hard error, return None so gl_draw can use pic_nul
+    return None, 0
 
 def W_GetLumpNum(num):
-    """Returns a memoryview slice of the lump data from the Hunk."""
+    """Returns (memoryview_slice, filepos)."""
     if num < 0 or num >= len(lumpinfo):
-        common.sys_sdl_unix.Sys_Error("W_GetLumpNum: bad number")
+        return None, 0
         
     lump = lumpinfo[num]
-    
-    # We return a slice of our global WAD buffer. 
-    # Because it's a memoryview, this is 'zero-copy'—it's just a window
-    # into the existing Hunk memory.
     start = lump.filepos
     end = start + lump.size
     
-    return wad_buffer[start:end]
+    return wad_buffer[start:end], lump.filepos
     
 def W_CleanupName(name: str) -> str:
     # Quake lump names are max 16 chars, often null-padded

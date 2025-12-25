@@ -1,7 +1,7 @@
-#gl_rmain.py 
+#gl_rmain.py
 
-import gl_model
 import render
+import gl_model
 
 modelorg    = [0, 0, 0]
 r_entorigin = [0, 0, 0]
@@ -60,7 +60,7 @@ textureLoc = 0
 def gl_rmain_Init():
     import cvar
 
-    r_norefresh           = {'name': "r_norefresh",       'value':"0",        'flags': cvar.CVAR_NONE};                                
+    r_norefresh           = {'name': "r_norefresh",       'value':"0",        'flags': cvar.CVAR_NONE};
     r_drawentities        = {'name': "r_drawentities",    'value':"1",        'flags': cvar.CVAR_NONE};
     r_drawviewmodel       = {'name': "r_drawviewmodel",   'value':"1",        'flags': cvar.CVAR_NONE};
     r_speeds              = {'name': "r_speeds",          'value':"0",        'flags': cvar.CVAR_NONE};
@@ -72,7 +72,7 @@ def gl_rmain_Init():
     r_litwater            = {'name': "r_litwater",        'value':"1",        'flags': cvar.CVAR_NONE};
     r_dynamic             = {'name': "r_dynamic",         'value':"1",        'flags': cvar.CVAR_ARCHIVE};
     r_novis               = {'name': "r_novis",           'value':"0",        'flags': cvar.CVAR_ARCHIVE};
-    
+
     gl_finish             = {'name': "gl_finish",         'value':"0",        'flags': cvar.CVAR_NONE};
     gl_clear              = {'name': "gl_clear",          'value':"1",        'flags': cvar.CVAR_NONE};
     gl_cull               = {'name': "gl_cull",           'value':"1",        'flags': cvar.CVAR_NONE};
@@ -82,7 +82,7 @@ def gl_rmain_Init():
     gl_flashblend         = {'name': "gl_flashblend",     'value':"0",        'flags': cvar.CVAR_ARCHIVE};
     gl_playermip          = {'name': "gl_playermip",      'value':"0",        'flags': cvar.CVAR_NONE};
     gl_nocolors           = {'name': "gl_nocolors",       'value':"0",        'flags': cvar.CVAR_NONE};
-    
+
     r_stereo              = {'name': "r_stereo",          'value':"0",        'flags': cvar.CVAR_NONE};
     r_stereodepth         = {'name': "r_stereodepth",     'value':"128",      'flags': cvar.CVAR_NONE};
     r_clearcolor          = {'name': "r_clearcolor",      'value':"2",        'flags': cvar.CVAR_ARCHIVE};
@@ -98,10 +98,10 @@ def gl_rmain_Init():
     r_showbboxes          = {'name': "r_showbboxes",       'value': "0",      'flags': cvar.CVAR_NONE};
     r_lerpmodels          = {'name': "r_lerpmodels",       'value': "1",      'flags': cvar.CVAR_NONE};
     r_lerpmove            = {'name': "r_lerpmove",         'value': "1",      'flags': cvar.CVAR_NONE};
-    r_nolerp_list         = {'name': "r_nolerp_list",      'value': "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", 'flags' : cvar.CVAR_NONE} 
-    
+    r_nolerp_list         = {'name': "r_nolerp_list",      'value': "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", 'flags' : cvar.CVAR_NONE}
+
     r_noshadow_list       = {'name': "r_noshadow_list",    'value': "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", 'flags':cvar.CVAR_NONE};
-    
+
     r_lavaalpha           = {'name': "r_lavaalpha",        'value':"0",        'flags': cvar.CVAR_NONE};
     r_telealpha           = {'name': "r_telealpha",        'value':"0",        'flags': cvar.CVAR_NONE};
     r_slimealpha          = {'name': "r_slimealpha",       'value':"0",        'flags': cvar.CVAR_NONE};
@@ -159,8 +159,8 @@ def gl_rmain_Init():
     cvar.Cvar_RegisterVariable(r_slimealpha)
     cvar.Cvar_RegisterVariable(r_scale)
 
-    cvar.Cvar_SetCallback (gl_fullbrights, gl_rmisc.GL_Fullbrights_f)            
-    cvar.Cvar_SetCallback (gl_overbright,  gl_rmisc.GL_Overbright_f) 
+    cvar.Cvar_SetCallback (gl_fullbrights, gl_rmisc.GL_Fullbrights_f)
+    cvar.Cvar_SetCallback (gl_overbright,  gl_rmisc.GL_Overbright_f)
 
     cvar.Cvar_SetCallback (r_nolerp_list,   gl_rmisc.R_Model_ExtraFlags_List_f)
     cvar.Cvar_SetCallback (r_noshadow_list, gl_rmisc.R_Model_ExtraFlags_List_f)

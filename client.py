@@ -1,4 +1,4 @@
-#client.py 
+#client.py
 
 from enum import Enum
 import io
@@ -36,6 +36,12 @@ NAME_LENGTH  =   64
 
 SIGNONS = 4
 MAX_DLIGHTS = 64
+
+MAX_TEMP_ENTITIES   = 256     #johnfitz -- was 64
+MAX_STATIC_ENTITIES = 4096    #ericw -- was 512  #johnfitz -- was 128
+MAX_VISEDICTS       = 4096    # larger, now we support BSP2
+
+
 
 class dlight_t():
     def __init__(self):
@@ -81,7 +87,7 @@ class client_static_t():
         self.timedemo = False
         self.forcetrack = 0
         self.demofile: io.FileIO = None
-        
+
         self.td_lastframe  = 0
         self.td_startframe = 0
         self.td_starttime = 0.0
@@ -134,8 +140,8 @@ class client_state_t():
 
         self.last_received_message = 0.0
 
-        self.model_precache : List[gl_model.qmodel_t] = []
-        self.sound_precache : List[q_sound.sfx_s]     = []
+        self.model_precache : list[gl_model.qmodel_t] = []
+        self.sound_precache : list[q_sound.sfx_s]     = []
 
         self.mapname = ''
         self.levelname = ''
@@ -161,6 +167,4 @@ class client_state_t():
         self.protocol = 0
         self.protocolflags = 0
 
-cls : client_static_t = client_static_t()
-cl  : client_state_t  = client_state_t()
 

@@ -3,6 +3,7 @@
 import os, sys, io
 import sdl2
 
+import in_sdl
 import common
 import cvar
 import host
@@ -140,3 +141,11 @@ def Sys_FileType(path):
 def Sys_NumCPUS() -> int:
     return 1
 
+def Sys_SendKeyEvents():
+    #in_sdl.IN_Commands()
+    in_sdl.IN_SendKeyEvents()
+
+
+def Sys_Quit():
+    host.Host_Shutdown()
+    sys.exit(0)

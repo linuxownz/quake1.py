@@ -1,4 +1,4 @@
-#keys.py 
+#keys.py
 
 from __future__ import annotations
 from enum import Enum
@@ -9,6 +9,12 @@ import client
 import console
 import vid
 import menu
+
+class keydest_t(Enum):
+    key_game    = 0
+    key_console = 1
+    key_message = 2
+    key_menu    = 3
 
 # these are the key number
 K_TAB           = 9
@@ -131,125 +137,125 @@ MAX_KEYS        = 256
 
 keynames = [
 
-    {'TAB', K_TAB},
-    {'ENTER', K_ENTER},
-    {'ESCAPE', K_ESCAPE},
-    {'SPACE', K_SPACE},
-    {'BACKSPACE', K_BACKSPACE},
-    {'UPARROW', K_UPARROW},
-    {'DOWNARROW', K_DOWNARROW},
-    {'LEFTARROW', K_LEFTARROW},
-    {'RIGHTARROW', K_RIGHTARROW},
+    ('TAB', K_TAB),
+    ('ENTER', K_ENTER),
+    ('ESCAPE', K_ESCAPE),
+    ('SPACE', K_SPACE),
+    ('BACKSPACE', K_BACKSPACE),
+    ('UPARROW', K_UPARROW),
+    ('DOWNARROW', K_DOWNARROW),
+    ('LEFTARROW', K_LEFTARROW),
+    ('RIGHTARROW', K_RIGHTARROW),
 
-    {'ALT', K_ALT},
-    {'CTRL', K_CTRL},
-    {'SHIFT', K_SHIFT},
+    ('ALT', K_ALT),
+    ('CTRL', K_CTRL),
+    ('SHIFT', K_SHIFT),
 
-#  {'KP_NUMLOCK', K_KP_NUMLOCK},
-    {'KP_SLASH', K_KP_SLASH},
-    {'KP_STAR', K_KP_STAR},
-    {'KP_MINUS', K_KP_MINUS},
-    {'KP_HOME', K_KP_HOME},
-    {'KP_UPARROW', K_KP_UPARROW},
-    {'KP_PGUP', K_KP_PGUP},
-    {'KP_PLUS', K_KP_PLUS},
-    {'KP_LEFTARROW', K_KP_LEFTARROW},
-    {'KP_5', K_KP_5},
-    {'KP_RIGHTARROW', K_KP_RIGHTARROW},
-    {'KP_END', K_KP_END},
-    {'KP_DOWNARROW', K_KP_DOWNARROW},
-    {'KP_PGDN', K_KP_PGDN},
-    {'KP_ENTER', K_KP_ENTER},
-    {'KP_INS', K_KP_INS},
-    {'KP_DEL', K_KP_DEL},
+#  ('KP_NUMLOCK', K_KP_NUMLOCK),
+    ('KP_SLASH', K_KP_SLASH),
+    ('KP_STAR', K_KP_STAR),
+    ('KP_MINUS', K_KP_MINUS),
+    ('KP_HOME', K_KP_HOME),
+    ('KP_UPARROW', K_KP_UPARROW),
+    ('KP_PGUP', K_KP_PGUP),
+    ('KP_PLUS', K_KP_PLUS),
+    ('KP_LEFTARROW', K_KP_LEFTARROW),
+    ('KP_5', K_KP_5),
+    ('KP_RIGHTARROW', K_KP_RIGHTARROW),
+    ('KP_END', K_KP_END),
+    ('KP_DOWNARROW', K_KP_DOWNARROW),
+    ('KP_PGDN', K_KP_PGDN),
+    ('KP_ENTER', K_KP_ENTER),
+    ('KP_INS', K_KP_INS),
+    ('KP_DEL', K_KP_DEL),
 
-    {'F1', K_F1},
-    {'F2', K_F2},
-    {'F3', K_F3},
-    {'F4', K_F4},
-    {'F5', K_F5},
-    {'F6', K_F6},
-    {'F7', K_F7},
-    {'F8', K_F8},
-    {'F9', K_F9},
-    {'F10', K_F10},
-    {'F11', K_F11},
-    {'F12', K_F12},
+    ('F1', K_F1),
+    ('F2', K_F2),
+    ('F3', K_F3),
+    ('F4', K_F4),
+    ('F5', K_F5),
+    ('F6', K_F6),
+    ('F7', K_F7),
+    ('F8', K_F8),
+    ('F9', K_F9),
+    ('F10', K_F10),
+    ('F11', K_F11),
+    ('F12', K_F12),
 
-    {'INS', K_INS},
-    {'DEL', K_DEL},
-    {'PGDN', K_PGDN},
-    {'PGUP', K_PGUP},
-    {'HOME', K_HOME},
-    {'END', K_END},
+    ('INS', K_INS),
+    ('DEL', K_DEL),
+    ('PGDN', K_PGDN),
+    ('PGUP', K_PGUP),
+    ('HOME', K_HOME),
+    ('END', K_END),
 
-    {'COMMAND', K_COMMAND},
+    ('COMMAND', K_COMMAND),
 
-    {'MOUSE1', K_MOUSE1},
-    {'MOUSE2', K_MOUSE2},
-    {'MOUSE3', K_MOUSE3},
-    {'MOUSE4', K_MOUSE4},
-    {'MOUSE5', K_MOUSE5},
+    ('MOUSE1', K_MOUSE1),
+    ('MOUSE2', K_MOUSE2),
+    ('MOUSE3', K_MOUSE3),
+    ('MOUSE4', K_MOUSE4),
+    ('MOUSE5', K_MOUSE5),
 
-    {'JOY1', K_JOY1},
-    {'JOY2', K_JOY2},
-    {'JOY3', K_JOY3},
-    {'JOY4', K_JOY4},
+    ('JOY1', K_JOY1),
+    ('JOY2', K_JOY2),
+    ('JOY3', K_JOY3),
+    ('JOY4', K_JOY4),
 
-    {'AUX1', K_AUX1},
-    {'AUX2', K_AUX2},
-    {'AUX3', K_AUX3},
-    {'AUX4', K_AUX4},
-    {'AUX5', K_AUX5},
-    {'AUX6', K_AUX6},
-    {'AUX7', K_AUX7},
-    {'AUX8', K_AUX8},
-    {'AUX9', K_AUX9},
-    {'AUX10', K_AUX10},
-    {'AUX11', K_AUX11},
-    {'AUX12', K_AUX12},
-    {'AUX13', K_AUX13},
-    {'AUX14', K_AUX14},
-    {'AUX15', K_AUX15},
-    {'AUX16', K_AUX16},
-    {'AUX17', K_AUX17},
-    {'AUX18', K_AUX18},
-    {'AUX19', K_AUX19},
-    {'AUX20', K_AUX20},
-    {'AUX21', K_AUX21},
-    {'AUX22', K_AUX22},
-    {'AUX23', K_AUX23},
-    {'AUX24', K_AUX24},
-    {'AUX25', K_AUX25},
-    {'AUX26', K_AUX26},
-    {'AUX27', K_AUX27},
-    {'AUX28', K_AUX28},
-    {'AUX29', K_AUX29},
-    {'AUX30', K_AUX30},
-    {'AUX31', K_AUX31},
-    {'AUX32', K_AUX32},
+    ('AUX1', K_AUX1),
+    ('AUX2', K_AUX2),
+    ('AUX3', K_AUX3),
+    ('AUX4', K_AUX4),
+    ('AUX5', K_AUX5),
+    ('AUX6', K_AUX6),
+    ('AUX7', K_AUX7),
+    ('AUX8', K_AUX8),
+    ('AUX9', K_AUX9),
+    ('AUX10', K_AUX10),
+    ('AUX11', K_AUX11),
+    ('AUX12', K_AUX12),
+    ('AUX13', K_AUX13),
+    ('AUX14', K_AUX14),
+    ('AUX15', K_AUX15),
+    ('AUX16', K_AUX16),
+    ('AUX17', K_AUX17),
+    ('AUX18', K_AUX18),
+    ('AUX19', K_AUX19),
+    ('AUX20', K_AUX20),
+    ('AUX21', K_AUX21),
+    ('AUX22', K_AUX22),
+    ('AUX23', K_AUX23),
+    ('AUX24', K_AUX24),
+    ('AUX25', K_AUX25),
+    ('AUX26', K_AUX26),
+    ('AUX27', K_AUX27),
+    ('AUX28', K_AUX28),
+    ('AUX29', K_AUX29),
+    ('AUX30', K_AUX30),
+    ('AUX31', K_AUX31),
+    ('AUX32', K_AUX32),
 
-    {'PAUSE', K_PAUSE},
+    ('PAUSE', K_PAUSE),
 
-    {'MWHEELUP', K_MWHEELUP},
-    {'MWHEELDOWN', K_MWHEELDOWN},
+    ('MWHEELUP', K_MWHEELUP),
+    ('MWHEELDOWN', K_MWHEELDOWN),
 
-    {'SEMICOLON', ';'}, # because a raw semicolon seperates commands
+    ('SEMICOLON', ';'), # because a raw semicolon seperates commands
 
-    {'BACKQUOTE', '`'}, # because a raw backquote may toggle the console
-    {'TILDE', '~'},     # because a raw tilde may toggle the console
+    ('BACKQUOTE', '`'), # because a raw backquote may toggle the console
+    ('TILDE', '~'),     # because a raw tilde may toggle the console
 
-    {'LTHUMB', K_LTHUMB},
-    {'RTHUMB', K_RTHUMB},
-    {'LSHOULDER', K_LSHOULDER},
-    {'RSHOULDER', K_RSHOULDER},
-    {'ABUTTON', K_ABUTTON},
-    {'BBUTTON', K_BBUTTON},
-    {'XBUTTON', K_XBUTTON},
-    {'YBUTTON', K_YBUTTON},
-    {'LTRIGGER', K_LTRIGGER},
-    {'RTRIGGER', K_RTRIGGER},
-    {None,      0}
+    ('LTHUMB', K_LTHUMB),
+    ('RTHUMB', K_RTHUMB),
+    ('LSHOULDER', K_LSHOULDER),
+    ('RSHOULDER', K_RSHOULDER),
+    ('ABUTTON', K_ABUTTON),
+    ('BBUTTON', K_BBUTTON),
+    ('XBUTTON', K_XBUTTON),
+    ('YBUTTON', K_YBUTTON),
+    ('LTRIGGER', K_LTRIGGER),
+    ('RTRIGGER', K_RTRIGGER),
+    (None,      0)
 ]
 
 HISTORY_FILE_NAME = 'history.txt'
@@ -264,7 +270,7 @@ history_line = 0
 
 class keydest_t(Enum):
     key_game    = 0
-    key_console = 1 
+    key_console = 1
     key_message = 2
     key_menu    = 3
 
@@ -279,7 +285,7 @@ key_inputgrab : key_inputgrab_t =  key_inputgrab_t()
 
 key_dest = keydest_t.key_game
 
-keybindings : list[bool] = [False for _ in range(256)]
+keybindings : list[str]  = ["" for _ in range(MAX_KEYS)]
 consolekeys : list[bool] = [False for _ in range(256)]
 menubound   : list[bool] = [False for _ in range(256)]
 keydown     : list[bool] = [False for _ in range(256)]
@@ -296,7 +302,7 @@ def Key_EndChat():
 def History_Init():
     global key_lines
     try:
-        with open(f'{parms.userdir}/{HISTORY_FILE_NAME}', 'rt') as hf:
+        with open(f'{host.parms.userdir}/{HISTORY_FILE_NAME}', 'rt') as hf:
             key_lines = [ line.rstrip() for line in hf.readlines() ]
         key_lines.insert(0, ']')
     except:
@@ -319,24 +325,33 @@ def Key_TextEntry() -> bool:
             return False
 
 def Key_EventWithKeycode(key, down, keycode):
+    if not key:
+        return
+
     if key < 0 or key >= MAX_KEYS:
         return
-    
-    if down and ( key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
+
+    # 1. Handle Fullscreen Toggle (Alt + Enter)
+    if down and (key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
         vid.VID_Toggle()
         return
 
+    # 2. Maintain keydown state
+    # If the key is already down and we aren't in console, ignore repeats
     if down:
         if keydown[key]:
             if key_dest == keydest_t.key_game and not console.con_forcedup:
                 return
         elif key >= 200 and not keybindings[key]:
-            console.Con_Printf(f'{Key_KeynumToString(key)} is unbound, hit F4 to set\n')
+            # Optional: Notify about unbound mouse/joy keys
+            # console.Con_Printf(f'{Key_KeynumToString(key)} is unbound\n')
+            pass
     elif not keydown[key]:
-        return
+        return # Key was already up
 
     keydown[key] = down
 
+    # 3. Handle Input Grab (for binding keys in a menu)
     if key_inputgrab.active:
         if down:
             key_inputgrab.lastkey = key
@@ -344,73 +359,109 @@ def Key_EventWithKeycode(key, down, keycode):
                 key_inputgrab.lastchar = keycode
         return
 
+    # 4. Handle Escape Key (Priority)
     if key == K_ESCAPE:
         if not down:
             return
-        
+
+        # Shift + Escape toggles console
         if keydown[K_SHIFT]:
             console.Con_ToggleConsole_f()
             return
 
         match key_dest:
             case keydest_t.key_message:
-                Key_Message(key)
+                Key_EndChat()
             case keydest_t.key_menu:
                 menu.M_Keydown(key)
             case keydest_t.key_game | keydest_t.key_console:
                 menu.M_ToggleMenu_f()
-            case _:
-                Sys_Error('Bad key_dest')
-        
         return
-    
+
+    if key == ord('`') or key == ord('~'):
+        if down:
+            console.Con_ToggleConsole_f()
+        return
+
+
+    # 5. Handle Key Up Events
     if not down:
         kb = keybindings[key]
-        if kb and kb[0] == '+':
+        if kb and isinstance(kb, str) and kb.startswith('+'):
+            # Convert +moveup to -moveup
             cmd = f'-{kb[1:]} {key}\n'
-            Cbuf_AddText(cmd)
-        
+            _cmd.Cbuf_AddText(cmd)
         return
 
-    if client.cls.demoplayback and down and consolekeys[key] and key_dest == keydest_t.key_game and key != K_TAB:
-        menu.M_ToggleMenu_f()
+    # 6. Console Redirection
+    # If console is open and the key is a "console key" (typing character, enter, etc)
+    # redirect it to the console buffer instead of the game bindings.
+    if key_dest == keydest_t.key_console and consolekeys[key]:
+        Key_Console(key)
         return
 
-    if (key_dest == keydest_t.key_menu and menubound[key]) or (key_dest == keydest_t.key_console and not consolekeys[key]) or (key_dest == keydest_t.key_game and ( not console.con_forcedup or not consolekeys[key])):
-        kb = keybindings[key]
-        if kb:
-            if kb[0] == '+':
-                cmd = f'{kb} {key}\n'
-                Cbuf_AddText(cmd)
-            else:
-                Cbuf_AddText(kb)
-                Cbuf_AddText('\n')
+    # 7. Menu Redirection
+    if key_dest == keydest_t.key_menu and menubound[key]:
+        menu.M_Keydown(key)
         return
 
-    if not down:
+    # 8. Handle Game Bindings
+    # If we are here, the key is either for the game or it's a key
+    # the console/menu doesn't specifically claim.
+    kb = keybindings[key]
+    if kb:
+        if kb.startswith('+'):
+            # Action command (held down)
+            cmd = f'{kb} {key}\n'
+            _cmd.Cbuf_AddText(cmd)
+        else:
+            # Impulse/Instant command
+            _cmd.Cbuf_AddText(kb)
+            _cmd.Cbuf_AddText('\n')
         return
 
-    match key_dest:
-        case keydest_t.key_message:
-            Key_Message(key)
-        case keydest_t.key_menu:
-            menu.M_Keydown(key)
-        case keydest_t.key_game | keydest_t.key_console:
-            Key_Console(key)
-        case _:
-            Sys_Error('bad key_dest')
-
-        
+    # 9. Fallback for Chat/Message Mode
+    if key_dest == keydest_t.key_message and down:
+        # Key_Message(key) logic would go here
+        pass
 
 
+def Key_Init():
+    global consolekeys, menubound, key_blinktime
 
+    # Create clean lists of 256 False values
+    consolekeys = [False] * 256
+    menubound = [False] * 256
 
-    
+    # 1. Allow standard typing characters (Space through ~)
+    for i in range(32, 127):
+        consolekeys[i] = True
 
+    # 2. Toggle keys must be FALSE so they don't print characters
+    consolekeys[ord('`')] = False
+    consolekeys[ord('~')] = False
 
+    # 3. Special functional keys
+    special_keys = [
+        K_TAB, K_ENTER, K_ESCAPE, K_BACKSPACE, K_UPARROW, K_DOWNARROW,
+        K_LEFTARROW, K_RIGHTARROW, K_CTRL, K_SHIFT, K_INS, K_DEL,
+        K_PGDN, K_PGUP, K_HOME, K_END, K_KP_ENTER
+    ]
+    for k in special_keys:
+        consolekeys[k] = True
 
+    # Initialize menu keys
+    menubound[K_ESCAPE] = True
+    for i in range(12):
+        menubound[K_F1 + i] = True
 
+    History_Init()
+    key_blinktime = host.realtime
 
+    _cmd.Cmd_AddCommand('bindlist', Key_Bindlist_f)
+    _cmd.Cmd_AddCommand('bind', Key_Bind_f)
+    _cmd.Cmd_AddCommand('unbind', Key_Unbind_f)
+    _cmd.Cmd_AddCommand('unbindall', Key_Unbindall_f)
 
 def Key_Event(key, down):
     Key_EventWithKeycode(key, down, 0)
@@ -420,94 +471,35 @@ def Key_ClearStates():
         if keydown[i]:
             Key_Event(i, False)
 
-def Key_Init():
-    global consolekeys
-    global menubound
-
-    global key_blinktime
-
-    #from main_sdl import parms
-
-    History_Init()
-
-    key_blinktime = host.realtime
-
-    for i in range (256):
-        consolekeys.append(False)
-
-    for i in range(32, 127):
-        consolekeys[i] = True
-
-    consolekeys[ord('`')] = False;
-    consolekeys[ord('~')] = False;
-    consolekeys[K_TAB] = True;
-    consolekeys[K_ENTER] = True;
-    consolekeys[K_ESCAPE] = True;
-    consolekeys[K_BACKSPACE] = True;
-    consolekeys[K_UPARROW] = True;
-    consolekeys[K_DOWNARROW] = True;
-    consolekeys[K_LEFTARROW] = True;
-    consolekeys[K_RIGHTARROW] = True;
-    consolekeys[K_CTRL] = True;
-    consolekeys[K_SHIFT] = True;
-    consolekeys[K_INS] = True;
-    consolekeys[K_DEL] = True;
-    consolekeys[K_PGDN] = True;
-    consolekeys[K_PGUP] = True;
-    consolekeys[K_HOME] = True;
-    consolekeys[K_END] = True;
-    consolekeys[K_KP_NUMLOCK] = True;
-    consolekeys[K_KP_SLASH] = True;
-    consolekeys[K_KP_STAR] = True;
-    consolekeys[K_KP_MINUS] = True;
-    consolekeys[K_KP_HOME] = True;
-    consolekeys[K_KP_UPARROW] = True;
-    consolekeys[K_KP_PGUP] = True;
-    consolekeys[K_KP_PLUS] = True;
-    consolekeys[K_KP_LEFTARROW] = True;
-    consolekeys[K_KP_5] = True;
-    consolekeys[K_KP_RIGHTARROW] = True;
-    consolekeys[K_KP_END] = True;
-    consolekeys[K_KP_DOWNARROW] = True;
-    consolekeys[K_KP_PGDN] = True;
-    consolekeys[K_KP_ENTER] = True;
-    consolekeys[K_KP_INS] = True;
-    consolekeys[K_KP_DEL] = True;
-    consolekeys[K_MWHEELUP] = True;
-    consolekeys[K_MWHEELDOWN] = True;
-
-    for i in range (256):
-        menubound.append(False)
-
-    menubound[K_ESCAPE] = True
-    for i in range(12):
-        menubound[K_F1 + i] = True
-
-    _cmd.Cmd_AddCommand('bindlist', Key_Bindlist_f)
-    _cmd.Cmd_AddCommand('bind', Key_Bind_f)
-    _cmd.Cmd_AddCommand('unbind', Key_Unbind_f)
-    _cmd.Cmd_AddCommand('unbindall', Key_Unbindall_f)
-
 
 def Key_KeynumToString(keynum):
-    global keynames
-    if keynum == -1:
-        return '<KEY NOT FOUND>'
+    # 1. Handle standard printable characters
+    if 32 < keynum < 127:
+        return chr(keynum).upper()
 
-    if keynum > 32 and keynum < 127:
-        return chr(keynum)
+    # 2. Check the special names table
+    for name, num in keynames:
+        if num == keynum:
+            return name
 
-    for kn in keynames:
-        l = list(kn)
-        if l[1] == keynum:
-            return l[0]
-    
+    # 3. Fallback to raw number if not found
+    return str(keynum)
+
 def Key_StringToKeynum(string):
-    global keynames
-    for kn in keynames:
-        l = list(kn)
-        if l[0] == string:
-            return l[1]
+    if not string:
+        return -1
+
+    s_upper = string.upper()
+
+    # 1. Check special names (TAB, ENTER, etc)
+    for name, num in keynames:
+        if name == s_upper:
+            return num
+
+    # 2. Check single characters (A-Z)
+    if len(string) == 1:
+        return ord(s_upper)
+
     return -1
 
 def Key_Bindlist_f():
@@ -516,10 +508,10 @@ def Key_Bindlist_f():
 
     for i in range(MAX_KEYS):
         if keybindings[i]:
-            console.Con_SafePrintf(f'   {Key_KeynumToString(i)} {keybindings[i]}')
+            console.Con_Printf(f'   {Key_KeynumToString(i)} {keybindings[i]}')
             count += 1
 
-    console.Con_SafePrintf(f'{count} bindings')
+    console.Con_Printf(f'{count} bindings')
 
 def Key_SetBinding(keynum, binding):
     global keybindings
@@ -535,34 +527,39 @@ def Key_SetBinding(keynum, binding):
 
 
 def Key_Bind_f():
-    global keybindings
+    c = _cmd.Cmd_Argc()
 
-    c = Cmd_Argc()
-
-    if c != 2 and c != 3:
-        console.Con_Printf('bind <key> [command] : attach a command to a key')
+    if c < 2:
+        console.Con_Printf('bind <key> [command]\n')
         return
 
-    b = Key_StringToKeynum(Cmd_Argv(1))
+    # 1. Get the key and strip any leading/trailing quotes
+    key_name = _cmd.Cmd_Argv(1).strip('"')
+    b = Key_StringToKeynum(key_name)
+
     if b == -1:
-        console.Con_Printf(f'{Cmd_Argv(1)} isnt a valid key')
+        console.Con_Printf(f'"{key_name}" isn\'t a valid key\n')
         return
 
+    # 2. If only 2 args, show current binding
     if c == 2:
-        if keybindings[b]:
-            console.Con_Printf(f'{Cmd_Argv(1)} = {keybindings[b]}') 
+        binding = keybindings[b]
+        if binding:
+            console.Con_Printf(f'"{key_name}" = "{binding}"\n')
         else:
-            console.Con_Printf(f'{Cmd_Argv(1)} is unbound')
+            console.Con_Printf(f'"{key_name}" is not bound\n')
         return
 
-    cmd = ''
+    # 3. Join all remaining tokens for the command
+    # This handles "bind x say hello world" correctly
+    args_list = []
     for i in range(2, c):
-        cmd += Cmd_Argv(i)
+        args_list.append(_cmd.Cmd_Argv(i))
 
-        if i != (c-1):
-            cmd += ' '
+    # Join and clean quotes from the final command string
+    binding = " ".join(args_list).strip('"')
 
-    Key_SetBinding(b, cmd)
+    Key_SetBinding(b, binding)
 
 def Key_Unbind_f():
     if Cmd_Argc() != 2:
@@ -583,3 +580,63 @@ def Key_Unbindall_f():
             Key_SetBinding(i, '')
 
 
+def Key_Console(key):
+    global key_linepos
+
+    # Handle Backspace (127 or 8 depending on OS mapping)
+    if key == K_BACKSPACE or key == 8:
+        if len(console.con_input_buffer) > 0:
+            console.con_input_buffer = console.con_input_buffer[:-1]
+        return
+
+    # Handle Enter
+    if key == K_ENTER or key == K_KP_ENTER:
+        # Add a newline to the console log for the user to see
+        console.Con_Printf(f"] {console.con_input_buffer}\n")
+
+        # Pass to the command buffer to actually DO something
+        _cmd.Cbuf_AddText(f"{console.con_input_buffer}\n")
+
+        # Clear the input line
+        console.con_input_buffer = ""
+        return
+
+    # Handle standard characters
+    if isinstance(key, int):
+        if key < 32 or key > 127:
+            return
+        char = chr(key)
+    else:
+        char = key # already a string from Char_Event
+
+    # Ignore the console toggle key so it doesn't type ` into the console
+    if char == '`':
+        return
+
+    console.con_input_buffer += char
+
+
+def Char_Event(ch):
+    """
+    Called by in_sdl.py when SDL_TEXTINPUT is triggered.
+    This handles the actual translated character (like 'A' vs 'a').
+    """
+    if key_dest == keydest_t.key_console:
+        Key_Console(ch)
+
+def WriteBindings(file_handle):
+    """Writes all current key bindings to the opened config file."""
+    file_handle.write('// key bindings\n')
+
+    active_binds = []
+
+    for i in range(MAX_KEYS):
+        # Assuming keybindings is a list of strings parallel to your keycodes
+        if keybindings[i]:
+            key_name = Key_KeynumToString(i)
+            if key_name:
+                active_binds.append((key_name, keybindings[i]))
+
+    active_binds.sort()
+    for bind_name, command in active_binds:
+        file_handle.write(f'bind "{bind_name}" "{command}"\n')
