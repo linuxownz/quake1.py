@@ -39,7 +39,7 @@ oldrealtime = 0.0
 
 host_framecount = 0
 
-host_client : client_t = None
+host_client : quakedef.client_t = None
 
 host_colormap : bytes = b''
 
@@ -67,17 +67,17 @@ def Host_FindMaxClients():
 
     i = common.COM_CheckParm('-dedicated')
     if i:
-        cl_main.cls.state = client.cactive_t.ca_dedicated
+        cl_main.cls.state = quakedef.cactive_t.ca_dedicated
         if i != (com_argc - 1):
             sv_main.svs.maxclients = int(com_argv[i+1])
         else:
             sv_main.svs.maxclients = 8
     else:
-        cl_main.cls.state = client.cactive_t.ca_disconnected
+        cl_main.cls.state = quakedef.cactive_t.ca_disconnected
 
     i = common.COM_CheckParm('-listen')
     if i:
-        if cl_main.cls.state == client.cactive_t.ca_dedicated:
+        if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
             Sys_Error('only one of -dedicated or -listen may be specified')
         if i != (com_argc - 1):
             sv_main.svs.maxclients = int(com_argv[i+1])
@@ -196,7 +196,7 @@ def Host_Init():
 
     wad.W_LoadWadFile("gfx.wad")
 
-    if cl_main.cls.state != client.cactive_t.ca_dedicated:
+    if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
         keys.Key_Init()
         console.Con_Init()
 
@@ -206,7 +206,7 @@ def Host_Init():
     sv_main.SV_Init()
 
     global host_colormap
-    if cl_main.cls.state != client.cactive_t.ca_dedicated:
+    if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
         host_colormap = common.COM_LoadHunkFile('gfx/colormap.lmp')
         if host_colormap is None:
             Sys_Error('couldnt load gfx/colormap.lmp')
@@ -380,7 +380,7 @@ def Host_Shutdown():
 
     #net_main.NET_Shutdown()
 
-    if cl_main.cls.state != client.cactive_t.ca_dedicated:
+    if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
         if console.con_initialized:
             #History_Shutdown()
             pass

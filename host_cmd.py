@@ -894,9 +894,9 @@ def Host_Startdemos_f():
         return
 
     c = _cmd.Cmd_Argc() - 1
-    if c > client.MAX_DEMOS:
-        console.Con_Printf(f'max {client.MAX_DEMOS} demos in demoloop')
-        c = client.MAX_DEMOS
+    if c > quakedef.MAX_DEMOS:
+        console.Con_Printf(f'max {quakedef.MAX_DEMOS} demos in demoloop')
+        c = quakedef.MAX_DEMOS
 
     console.Con_Printf(f'{c} demos in loop')
 

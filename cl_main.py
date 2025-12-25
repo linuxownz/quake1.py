@@ -3,7 +3,6 @@
 from enum import Enum
 import keys
 import snd_dma
-import client
 import cl_main
 import cl_demo
 import _cmd
@@ -26,12 +25,12 @@ class cactive_t(Enum):
     ca_disconnected = 1
     ca_connected    = 2
 
-cls = client.client_static_t()
-cl  = client.client_state_t()
+cls = quakedef.client_static_t()
+cl  = quakedef.client_state_t()
 
-cl_static_entities                        = [None for _ in range(client.MAX_STATIC_ENTITIES)]
-cl_lightstyle : list[client.lightstyle_t] = [None for _ in range(quakedef.MAX_LIGHTSTYLES)]
-cl_dlights    : list[client.dlight_t]     = [None for _ in range(client.MAX_DLIGHTS)]
+cl_static_entities                        = [None for _ in range(quakedef.MAX_STATIC_ENTITIES)]
+cl_lightstyle : list[quakedef.lightstyle_t] = [None for _ in range(quakedef.MAX_LIGHTSTYLES)]
+cl_dlights    : list[quakedef.dlight_t]     = [None for _ in range(quakedef.MAX_DLIGHTS)]
 
 cl_entities = None
 
@@ -151,7 +150,7 @@ def CL_NextDemo():
     if cls.demonum == -1:
         return
 
-    if not cls.demos[cls.demonum] or cls.demonum == client.MAX_DEMOS:
+    if not cls.demos[cls.demonum] or cls.demonum == quakedef.MAX_DEMOS:
         cls.demonum = 0
         if not cls.demos[cls.demonum]:
             console.Con_Printf('no demos listed with startdemos')

@@ -1,7 +1,7 @@
 #gl_rmain.py
 
 import render
-import gl_model
+import quakedef
 
 modelorg    = [0, 0, 0]
 r_entorigin = [0, 0, 0]
@@ -11,7 +11,7 @@ currententity : render.entity_t = None
 r_visframecount = 0
 r_framecount = 0
 
-frustum : list[gl_model.mplane_t] = [ gl_model.mplane_t(0, 0, 0, 0) for i in range(4)]
+frustum : list[quakedef.mplane_t] = [ quakedef.mplane_t(0, 0, 0, 0) for i in range(4)]
 
 rs_brushpolys       = 0
 rs_aliaspolys       = 0
