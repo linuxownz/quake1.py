@@ -248,86 +248,56 @@ def TexMgr_PadConditional(s):
 
 
 def TexMgr_MipMapW(data: bytes, width: int, height: int) -> np.ndarray:
-
     np_data = np.frombuffer(data, dtype=np.uint8)
 
-    # --- Standard Validation and Calculation ---
+    # If width is 1, we can't downsample further horizontally
+    if width < 2:
+        return data
+
     total_bytes = width * height * 4
-    if np_data.size != total_bytes:
-        raise Exception()
-        # In a real application, you might raise an error here
-        # or handle partial rows/images.
-        pass
+
+    # Ensure we don't try to process more data than we have
+    if np_data.size < total_bytes:
+        return data
 
     num_input_bytes = (total_bytes // 8) * 8
     num_output_pixels = num_input_bytes // 8
 
-    # 2. Reshape the relevant input data (Vectorized process begins)
     try:
-        # Shape: (number of output pixels, 2 input pixels, 4 color components)
         in_view = np_data[:num_input_bytes].reshape(num_output_pixels, 2, 4)
-    except ValueError as e:
-        raise ValueError(f"Reshape failed: Check if W*H is an even number. Error: {e}")
+        summed_pixels = in_view.sum(axis=1, dtype=np.uint16)
+        out_pixels = (summed_pixels // 2).astype(np.uint8)
 
-    # 3. Perform the averaging
-    summed_pixels = in_view.sum(axis=1, dtype=np.uint16)
-    out_pixels = (summed_pixels // 2).astype(np.uint8)
-
-    # 4. Overwrite the first half of the original array (in-place modification)
-    # Since np_data is a view of the original bytes buffer (if possible),
-    # this modification happens in the memory buffer itself.
-    np_data[:num_output_pixels * 4] = out_pixels.flatten()
-
-    # 5. Return the modified NumPy array
-    return np_data.tobytes()
+        # We need a writable copy if the buffer is read-only
+        res = bytearray(data)
+        res[:num_output_pixels * 4] = out_pixels.flatten().tobytes()
+        return bytes(res)
+    except Exception:
+        return data
 
 def TexMgr_MipMapH(data, width, height):
-    data = np.frombuffer(data, dtype=np.uint8)
+    # If height is 1, we can't downsample further vertically
+    if height < 2:
+        return data
 
-    if data.dtype != np.uint8:
-        data = data.astype(np.uint8)
+    data_np = np.frombuffer(data, dtype=np.uint8)
+    expected_size = width * height * 4
 
-    # 1. Reshape the 1D data into a 3D structure: [Rows, Pixels_Per_Row, Components]
-    # We use -1 to let NumPy infer the number of rows.
-    # The image is treated as a stack of rows, where each row is W * 4 bytes.
-    data_reshaped = data.reshape(height, width, 4)
+    if len(data_np) < expected_size:
+        return data
 
-    # Check if the height is even, as vertical averaging requires pairs of rows
-    if height % 2 != 0:
-        # For an odd height, the last row cannot be averaged. We proceed with
-        # the largest even number of rows that fits.
-        print("Warning: Odd height, last row will be ignored for downsampling.")
-
+    data_reshaped = data_np[:expected_size].reshape(height, width, 4)
     new_height = height // 2
 
-    # 2. Reshape for vertical pairing
-    # We create a view of the first (2 * new_height) rows and reshape them into pairs.
-    # Shape: [new_height, 2, width, 4]
-    # new_height = Number of output rows
-    # 2 = The two rows being averaged (R_i and R_i+1)
-    # width = Pixels per row
-    # 4 = Components per pixel (RGBA)
     paired_rows = data_reshaped[:new_height * 2, ...].reshape(new_height, 2, width, 4)
-
-    # 3. Perform the vectorized averaging
-
-    # Sum the two rows (axis=1). Cast to uint16 to prevent overflow.
     summed_rows = paired_rows.sum(axis=1, dtype=np.uint16)
-
-    # Integer division by 2 (equivalent to C's '>> 1') and cast back to uint8.
     averaged_rows = (summed_rows // 2).astype(np.uint8)
 
-    # 4. Overwrite the first half of the original array (in-place modification)
-    # The output size is new_height * width * 4 bytes
-
-    # Calculate the total size of the output image in bytes
+    res = bytearray(data)
     output_size_bytes = new_height * width * 4
+    res[:output_size_bytes] = averaged_rows.flatten().tobytes()
 
-    # Overwrite the initial segment of the original 1D array
-    data[:output_size_bytes] = averaged_rows.flatten()
-
-    # Return the data (pointer equivalent)
-    return data.tobytes()
+    return bytes(res)
 
 def TexMgr_AlphaEdgeFix(data: bytes, width: int, height: int) -> bytes:
 
@@ -403,8 +373,6 @@ def TexMgr_AlphaEdgeFix(data: bytes, width: int, height: int) -> bytes:
     return data.tobytes()
 
 def TexMgr_LoadImage32(glt: gltexture_t, data):
-
-    #print(data)
     gl_picmip = cvar.Cvar_GetCvar('gl_picmip')
 
     if not gl_vidsdl.gl_texture_NPOT:
@@ -416,44 +384,44 @@ def TexMgr_LoadImage32(glt: gltexture_t, data):
     mipwidth  = TexMgr_SafeTextureSize(glt.width  >> picmip)
     mipheight = TexMgr_SafeTextureSize(glt.height >> picmip)
 
+    # Initial picmip reduction
     while glt.width > mipwidth:
         data = TexMgr_MipMapW(data, glt.width, glt.height)
-
         glt.width >>= 1
         if glt.flags & TEXPREF_ALPHA:
             TexMgr_AlphaEdgeFix(data, glt.width, glt.height)
 
     while glt.height > mipheight:
         data = TexMgr_MipMapH(data, glt.width, glt.height)
-
         glt.height >>= 1
         if glt.flags & TEXPREF_ALPHA:
             TexMgr_AlphaEdgeFix(data, glt.width, glt.height)
 
     GL_Bind(glt)
-
     internalformat = gl_alpha_format if glt.flags & TEXPREF_ALPHA else gl_solid_format
 
-    OpenGL.GL.glTexImage2D(OpenGL.GL.GL_TEXTURE_2D, 0, internalformat, glt.width, glt.height, 0, \
+    # Upload Level 0
+    OpenGL.GL.glTexImage2D(OpenGL.GL.GL_TEXTURE_2D, 0, internalformat, glt.width, glt.height, 0,
         OpenGL.GL.GL_RGBA, OpenGL.GL.GL_UNSIGNED_BYTE, data)
 
-    if glt.flags & TEXPREF_MIPMAP and not ( glt.flags & TEXPREF_WARPIMAGE):
-        mipwidth = glt.width
-        mipheight = glt.height
-
+    # Generate Mipmap Chain
+    if glt.flags & TEXPREF_MIPMAP and not (glt.flags & TEXPREF_WARPIMAGE):
+        m_width = glt.width
+        m_height = glt.height
         miplevel = 1
 
-        while mipwidth > 1 or mipheight > 1:
-            if mipwidth > 1:
-                TexMgr_MipMapW(data, mipwidth, mipheight)
-                mipwidth >>= 1
-            if mipheight > 1:
-                TexMgr_MipMapH(data, mipwidth, mipheight)
-                mipheight >>= 1
+        while m_width > 1 or m_height > 1:
+            if m_width > 1:
+                data = TexMgr_MipMapW(data, m_width, m_height)
+                m_width >>= 1
+            if m_height > 1:
+                data = TexMgr_MipMapH(data, m_width, m_height)
+                m_height >>= 1
 
-            OpenGL.GL.glTexImage2D(OpenGL.GL.GL_TEXTURE_2D, 0, internalformat, mipwidth, mipheight, 0, \
+            # UPLOAD TO miplevel, NOT 0
+            OpenGL.GL.glTexImage2D(OpenGL.GL.GL_TEXTURE_2D, miplevel, internalformat, m_width, m_height, 0,
                 OpenGL.GL.GL_RGBA, OpenGL.GL.GL_UNSIGNED_BYTE, data)
-
+            miplevel += 1
 
     TexMgr_SetFilterModes(glt)
 

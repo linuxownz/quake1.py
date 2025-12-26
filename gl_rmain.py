@@ -1,7 +1,13 @@
 #gl_rmain.py
 
+import OpenGL.GL as gl
+
+import console
+import r_brush
 import render
 import quakedef
+import cl_main
+import gl_rmain
 
 modelorg    = [0, 0, 0]
 r_entorigin = [0, 0, 0]
@@ -29,10 +35,10 @@ r_origin  = [0, 0, 0]
 r_fovx = 0.0
 r_fovy = 0.0
 
-r_refdef : render.refdef_t = None
+r_refdef : quakedef.refdef_t = quakedef.refdef_t()
 
-r_viewleaf    : gl_model.mleaf_t = None
-r_oldviewleaf : gl_model.mleaf_t = None
+r_viewleaf    : quakedef.mleaf_t = None
+r_oldviewleaf : quakedef.mleaf_t = None
 
 d_lightstylevalue = [ 0 for i in range(256)]
 
@@ -60,52 +66,52 @@ textureLoc = 0
 def gl_rmain_Init():
     import cvar
 
-    r_norefresh           = {'name': "r_norefresh",       'value':"0",        'flags': cvar.CVAR_NONE};
-    r_drawentities        = {'name': "r_drawentities",    'value':"1",        'flags': cvar.CVAR_NONE};
-    r_drawviewmodel       = {'name': "r_drawviewmodel",   'value':"1",        'flags': cvar.CVAR_NONE};
-    r_speeds              = {'name': "r_speeds",          'value':"0",        'flags': cvar.CVAR_NONE};
-    r_pos                 = {'name': "r_pos",             'value':"0",        'flags': cvar.CVAR_NONE};
-    r_fullbright          = {'name': "r_fullbright",      'value':"0",        'flags': cvar.CVAR_NONE};
-    r_lightmap            = {'name': "r_lightmap",        'value':"0",        'flags': cvar.CVAR_NONE};
-    r_shadows             = {'name': "r_shadows",         'value':"0",        'flags': cvar.CVAR_ARCHIVE};
-    r_wateralpha          = {'name': "r_wateralpha",      'value':"1",        'flags': cvar.CVAR_ARCHIVE};
-    r_litwater            = {'name': "r_litwater",        'value':"1",        'flags': cvar.CVAR_NONE};
-    r_dynamic             = {'name': "r_dynamic",         'value':"1",        'flags': cvar.CVAR_ARCHIVE};
-    r_novis               = {'name': "r_novis",           'value':"0",        'flags': cvar.CVAR_ARCHIVE};
+    r_norefresh           = {'name': "r_norefresh",       'value':"0",        'flags': cvar.CVAR_NONE}
+    r_drawentities        = {'name': "r_drawentities",    'value':"1",        'flags': cvar.CVAR_NONE}
+    r_drawviewmodel       = {'name': "r_drawviewmodel",   'value':"1",        'flags': cvar.CVAR_NONE}
+    r_speeds              = {'name': "r_speeds",          'value':"0",        'flags': cvar.CVAR_NONE}
+    r_pos                 = {'name': "r_pos",             'value':"0",        'flags': cvar.CVAR_NONE}
+    r_fullbright          = {'name': "r_fullbright",      'value':"0",        'flags': cvar.CVAR_NONE}
+    r_lightmap            = {'name': "r_lightmap",        'value':"0",        'flags': cvar.CVAR_NONE}
+    r_shadows             = {'name': "r_shadows",         'value':"0",        'flags': cvar.CVAR_ARCHIVE}
+    r_wateralpha          = {'name': "r_wateralpha",      'value':"1",        'flags': cvar.CVAR_ARCHIVE}
+    r_litwater            = {'name': "r_litwater",        'value':"1",        'flags': cvar.CVAR_NONE}
+    r_dynamic             = {'name': "r_dynamic",         'value':"1",        'flags': cvar.CVAR_ARCHIVE}
+    r_novis               = {'name': "r_novis",           'value':"0",        'flags': cvar.CVAR_ARCHIVE}
 
-    gl_finish             = {'name': "gl_finish",         'value':"0",        'flags': cvar.CVAR_NONE};
-    gl_clear              = {'name': "gl_clear",          'value':"1",        'flags': cvar.CVAR_NONE};
-    gl_cull               = {'name': "gl_cull",           'value':"1",        'flags': cvar.CVAR_NONE};
-    gl_smoothmodels       = {'name': "gl_smoothmodels",   'value':"1",        'flags': cvar.CVAR_NONE};
-    gl_affinemodels       = {'name': "gl_affinemodels",   'value':"0",        'flags': cvar.CVAR_NONE};
-    gl_polyblend          = {'name': "gl_polyblend",      'value':"1",        'flags': cvar.CVAR_NONE};
-    gl_flashblend         = {'name': "gl_flashblend",     'value':"0",        'flags': cvar.CVAR_ARCHIVE};
-    gl_playermip          = {'name': "gl_playermip",      'value':"0",        'flags': cvar.CVAR_NONE};
-    gl_nocolors           = {'name': "gl_nocolors",       'value':"0",        'flags': cvar.CVAR_NONE};
+    gl_finish             = {'name': "gl_finish",         'value':"0",        'flags': cvar.CVAR_NONE}
+    gl_clear              = {'name': "gl_clear",          'value':"1",        'flags': cvar.CVAR_NONE}
+    gl_cull               = {'name': "gl_cull",           'value':"1",        'flags': cvar.CVAR_NONE}
+    gl_smoothmodels       = {'name': "gl_smoothmodels",   'value':"1",        'flags': cvar.CVAR_NONE}
+    gl_affinemodels       = {'name': "gl_affinemodels",   'value':"0",        'flags': cvar.CVAR_NONE}
+    gl_polyblend          = {'name': "gl_polyblend",      'value':"1",        'flags': cvar.CVAR_NONE}
+    gl_flashblend         = {'name': "gl_flashblend",     'value':"0",        'flags': cvar.CVAR_ARCHIVE}
+    gl_playermip          = {'name': "gl_playermip",      'value':"0",        'flags': cvar.CVAR_NONE}
+    gl_nocolors           = {'name': "gl_nocolors",       'value':"0",        'flags': cvar.CVAR_NONE}
 
-    r_stereo              = {'name': "r_stereo",          'value':"0",        'flags': cvar.CVAR_NONE};
-    r_stereodepth         = {'name': "r_stereodepth",     'value':"128",      'flags': cvar.CVAR_NONE};
-    r_clearcolor          = {'name': "r_clearcolor",      'value':"2",        'flags': cvar.CVAR_ARCHIVE};
-    r_drawflat            = {'name': "r_drawflat",        'value':"0",        'flags': cvar.CVAR_NONE};
-    r_flatlightstyles     = {'name': "r_flatlightstyles", 'value': "0",       'flags': cvar.CVAR_NONE};
-    gl_fullbrights        = {'name': "gl_fullbrights",    'value': "1",       'flags': cvar.CVAR_ARCHIVE};
-    gl_farclip            = {'name': "gl_farclip",        'value': "65536",   'flags': cvar.CVAR_ARCHIVE};
-    gl_overbright         = {'name': "gl_overbright",     'value': "1",       'flags': cvar.CVAR_ARCHIVE};
-    gl_overbright_models  = {'name': "gl_overbright_models", 'value': "1",    'flags': cvar.CVAR_ARCHIVE};
-    r_oldskyleaf          = {'name': "r_oldskyleaf",       'value': "0",      'flags': cvar.CVAR_NONE};
-    r_drawworld           = {'name': "r_drawworld",        'value': "1",      'flags': cvar.CVAR_NONE};
-    r_showtris            = {'name': "r_showtris",         'value': "0",      'flags': cvar.CVAR_NONE};
-    r_showbboxes          = {'name': "r_showbboxes",       'value': "0",      'flags': cvar.CVAR_NONE};
-    r_lerpmodels          = {'name': "r_lerpmodels",       'value': "1",      'flags': cvar.CVAR_NONE};
-    r_lerpmove            = {'name': "r_lerpmove",         'value': "1",      'flags': cvar.CVAR_NONE};
+    r_stereo              = {'name': "r_stereo",          'value':"0",        'flags': cvar.CVAR_NONE}
+    r_stereodepth         = {'name': "r_stereodepth",     'value':"128",      'flags': cvar.CVAR_NONE}
+    r_clearcolor          = {'name': "r_clearcolor",      'value':"2",        'flags': cvar.CVAR_ARCHIVE}
+    r_drawflat            = {'name': "r_drawflat",        'value':"0",        'flags': cvar.CVAR_NONE}
+    r_flatlightstyles     = {'name': "r_flatlightstyles", 'value': "0",       'flags': cvar.CVAR_NONE}
+    gl_fullbrights        = {'name': "gl_fullbrights",    'value': "1",       'flags': cvar.CVAR_ARCHIVE}
+    gl_farclip            = {'name': "gl_farclip",        'value': "65536",   'flags': cvar.CVAR_ARCHIVE}
+    gl_overbright         = {'name': "gl_overbright",     'value': "1",       'flags': cvar.CVAR_ARCHIVE}
+    gl_overbright_models  = {'name': "gl_overbright_models", 'value': "1",    'flags': cvar.CVAR_ARCHIVE}
+    r_oldskyleaf          = {'name': "r_oldskyleaf",       'value': "0",      'flags': cvar.CVAR_NONE}
+    r_drawworld           = {'name': "r_drawworld",        'value': "1",      'flags': cvar.CVAR_NONE}
+    r_showtris            = {'name': "r_showtris",         'value': "0",      'flags': cvar.CVAR_NONE}
+    r_showbboxes          = {'name': "r_showbboxes",       'value': "0",      'flags': cvar.CVAR_NONE}
+    r_lerpmodels          = {'name': "r_lerpmodels",       'value': "1",      'flags': cvar.CVAR_NONE}
+    r_lerpmove            = {'name': "r_lerpmove",         'value': "1",      'flags': cvar.CVAR_NONE}
     r_nolerp_list         = {'name': "r_nolerp_list",      'value': "progs/flame.mdl,progs/flame2.mdl,progs/braztall.mdl,progs/brazshrt.mdl,progs/longtrch.mdl,progs/flame_pyre.mdl,progs/v_saw.mdl,progs/v_xfist.mdl,progs/h2stuff/newfire.mdl", 'flags' : cvar.CVAR_NONE}
 
-    r_noshadow_list       = {'name': "r_noshadow_list",    'value': "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", 'flags':cvar.CVAR_NONE};
+    r_noshadow_list       = {'name': "r_noshadow_list",    'value': "progs/flame2.mdl,progs/flame.mdl,progs/bolt1.mdl,progs/bolt2.mdl,progs/bolt3.mdl,progs/laser.mdl", 'flags':cvar.CVAR_NONE}
 
-    r_lavaalpha           = {'name': "r_lavaalpha",        'value':"0",        'flags': cvar.CVAR_NONE};
-    r_telealpha           = {'name': "r_telealpha",        'value':"0",        'flags': cvar.CVAR_NONE};
-    r_slimealpha          = {'name': "r_slimealpha",       'value':"0",        'flags': cvar.CVAR_NONE};
-    r_scale               = {'name': "r_scale",            'value': "1",       'flags': cvar.CVAR_ARCHIVE};
+    r_lavaalpha           = {'name': "r_lavaalpha",        'value':"0",        'flags': cvar.CVAR_NONE}
+    r_telealpha           = {'name': "r_telealpha",        'value':"0",        'flags': cvar.CVAR_NONE}
+    r_slimealpha          = {'name': "r_slimealpha",       'value':"0",        'flags': cvar.CVAR_NONE}
+    r_scale               = {'name': "r_scale",            'value': "1",       'flags': cvar.CVAR_ARCHIVE}
 
     import gl_rmisc
     import gl_vidsdl
@@ -172,3 +178,84 @@ def gl_rmain_Init():
     cvar.Cvar_SetCallback (r_slimealpha, gl_rmisc.R_SetSlimealpha_f)
 
 
+def R_SetView():
+    import OpenGL.GL as gl
+    import OpenGL.GLU as glu
+
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
+    # Use a wide FOV to help find the geometry
+    glu.gluPerspective(90, 640/480, 4, 8192)
+
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+    gl.glLoadIdentity()
+
+    # 1. Convert Quake coordinates to OpenGL coordinates
+    # Rotate -90 degrees around X to make Z "Up"
+    gl.glRotatef(-90, 1, 0, 0)
+    # Rotate 90 degrees around Z to align X as "Forward"
+    gl.glRotatef(90, 0, 0, 1)
+
+
+
+    # 2. Apply Player View Angles (Pitch, Yaw, Roll)
+    angles = cl_main.cl.viewangles
+
+    # Ensure we have at least 3 elements to avoid IndexError
+    pitch = angles[0] if len(angles) > 0 else 0
+    yaw   = angles[1] if len(angles) > 1 else 0
+    roll  = angles[2] if len(angles) > 2 else 0
+
+    gl.glRotatef(-roll, 1, 0, 0)  # Roll
+    gl.glRotatef(-pitch, 0, 1, 0) # Pitch
+    gl.glRotatef(-yaw, 0, 0, 1)   # Yaw
+
+  # 3. Translate to Camera Position
+    # We must move the WORLD in the opposite direction of the player
+    origin = cl_main.cl.vieworg
+
+    # Create the 'Eye' position by adding Quake's view height (22 units)
+    # This keeps the player origin at the feet for physics but eye for rendering
+    eye_x = origin[0]
+    eye_y = origin[1]
+    eye_z = origin[2] + 22.0  # The Quake standard offset
+
+    # Move the world in the opposite direction
+    gl.glTranslatef(-eye_x, -eye_y, -eye_z)
+
+def R_RenderView():
+    global r_visframecount
+
+    if not cl_main.cl or not cl_main.cl.worldmodel:
+        return
+
+    r_visframecount += 1
+
+    # 1. Sync camera data
+    gl_rmain.r_refdef.vieworg = list(cl_main.cl.vieworg)
+    gl_rmain.r_refdef.viewangles = list(cl_main.cl.viewangles)
+
+    # 2. CLEAR AND SETUP (Must happen before drawing)
+    gl.glClearColor(0.3, 0.5, 0.9, 1.0)
+    gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+    gl.glEnable(gl.GL_DEPTH_TEST)
+    gl.glDepthFunc(gl.GL_LEQUAL)
+    gl.glEnable(gl.GL_CULL_FACE)
+    gl.glFrontFace(gl.GL_CW)
+    gl.glCullFace(gl.GL_BACK)
+
+    # 3. SET CAMERA
+    R_SetView()
+
+    # 4. DRAW
+    r_brush.r_visframecount = r_visframecount
+    r_brush.r_refdef = gl_rmain.r_refdef
+    r_brush.r_worldmodel = cl_main.cl.worldmodel
+
+    # Use the debug drawer for now to verify coordinates
+    #r_brush.R_DrawWorldDebug(cl_main.cl.worldmodel)
+
+    # Once debug works, you can uncomment this:
+    r_brush.R_RecursiveWorldNode(cl_main.cl.worldmodel.nodes[0])
+
+    console.Con_DrawConsole()

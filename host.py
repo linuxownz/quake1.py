@@ -1,11 +1,10 @@
 #host.py
 import os
 import sys
-import ctypes
 
 import chase
-import client
 import cl_main
+import client
 import _cmd
 import common
 import console
@@ -16,15 +15,14 @@ import gl_texmgr
 import gl_vidsdl
 import gl_rmisc
 import gl_screen
+import quakedef
 import host_cmd
 import host
 import in_sdl
 import keys
 import menu
 import net_main
-import net_main
 import pr_edict
-import quakedef
 import snd_dma
 import sv_main
 import sys_sdl_unix
@@ -242,10 +240,34 @@ def Host_Init():
         if not sv_main.sv.active:
             _cmd.Cbuf_AddText ("map start\n")
 
-
+    _cmd.Cbuf_AddText("map start\n")
+    _cmd.cmd_source = _cmd.cmd_source_t.src_command
+    _cmd.Cbuf_Execute()
 
     keys.key_dest = keys.keydest_t.key_console
     #raise NotImplementedError
+
+    # --- MANUAL RENDERER TRAP ---
+
+
+    print("DEBUG: Manually loading world for renderer...")
+
+    # 1. Load the BSP through the model manager
+    # This WILL call Mod_LoadBrushModel if implemented in gl_model.py
+    world = gl_model.Mod_ForName("maps/start.bsp")
+
+    if world:
+        # 2. Assign it directly to the client
+        cl_main.cl.worldmodel = world
+
+        # 3. Force the state to 'connected' so R_RenderView runs
+        cl_main.cls.state = quakedef.cactive_t.ca_connected
+
+        # 4. Set a starting position so we aren't at [0,0,0] (inside a wall)
+        cl_main.cl.vieworg = [0, 0, 50]
+        print("DEBUG: World assigned. Renderer should now fire.")
+    else:
+        print("DEBUG: Failed to load maps/start.bsp. Check file path!")
 
 
 def SV_ClientPrintf(msg):
@@ -321,6 +343,8 @@ def _Host_Frame(time):
     host_speeds = cvar.Cvar_GetCvar('host_speeds')
     if int(host_speeds.value):
         time1 = sys_sdl_unix.Sys_DoubleTime()
+
+    cl_main.CL_Move(time)
 
     gl_screen.SCR_UpdateScreen()
 
@@ -440,3 +464,9 @@ def Host_Error(error):
     cl_main.cl.intermission = 0
 
     inerror = False
+
+def Host_ShutdownServer(arg):
+    print('not implemented')
+    return
+
+    raise NotImplementedError

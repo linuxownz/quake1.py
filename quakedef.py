@@ -2,7 +2,6 @@
 
 from enum import Enum
 
-
 VERSION = 1.09
 GLQUAKE_VERSION = 1.00
 D3DQUAKE_VERSION = 0.01
@@ -139,6 +138,11 @@ MAX_SCOREBOARD = 16
 MAX_SCOREBOARDNAME = 32
 SOUND_CHANNELS = 8
 
+CONTENTS_SOLID = -2
+
+LMBLOCK_WIDTH = 128
+LMBLOCK_HEIGHT = 128
+
 class quakeparms_t():
     def __init__(self):
         self.basedir = ''
@@ -168,6 +172,17 @@ EF_QEX_CANDLELIGHT = 64
 
 
 # --- Classes ---
+
+class dmodel_t:
+    def __init__(self):
+        self.mins = [0,0,0]
+        self.maxs = [0,0,0]
+        self.origin = [0,0,0]
+        self.headnode = [0,0,0,0]
+        self.visleafs = 0
+        self.firstface = 0
+        self.numfaces = 0
+
 class mvertex_t():
     def __init__(self, position):
         self.position : list[float] = position
@@ -234,6 +249,7 @@ class mtexinfo_t():
     def __init__(self):
         self.vecs = [[0., 0., 0., 0.], [0., 0., 0., 0.]]
         self.texture : Optional[texture_t] = None
+        self.flags = 0
 
 VERTEXSIZE = 7
 
@@ -260,8 +276,32 @@ class msurface_t():
         self.polys : Optional[glpoly_t] = None
         self.texturechain : Optional['msurface_t'] = None
         self.texinfo : Optional[mtexinfo_t] = None
-        self.lightofs = -1 # Added this to match bspfile.py
-        self.lightmap_texture = 0 # GPU handle for lightmap
+        self.styles = [0, 0, 0, 0]
+        self.lightofs = -1
+        self.lightmap_texture = 0
+
+class mnode_t():
+    def __init__(self):
+        self.contents = 0             # 0 or greater for nodes
+        self.parent = None            # Set by Mod_SetParent
+        self.plane = None             # Pointer to mplane_t
+        self.children = [None, None]  # Set to Node or Leaf objects by Mod_SetParent
+        self.mins = [0, 0, 0]
+        self.maxs = [0, 0, 0]
+        self.firstface = 0
+        self.numfaces = 0
+
+class mleaf_t():
+    def __init__(self):
+        self.contents = -1            # Negative for leaves (e.g., CONTENTS_SOLID)
+        self.parent = None            # Set by Mod_SetParent
+        self.mins = [0, 0, 0]
+        self.maxs = [0, 0, 0]
+        self.firstmarksurface = 0
+        self.nummarksurface = 0
+        self.visofs = 0               # Offset into visdata for PVS
+        self.ambient_sound_levels = [0, 0, 0, 0]
+
 
 class qmodel_t:
     def __init__(self):
@@ -311,6 +351,8 @@ class qmodel_t:
 
         # Sync/Loading metadata
         self.needload = False     # For async loading if implemented
+        self.submodels = []       # List of dmodel_t (Submodel info)
+        self.numsubmodels = 0
 
 
 class lightstyle_t():
@@ -418,9 +460,9 @@ class client_state_t():
         self.prev_cshifts : list[cshift_t] = []
 
         self.mviewangles  = [[0, 0, 0], [0, 0, 0]]
-        self.viewangles   = []
+        self.viewangles   = [0, 0, 0]
         self.mvelocity    = [[0, 0, 0], [0, 0, 0]]
-        self.velocity     = []
+        self.velocity     = [0, 0, 0]
 
         self.punchangle   = []
 
@@ -448,7 +490,7 @@ class client_state_t():
         self.last_received_message = 0.0
 
         self.model_precache : list[qmodel_t] = []
-        self.sound_precache : list[sfx_s]     = []
+        self.sound_precache : list[sfx_s]    = []
 
         self.mapname = ''
         self.levelname = ''
@@ -474,4 +516,18 @@ class client_state_t():
         self.protocol = 0
         self.protocolflags = 0
 
+class modtype_t(Enum):
+    mod_brush = 0
+    mod_sprite = 1
+    mod_alias = 2
 
+
+# quakedef.py
+
+class refdef_t:
+    def __init__(self):
+        self.vieworg = [0.0, 0.0, 0.0]    # Player camera position (Origin)
+        self.viewangles = [0.0, 0.0, 0.0] # Player rotation (Pitch, Yaw, Roll)
+        self.fov_x = 90.0
+        self.fov_y = 0.0
+        # Add matrix or frustum data here later for culling

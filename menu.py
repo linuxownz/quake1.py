@@ -140,7 +140,7 @@ def M_Menu_Load_f():
 
     m_entersound = True
     m_state = m_state_e.m_load
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     M_ScanSaves()
 
@@ -158,7 +158,7 @@ def M_Menu_Save_f():
     m_entersound = True
     m_state = m_state_e.m_save
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
 
     M_ScanSaves()
@@ -170,7 +170,7 @@ def M_Menu_Setup_f():
     global setup_hostname
     global setup_top, setup_bottom, setup_oldtop, setup_oldbottom
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_setup
     m_entersound = True
@@ -184,7 +184,7 @@ def M_Menu_Setup_f():
 def M_Menu_Options_f():
     global m_state, m_entersound
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_options
     m_entersound = True
@@ -192,7 +192,7 @@ def M_Menu_Options_f():
 def M_Menu_Keys_f():
     global m_state, m_entersound
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_options
     m_entersound = True
@@ -200,7 +200,7 @@ def M_Menu_Keys_f():
 def M_Menu_Help_f():
     global m_state, m_entersound, help_page
 
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_state = m_state_e.m_help
     m_entersound = True
@@ -216,7 +216,7 @@ def M_Menu_Quit_f():
         return
 
     wasInMenus = (keys.key_dest == keys.keydest_t.key_menu)
-    IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
+    in_sdl.IN_Deactivate(gl_vidsdl.modestate == gl_vidsdl.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
     m_quit_prestate = m_state
     m_state = m_state_e.m_quit

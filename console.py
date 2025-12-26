@@ -1,4 +1,4 @@
-#console.py 
+#console.py
 
 import sys
 from datetime import datetime
@@ -38,7 +38,7 @@ con_backscroll = 0
 con_current    = 0
 con_x          = 0
 con_text       = None
-con_input_buffer = "" 
+con_input_buffer = ""
 
 con_lastcenterstring = ''
 
@@ -57,7 +57,7 @@ def LOG_Init():
 
     if '-condebug' in sys.argv:
         con_debuglog = True
-    
+
     if not con_debuglog:
         return
 
@@ -84,27 +84,27 @@ def Con_Printf(text):
         print('con_text is None\n')
         return
 
-    cols = 80 
+    cols = 80
     # Handle multiple lines if the text contains \n
     lines = text.split('\n')
-    
+
     for line in lines:
         if line == "" and text.count('\n') == 0:
             continue
-            
+
         # 1. Scroll: Move everything up by one line
         con_text[:-cols] = con_text[cols:]
-        
+
         # 2. Clear the bottom line
         con_text[-cols:] = b' ' * cols
-        
+
         # 3. Write the current line to the bottom
         last_line_start = (con_totallines - 1) * cols
         for i, char in enumerate(line[:cols-1]):
             con_text[last_line_start + i] = ord(char)
-    
+
     print(text.strip())
-    
+
 def Con_Warning(msg):
     print('Warning: ', msg)
 
@@ -113,7 +113,7 @@ def Con_DPrintf(msg):
 
 def Con_ToggleConsole_f():
     global console_is_open
-    
+
     # Use the global state from keys.py
     if keys.key_dest == keys.keydest_t.key_console:
         # Close console
@@ -130,19 +130,19 @@ def Con_MessageMode_f():
 
     if cl_main.cls.state != client.cactive_t.ca_connected or cl_main.cls.demoplayback:
         return
-    
+
     keys.chat_team = False
     key_dest = keys.keydest_t.key_message
-    
+
 def Con_MessageMode2_f():
     global key_dest
 
     if cl_main.cls.state != client.cactive_t.ca_connected or cl_main.cls.demoplayback:
         return
-    
+
     keys.chat_team = True
     key_dest = keys.keydest_t.key_message
- 
+
 def Con_Clear_f():
     global con_text
     if con_text is not None:
@@ -165,7 +165,7 @@ def Con_Init():
 
     global con_initialized
     global con_linewidth
-    global con_backscroll 
+    global con_backscroll
     global con_current
     global con_totallines
     global con_text
@@ -174,7 +174,7 @@ def Con_Init():
     con_columns =   80
     con_backscroll = 0
     con_totallines = 1000
-    
+
 
     # Fill the buffer with spaces (ASCII 32) so it looks empty
     con_text = bytearray([32] * (con_totallines * con_columns))
@@ -197,12 +197,12 @@ def Con_Init():
 
 def Con_DrawConsole():
     global con_text, con_displaylines, con_totallines, con_input_buffer
-    
+
     if con_displaylines <= 0 or con_text is None:
         return
 
     # 1. Background (Slides down from top)
-    gl_draw.Draw_Fill(0, 0, 640, con_displaylines, 200) 
+    gl_draw.Draw_Fill(0, 0, 640, con_displaylines, 200)
 
     # 2. Draw History
     # We want the text to "stick" to the bottom of the sliding console
@@ -213,11 +213,11 @@ def Con_DrawConsole():
             line_data = con_text[start:start+80].decode('ascii', 'replace')
         except:
             continue
-        
+
         # Calculate Y relative to the current bottom (con_displaylines)
         # Newest history line is 16px above the prompt
         text_y = (con_displaylines - 24) - ((24 - i) * 8)
-        
+
         if text_y >= 0:
             gl_draw.Draw_String(8, text_y, line_data)
 
@@ -231,11 +231,11 @@ def Con_DrawConsole():
         # Draw the prompt symbol ']' followed by your typed buffer
         full_input_line = "]" + con_input_buffer
         gl_draw.Draw_String(8, prompt_y, full_input_line)
-        
+
         # Draw the blinking cursor at the end of the text
         # Logic: 8 pixels per character (prompt + buffer length)
         cursor_x = 8 + (len(full_input_line)) * 8
-        
+
         # Simple blink based on system time
         if int(host.realtime * 2) % 2 == 0:
             gl_draw.Draw_Character(cursor_x, prompt_y, 11) # 11 is the Quake cursor
@@ -243,9 +243,9 @@ def Con_DrawConsole():
 
 def Con_CheckResize():
     global con_displaylines, console_is_open
-    
+
     target = 200 if console_is_open else 0
-    
+
     if con_displaylines < target:
         con_displaylines += CON_SPEED
         if con_displaylines > target:

@@ -94,3 +94,26 @@ def SV_Init():
             return
 
     sys_sdl_unix.Sys_Printf(f'Server using protocol {sv_protocol} {p}')
+
+
+# sv_main.py
+
+sv_active = False
+
+def SV_SpawnServer(mapname):
+    global sv_active
+    import gl_model
+    import cl_main
+
+    print(f"SV_SpawnServer (Stub): Loading {mapname}...")
+
+    # Just load the model and flip the bit
+    full_path = f"maps/{mapname}.bsp"
+    mod = gl_model.Mod_ForName(full_path)
+
+    if mod:
+        cl_main.cl.worldmodel = mod
+        sv_active = True
+        return True
+
+    return False

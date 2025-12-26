@@ -3,7 +3,6 @@
 import _cmd
 import client
 import cvar
-import view
 import quakedef
 
 v_punchangles = []; #johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous valu

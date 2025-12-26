@@ -188,25 +188,51 @@ def IN_SendKeyEvents():
                 down = (event.key.state == sdl2.SDL_PRESSED)
                 key = IN_SDL2_ScancodeToQuakeKey(event.key.keysym.scancode)
 
-                # --- NEW CONVERSION LOGIC ---
-                # If 'key' is a string (like 'a' or '`'), convert it to its integer ASCII value
                 if isinstance(key, str):
                     key = ord(key)
 
+                # 1. ALWAYS handle the console toggle first
+                # 96 is the ASCII for ` (backquote)
+                if key == 96:
+                    keys.Key_Event(key, down)
+                    continue
+
+                if keys.key_dest == keys.keydest_t.key_game:
+                    down = (event.key.state == sdl2.SDL_PRESSED)
+
+                    # --- STRAFING (A/D) ---
+                    if key == ord('w'):
+                        client.in_forward.state = (client.in_forward.state | 1 | 2) if down else (client.in_forward.state & ~1)
+                    elif key == ord('s'):
+                        client.in_back.state = (client.in_back.state | 1 | 2) if down else (client.in_back.state & ~1)
+                    elif key == ord('a'):
+                        client.in_strafe_left.state = (client.in_strafe_left.state | 1 | 2) if down else (client.in_strafe_left.state & ~1)
+                    elif key == ord('d'):
+                        client.in_strafe_right.state = (client.in_strafe_right.state | 1 | 2) if down else (client.in_strafe_right.state & ~1)
+
+                    # --- TURNING (Arrow Keys) ---
+                    if key == keys.K_LEFTARROW:
+                        client.in_turn_left.state = (client.in_turn_left.state | 1) if down else 0
+                    elif key == keys.K_RIGHTARROW:
+                        client.in_turn_right.state = (client.in_turn_right.state | 1) if down else 0
+                    elif key == keys.K_UPARROW:
+                        client.in_pitch_up.state = (client.in_pitch_up.state | 1) if down else 0
+                    elif key == keys.K_DOWNARROW:
+                        client.in_pitch_down.state = (client.in_pitch_down.state | 1) if down else 0
+
+                # 2. If console is open, handle navigation keys
                 if keys.key_dest == keys.keydest_t.key_console:
                     control_keys = (
                         keys.K_ENTER, keys.K_ESCAPE, keys.K_BACKSPACE,
                         keys.K_UPARROW, keys.K_DOWNARROW,
                         keys.K_LEFTARROW, keys.K_RIGHTARROW,
-                        keys.K_TAB, 96, 126 # These are already integers
+                        keys.K_TAB
                     )
-
                     if key in control_keys:
                         keys.Key_Event(key, down)
-
                     continue
 
-                # Standard gameplay path
+                # 3. Standard gameplay path
                 if key:
                     keys.Key_EventWithKeycode(key, down, event.key.keysym.sym)
 

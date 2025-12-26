@@ -8,8 +8,10 @@ import console
 import common
 import sv_main
 import menu
+import in_sdl
 import _cmd
 import net_main
+import gl_screen
 import host
 import quakedef
 import host_cmd
@@ -212,46 +214,46 @@ def Host_Fly_f():
             console.Con_Printf('fly [value] : toggle fly mode. values 0=off, 1=on\n')
 
 def Host_Map_f():
-    if Cmd_Argc() < 2:
-        if cls.state == ca_dedicated:
-            if sv.active:
+    if _cmd.Cmd_Argc() < 2:
+        if cl_main.cls.state == cl_main.cactive_t.ca_dedicated:
+            if sv_main.sv.active:
                 console.Con_Printf(f'Current map {sv.name}')
             else:
                 console.Con_Printf('server not active')
-        elif cls.state == ca_connected:
+        elif cl_main.cls.state == cl_main.cactive_t.ca_connected:
             console.Con_Printf(f'Current map {cl.levelname} {cl.mapname}')
         else:
             console.Con_Printf('map <levelname>: start a new server')
         return
 
-    if _cmd.cmd != src_command:
+    if _cmd.cmd_source != _cmd.cmd_source_t.src_command:
         return
 
-    cls.demonum = -1
+    cl_main.cls.demonum = -1
 
-    CL_Disconnect()
-    Host_ShutdownServer(False)
+    cl_main.CL_Disconnect()
+    host.Host_ShutdownServer(False)
 
-    if cls.state != ca_dedicated:
-        IN_Activate()
+    if cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
+        in_sdl.IN_Activate()
 
-    key_dest = key_game
-    SCR_BeginLoadingPlaque()
+    keys.key_dest = keys.keydest_t.key_game
+    gl_screen.SCR_BeginLoadingPlaque()
 
-    svs.serverflags = 0
-    name = Cmd_Argv(1)
+    sv_main.svs.serverflags = 0
+    name = _cmd.Cmd_Argv(1)
 
     name.strip('.bsp')
 
-    SV_SpawnServer(name)
+    sv_main.SV_SpawnServer(name)
 
-    if not sv_active:
+    if not sv_main.sv.active:
         return
 
-    if cls.state != ca_dedicated:
-        for i in range (Cmd_Argc()):
-            cls.spawnparms += Cmd_Argv(i)
-        Cmd_ExecuteString ('connect local', src_command)
+    if cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
+        for i in range (common.Cmd_Argc()):
+            cl_main.cls.spawnparms += common.Cmd_Argv(i)
+        _cmd.Cmd_ExecuteString ('connect local', _cmd.cmd_source_t.src_command)
 
 
 def Host_Restart_f():

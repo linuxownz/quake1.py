@@ -1,4 +1,4 @@
-#!/usr/bin/python 
+#!/usr/bin/python
 # main_sdl.py for main_sdl.c
 
 import sys
@@ -83,6 +83,8 @@ def main():
             time = newtime - oldtime
 
             host.Host_Frame(time)
+
+            #sdl2.SDL_GL_SwapWindow(gl_vidsdl.draw_context)
 
             if time < sys_throttle and not cl_main.cls.timedemo:
                 sdl2.SDL_Delay(1)

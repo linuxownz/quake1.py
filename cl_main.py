@@ -1,9 +1,12 @@
 #cl_main.py
 
 from enum import Enum
+import math
+
 import keys
 import snd_dma
 import cl_main
+import client
 import cl_demo
 import _cmd
 import console
@@ -163,3 +166,40 @@ def CL_NextDemo():
     demoname = f'playdemo {cls.demos[cls.demonum]}\n'
     _cmd.Cbuf_InsertText(demoname)
     cls.demonum += 1
+
+def CL_Move(time_step):
+    if keys.key_dest != keys.keydest_t.key_game:
+        return
+
+    # 1. Update Angles (Rotation)
+    turn_speed = 140.0 * time_step
+    if client.in_turn_left.state & 1:   cl_main.cl.viewangles[1] += turn_speed
+    if client.in_turn_right.state & 1:  cl_main.cl.viewangles[1] -= turn_speed
+    if client.in_pitch_up.state & 1:    cl_main.cl.viewangles[0] -= turn_speed
+    if client.in_pitch_down.state & 1:  cl_main.cl.viewangles[0] += turn_speed
+
+    # Clamp Pitch to prevent looking too far up/down
+    cl_main.cl.viewangles[0] = max(-80, min(80, cl_main.cl.viewangles[0]))
+
+    # 2. Update Position (Translation)
+    movespeed = 400.0 * time_step
+    yaw_rad = math.radians(cl_main.cl.viewangles[1])
+
+    # Forward/Back Vector
+    fwd_move = 0
+    if client.in_forward.state & 1: fwd_move += 1
+    if client.in_back.state & 1:    fwd_move -= 1
+
+    # Strafe Vector
+    side_move = 0
+    if client.in_strafe_right.state & 1: side_move += 1
+    if client.in_strafe_left.state & 1:  side_move -= 1
+
+    # Apply math to the origin (vieworg)
+    # Forward calculation
+    cl_main.cl.vieworg[0] += math.cos(yaw_rad) * fwd_move * movespeed
+    cl_main.cl.vieworg[1] += math.sin(yaw_rad) * fwd_move * movespeed
+
+    # Strafe calculation (90 degrees off the yaw)
+    cl_main.cl.vieworg[0] += math.cos(yaw_rad - math.pi/2) * side_move * movespeed
+    cl_main.cl.vieworg[1] += math.sin(yaw_rad - math.pi/2) * side_move * movespeed

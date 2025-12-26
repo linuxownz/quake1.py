@@ -14,6 +14,7 @@ import wad
 import vid
 import _cmd
 import gl_draw
+import gl_rmain
 import gl_vidsdl
 import sys_sdl_unix
 
@@ -211,35 +212,28 @@ def SCR_Init():
     scr_initialized = True
 
 def SCR_UpdateScreen():
-    # 1. Clear to a dark color
-    gl.glClearColor(0.1, 0.1, 0.2, 1.0)
-    gl.glClear(gl.GL_COLOR_BUFFER_BIT | gl.GL_DEPTH_BUFFER_BIT)
+    # 1. Draw the 3D World first
+    # This function handles its own clearing (the blue sky) and 3D projection
+    gl_rmain.R_RenderView()
 
-    # 2. Setup the 2D Viewport using the _vid object
-    # These are the actual hardware pixel dimensions of the window
+    # 2. NOW setup the 2D Viewport/Projection for the overlay
     gl.glViewport(0, 0, gl_vidsdl._vid.width, gl_vidsdl._vid.height)
-
-    # 3. Setup the Projection (The "Virtual" Screen)
     gl.glMatrixMode(gl.GL_PROJECTION)
     gl.glLoadIdentity()
-    # Virtual 640x480 coordinate system
-
-    # We use -10 to 10 for the Z-range instead of -1 to 1
-    # This gives OpenGL more breathing room to avoid clipping
     gl.glOrtho(0, 640, 480, 0, -10, 10)
-
 
     gl.glMatrixMode(gl.GL_MODELVIEW)
     gl.glLoadIdentity()
 
-    # 4. Global 2D States
+    # 3. Global 2D States (Ensure we draw ON TOP of the 3D world)
     gl.glDisable(gl.GL_DEPTH_TEST)
     gl.glEnable(gl.GL_BLEND)
     gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
 
-    # 5. Draw
+    # 4. Draw the Console last so it covers the world
     console.Con_DrawConsole()
 
+    # 5. Finally, show the result
     gl_vidsdl.VID_SwapBuffers()
 
 # Inside your frame update logic

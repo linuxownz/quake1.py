@@ -1,30 +1,40 @@
-# gl_model.py
+#gl_model.py
 
-# from enum import Enum
-# from typing import Optional # Required for Optional type hints
-
+import struct
+import bspfile
+import host
+import common
 import sys_sdl_unix
 import quakedef
+import modelgen
+import spritegen
+import r_brush
 
 MAX_MOD_KNOWN = 2048
-mod_known : list[qmodel_t] = [None] * MAX_MOD_KNOWN
+mod_known: list[quakedef.qmodel_t] = [None] * MAX_MOD_KNOWN
 mod_numknown = 0
 
 r_notexture_mip = None
-r_notexture_mip2 = None
+loadmodel: quakedef.qmodel_t = None
+loadname = ''
 
-
-# --- Verbs ---
+# --- Geometry Verbs ---
 
 def GL_BuildPolygon(model, face):
+    """Converts BSP face into a GL-friendly 7-float vertex array."""
+    # This logic stays here because it is part of the GL frontend
     tex = face.texinfo
-    poly = glpoly_t()
+    # Assume glpoly_t is defined in quakedef or locally
+    class glpoly_t:
+        def __init__(self):
+            self.numverts = 0
+            self.verts = []
 
+    poly = glpoly_t()
     verts = []
     mins = [99999, 99999]
     maxs = [-99999, -99999]
 
-    # 1. Gather verts and find texture boundaries
     for i in range(face.numedges):
         e_idx = model.surfedges[face.firstedge + i]
         v_idx = model.edges[e_idx].v[0] if e_idx >= 0 else model.edges[-e_idx].v[1]
@@ -37,21 +47,17 @@ def GL_BuildPolygon(model, face):
             if val < mins[j]: mins[j] = val
             if val > maxs[j]: maxs[j] = val
 
-    # 2. Store lightmap extents
     face.texturemins = [int(mins[0] // 16), int(mins[1] // 16)]
     face.extents = [int(maxs[0] // 16) - int(mins[0] // 16),
                     int(maxs[1] // 16) - int(mins[1] // 16)]
 
-    # 3. Build 7-float vertex array [x, y, z, s1, t1, s2, t2]
     poly.numverts = len(verts)
     for v in verts:
-        # Texture coordinates
         s1 = (v[0] * tex.vecs[0][0] + v[1] * tex.vecs[0][1] +
               v[2] * tex.vecs[0][2] + tex.vecs[0][3]) / tex.texture.width
         t1 = (v[0] * tex.vecs[1][0] + v[1] * tex.vecs[1][1] +
               v[2] * tex.vecs[1][2] + tex.vecs[1][3]) / tex.texture.height
 
-        # Lightmap coordinates (Normalized 0.0 to 1.0 for the patch texture)
         s2 = (v[0] * tex.vecs[0][0] + v[1] * tex.vecs[0][1] +
               v[2] * tex.vecs[0][2] + tex.vecs[0][3])
         s2 = (s2 - face.texturemins[0] * 16 + 8) / ((face.extents[0] + 1) * 16)
@@ -65,6 +71,9 @@ def GL_BuildPolygon(model, face):
     face.polys = poly
 
 def Mod_SetTextureChain(model):
+    """Links faces to textures for efficient batch rendering."""
+    if not model.textures:
+        return
     for tex in model.textures:
         tex.texturechains = []
 
@@ -73,38 +82,109 @@ def Mod_SetTextureChain(model):
             continue
         face.texinfo.texture.texturechains.append(face)
 
+# --- High Level Loaders ---
 
+def Mod_LoadBrushModel(mod, buffer):
+    """Wrapper that calls the BSP parser and then prepares GL data."""
+    global loadmodel
+    loadmodel = mod
+    loadmodel.type = quakedef.modtype_t.mod_brush
+
+    # DELEGATE: All struct.unpack logic for BSP is in bspfile.py
+    bspfile.Mod_LoadModel(loadmodel, buffer)
+
+    # POST-PROCESS: Prepare GL data now that the raw bytes are parsed
+    for face in loadmodel.faces:
+        GL_BuildPolygon(loadmodel, face)
+        r_brush.R_BuildLightmap(loadmodel, face)
+
+    Mod_SetTextureChain(loadmodel)
+    return loadmodel
+
+def Mod_LoadAliasModel(mod, buffer):
+    """Wrapper that calls the MDL parser."""
+    global loadmodel
+    loadmodel = mod
+    # Delegate to modelgen.py
+    modelgen.Mod_UnpackAliasModel(loadmodel, buffer)
+    return loadmodel
+
+def Mod_LoadSpriteModel(mod, buffer):
+    """Wrapper that calls the SPR parser."""
+    global loadmodel
+    loadmodel = mod
+    # Delegate to spritegen.py
+    spritegen.Mod_UnpackSpriteModel(loadmodel, buffer)
+    return loadmodel
+
+# --- System Management ---
+
+def Mod_LoadModel(mod, crash):
+    global loadname, loadmodel
+
+    if not mod.needload:
+        return mod
+
+    buf = common.COM_LoadStackFile(mod.name)
+    if not buf:
+        if crash:
+            host.Host_Error(f'Mod_LoadModel: {mod.name} not found')
+        return None
+
+    loadname = common.COM_FileBase(mod.name)
+    loadmodel = mod
+    mod.needload = False
+
+    # Get header to determine type
+    mod_type = struct.unpack("<I", buf[:4])[0]
+
+    if mod_type == modelgen.IDPOLYHEADER:
+        return Mod_LoadAliasModel(mod, buf)
+    elif mod_type == spritegen.IDSPRITEHEADER:
+        return Mod_LoadSpriteModel(mod, buf)
+    else:
+        # Defaults to BSP
+        return Mod_LoadBrushModel(mod, buf)
 
 def Mod_Init():
-    """Initializes the model loading subsystem."""
     global r_notexture_mip
-
-    # Create a dummy texture to use when a real one is missing
-    # This prevents the engine from crashing on bad texture lookups
     r_notexture_mip = quakedef.texture_t("notexture", 16, 16)
-
-    # In a full engine, we would also clear the model list here
     print("Model Subsystem Initialized.")
-
 
 def Mod_FindName(name):
     global mod_numknown
-    if not name:
-        sys_sdl_unix.Sys_Error('Mod_FindName: name is None')
+    for i in range(mod_numknown):
+        if mod_known[i].name == name:
+            return mod_known[i]
 
-    for i in range( mod_numknown ):
-        mod = mod_known[i]
-        if mod.name == name:
-            break
+    if mod_numknown == MAX_MOD_KNOWN:
+        sys_sdl_unix.Sys_Error('mod_numknown == MAX_MOD_KNOWN')
 
-    if i == mod_numknown:
-        if mod_numknown == MAX_MOD_KNOWN:
-            sys_sdl_unix.Sys_Error('mod_numknown == MAX_MOD_KNOWN')
-        mod.name = name
-        mod.needload = True
-        mod_numknown += 1
+    mod = quakedef.qmodel_t()
+    mod.name = name
+    mod.needload = True
+    mod_known[mod_numknown] = mod
+    mod_numknown += 1
+    return mod
 
+#def Mod_ForName(name, crash):
+#    mod = Mod_FindName(name)
+#    return Mod_LoadModel(mod, crash)
 
-def Mod_ForName(name, crash):
-    mod = Mod_FindName(name)
-    return Mod_LoadModel(mod, crash)
+def Mod_ForName(name):
+    # Check cache first (optional for now)
+
+    # Load the raw data
+    import common
+    buffer = common.COM_LoadHunkFile(name)
+    if not buffer:
+        return None
+
+    mod = quakedef.qmodel_t()
+    mod.name = name
+
+    # Identify if it's a BSP (The 'Brush' model)
+    if name.endswith('.bsp'):
+        Mod_LoadBrushModel(mod, buffer)
+
+    return mod
