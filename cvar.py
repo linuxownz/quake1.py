@@ -27,9 +27,12 @@ class cvar_t():
 __cvars: list[cvar_t] = []
 
 def Cvar_List_f():
-    for cvar in __cvars:
-        print(cvar.name, cvar.string, cvar.flags, cvar.value, cvar.default_string)
-
+    arg = _cmd.Cmd_Argv(1)
+    for cvar in sorted(__cvars, key=lambda x: x.name):
+        if arg and not cvar.name.startswith(arg):
+            continue
+        console.Con_Printf('%s %s %i %f %s' % (cvar.name, cvar.string, cvar.flags, cvar.value, cvar.default_string))
+    console.Con_Printf(f'{len(__cvars)} cvars defined\n')
 
 def Cvar_Toggle_f():
     pass
@@ -50,13 +53,17 @@ def Cvar_ResetCfg_f():
     pass
 
 def Cvar_Init():
-    _cmd.Cmd_AddCommand('cvar_list', Cvar_List_f)
+    _cmd.Cmd_AddCommand('cvarlist', Cvar_List_f)
     _cmd.Cmd_AddCommand('toggle', Cvar_Toggle_f)
     _cmd.Cmd_AddCommand('cycle', Cvar_Cycle_f)
     _cmd.Cmd_AddCommand('inc', Cvar_Inc_f)
     _cmd.Cmd_AddCommand('reset', Cvar_Reset_f)
     _cmd.Cmd_AddCommand('resetall', Cvar_ResetAll_f)
     _cmd.Cmd_AddCommand('resetcfg', Cvar_ResetCfg_f)
+
+def Cvar_VariableValue(varname):
+    var = Cvar_FindVar(varname)
+    return var.value
 
 
 def Cvar_FindVar(name) -> cvar_t:

@@ -25,10 +25,12 @@ import net_main
 import pr_edict
 import snd_dma
 import sv_main
+import server
 import sys_sdl_unix
 import view
 import wad
 import zone
+import sbar
 
 host_initialized = False
 host_frametime = 0.0
@@ -37,7 +39,7 @@ oldrealtime = 0.0
 
 host_framecount = 0
 
-host_client : quakedef.client_t = None
+host_client : server.client_t = None
 
 host_colormap : bytes = b''
 
@@ -222,7 +224,7 @@ def Host_Init():
         gl_screen.SCR_Init()
         gl_rmisc.R_Init()
         #snd_dma.S_Init()
-        #Sbar_Init()
+        sbar.Sbar_Init()
         cl_main.CL_Init()
 
     global host_initialized
@@ -245,29 +247,29 @@ def Host_Init():
     _cmd.Cbuf_Execute()
 
     keys.key_dest = keys.keydest_t.key_console
-    #raise NotImplementedError
+    ###raise NotImplementedError
 
-    # --- MANUAL RENDERER TRAP ---
+    ### --- MANUAL RENDERER TRAP ---
 
 
-    print("DEBUG: Manually loading world for renderer...")
+    ##print("DEBUG: Manually loading world for renderer...")
 
-    # 1. Load the BSP through the model manager
-    # This WILL call Mod_LoadBrushModel if implemented in gl_model.py
-    world = gl_model.Mod_ForName("maps/start.bsp")
+    ### 1. Load the BSP through the model manager
+    ### This WILL call Mod_LoadBrushModel if implemented in gl_model.py
+    ##world = gl_model.Mod_ForName("maps/start.bsp")
 
-    if world:
-        # 2. Assign it directly to the client
-        cl_main.cl.worldmodel = world
+    ##if world:
+    ##    # 2. Assign it directly to the client
+    ##    cl_main.cl.worldmodel = world
 
-        # 3. Force the state to 'connected' so R_RenderView runs
-        cl_main.cls.state = quakedef.cactive_t.ca_connected
+    ##    # 3. Force the state to 'connected' so R_RenderView runs
+    ##    cl_main.cls.state = quakedef.cactive_t.ca_connected
 
-        # 4. Set a starting position so we aren't at [0,0,0] (inside a wall)
-        cl_main.cl.vieworg = [0, 0, 50]
-        print("DEBUG: World assigned. Renderer should now fire.")
-    else:
-        print("DEBUG: Failed to load maps/start.bsp. Check file path!")
+    ##    # 4. Set a starting position so we aren't at [0,0,0] (inside a wall)
+    ##    cl_main.cl.vieworg = [0, 0, 50]
+    ##    print("DEBUG: World assigned. Renderer should now fire.")
+    ##else:
+    ##    print("DEBUG: Failed to load maps/start.bsp. Check file path!")
 
 
 def SV_ClientPrintf(msg):
@@ -316,14 +318,18 @@ def _Host_Frame(time):
     if not Host_FilterTime(time):
         return
 
-
     console.Con_CheckResize()
 
     # --- Input and Commands (Uncomment these as you implement the modules) ---
-    # keys.Key_UpdateForDest()
-    in_sdl.IN_SendKeyEvents() #sys_sdl_unix.Sys_SendKeyEvents()
+    keys.Key_UpdateForDest()
+    in_sdl.IN_UpdateInputMode()
+    sys_sdl_unix.Sys_SendKeyEvents()
+
+    in_sdl.IN_Commands()# not implemented.  joystick functionality
+
     _cmd.Cbuf_Execute()
-    # net_main.NET_Poll()
+
+    net_main.NET_Poll()
 
     if sv_main.sv.active:
         cl_main.CL_SendCmd()
@@ -343,6 +349,8 @@ def _Host_Frame(time):
     host_speeds = cvar.Cvar_GetCvar('host_speeds')
     if int(host_speeds.value):
         time1 = sys_sdl_unix.Sys_DoubleTime()
+
+    in_sdl.IN_MouseMove()
 
     cl_main.CL_Move(time)
 

@@ -1,4 +1,4 @@
-#server.py 
+#server.py
 
 from enum import Enum
 from enum import Flag, auto
@@ -28,7 +28,7 @@ class client_t():
         self.netconnection:net_defs.qsocket_t = None
 
         self.cmd : protocol.usercmd_t = None
-        self.wishdir: List[float] = [0., 0., 0.]
+        self.wishdir: list[float] = [0., 0., 0.]
 
         self.message = bytearray()
         self.msgbug = bytearray()
@@ -42,24 +42,20 @@ class client_t():
 
         self.ping_times = []
         self.num_pings = 0
-        
-        self.spawn_parms :List[float]= []
+
+        self.spawn_parms : list[float]= []
 
         self.old_frags = 0
-
-
-
-        
 
 
 class server_static_t():
     def __init__(self):
         self.maxclients = 0
         self.maxclientslimit = 0
-        self.clients : List[client_t]= []
+        self.clients : list[client_t]= []
         self.serverflags = 0
         self.changelevel_issued = False
-        
+
 
 class server_state_t(Enum):
     ss_loading = 0
@@ -80,7 +76,7 @@ class server_t():
 
         self.worldmodel: gl_model.qmodel_t = None
         self.model_precache = ''
-        self.models: List[gl_model.qmodel_t] = []
+        self.models: list[gl_model.qmodel_t] = []
 
         self.sound_precache = ''
         self.lightstyles = ''
@@ -88,20 +84,20 @@ class server_t():
         self.num_edicts = 0
         self.max_edicts = 0
 
-        self.edicts : List[progs.edict_t] = []
+        self.edicts : list[progs.edict_t] = []
 
         self.state : server.server_state_t = server_state_t.ss_loading
-        
+
         self.datagram = bytearray()
         self.datagram_buf = bytearray()
 
         self.signon: bytearray = bytearray()
         self.num_signon_buffers = 0
-        self.signon_buffers : List[bytearray] = []
-        
+        self.signon_buffers : list[bytearray] = []
+
         self.protocol = 0
         self.protocolflags = 0
 
-        
 
-        
+
+

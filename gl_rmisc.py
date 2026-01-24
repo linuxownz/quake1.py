@@ -162,82 +162,16 @@ def R_Init():
     _cmd.Cmd_AddCommand('pointfile', R_ReadPointFile_f)
 
     import gl_rmain
-
     gl_rmain.gl_rmain_Init()
 
-    # # cvars in gl_rmisc
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_norefresh)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_lightmap)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_fullbright)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_drawentities)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_drawviewmodel)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_shadows)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_wateralpha)
-    # cvar.Cvar_SetCallback (gl_rmain.r_wateralpha, R_SetWateralpha_f)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_litwater)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_dynamic)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_novis)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_speeds)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_pos)
-
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_finish)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_clear)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_cull)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_smoothmodels)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_affinemodels)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_polyblend)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_flashblend)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_playermip)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_nocolors)
-
-    # #johnfitz -- new cvars
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_stereo)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_stereodepth)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_clearcolor)
-    # cvar.Cvar_SetCallback (gl_rmain.r_clearcolor, R_SetClearColor_f)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_waterquality)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_oldwater)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_waterwarp)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_drawflat)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_flatlightstyles)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_oldskyleaf)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_drawworld)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_showtris)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_showbboxes)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_farclip)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_fullbrights)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_overbright)
-    # cvar.Cvar_SetCallback (gl_rmain.gl_fullbrights, GL_Fullbrights_f)
-    # cvar.Cvar_SetCallback (gl_rmain.gl_overbright, GL_Overbright_f)
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_overbright_models)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_lerpmodels)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_lerpmove)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_nolerp_list)
-    # cvar.Cvar_SetCallback (gl_rmain.r_nolerp_list, R_Model_ExtraFlags_List_f)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_noshadow_list)
-    # cvar.Cvar_SetCallback (gl_rmain.r_noshadow_list, R_Model_ExtraFlags_List_f)
-    # #johnfitz
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_lightmapwide)
-    # cvar.Cvar_SetROM ("r_lightmapwide", "1" if gl_vidsdl.gl_packed_pixels else "0")
-
-    # cvar.Cvar_RegisterVariable (gl_rmain.gl_zfix) # QuakeSpasm z-fighting fix
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_lavaalpha)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_telealpha)
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_slimealpha)
-
-    # cvar.Cvar_RegisterVariable (gl_rmain.r_scale)
-    # cvar.Cvar_SetCallback (gl_rmain.r_lavaalpha, R_SetLavaalpha_f)
-    # cvar.Cvar_SetCallback (gl_rmain.r_telealpha, R_SetTelealpha_f)
-    # cvar.Cvar_SetCallback (gl_rmain.r_slimealpha, R_SetSlimealpha_f)
-
     r_part.R_InitParticles ()
-    R_SetClearColor_f (None); #johnfitz
+    R_SetClearColor_f (None) #johnfitz
 
     from gl_sky import Sky_Init
-    Sky_Init (); #johnfitz
+    Sky_Init () #johnfitz
 
     from gl_fog import Fog_Init
-    Fog_Init (); #johnfitz
+    Fog_Init () #johnfitz
 
 
 def GL_ClearBufferBindings():

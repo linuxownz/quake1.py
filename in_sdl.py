@@ -8,6 +8,7 @@ import sdl2.ext
 import ctypes
 
 # import cvar
+import cl_main
 import client
 import keys
 import common
@@ -148,11 +149,26 @@ def IN_StartupJoystick():
 
 def IN_MouseMotion(dx, dy):
     global total_dx, total_dy
-    if not windowhasfocus:
-        dx = dy = 0
 
-    total_dx += dx
-    total_dy += dy
+    # 1. Check console state
+    if keys.key_dest != keys.keydest_t.key_game:
+        return
+
+    # 2. Use the parameters 'dx' and 'dy' passed from SDL
+    # Instead of total_dx, use the actual movement 'dx'
+    sensitivity = 3.0
+    m_yaw = 0.022
+    m_pitch = 0.022
+
+    # 3. Apply directly to the angles
+    cl_main.cl.viewangles[1] -= dx * sensitivity * m_yaw
+    cl_main.cl.viewangles[0] -= dy * sensitivity * m_pitch
+
+    # 4. Clamp Pitch
+    if cl_main.cl.viewangles[0] > 80:
+        cl_main.cl.viewangles[0] = 80
+    elif cl_main.cl.viewangles[0] < -70:
+        cl_main.cl.viewangles[0] = -70
 
 def IN_SendKeyEvents():
     import cvar
@@ -222,11 +238,17 @@ def IN_SendKeyEvents():
 
                 # 2. If console is open, handle navigation keys
                 if keys.key_dest == keys.keydest_t.key_console:
+
+                    if keys.keydown[keys.K_CTRL]:
+                        if key == ord('l'):
+                            console.Con_Clear_f()
+
                     control_keys = (
                         keys.K_ENTER, keys.K_ESCAPE, keys.K_BACKSPACE,
                         keys.K_UPARROW, keys.K_DOWNARROW,
                         keys.K_LEFTARROW, keys.K_RIGHTARROW,
-                        keys.K_TAB
+                        keys.K_TAB, keys.K_PGUP, keys.K_PGDN,
+                        keys.K_CTRL, keys.K_ALT
                     )
                     if key in control_keys:
                         keys.Key_Event(key, down)
@@ -414,22 +436,25 @@ def IN_MouseMove():
     # We use the cached cl_sensitivity object we created in IN_Init
     # We'll also define m_yaw and m_pitch (Quake defaults)
     import cvar
+
+    cl_sensitivity = float(cvar.Cvar_GetCvar('sensitivity').value)
+
     m_yaw = cvar.Cvar_VariableValue('m_yaw') if cvar.Cvar_FindVar('m_yaw') else 0.022
     m_pitch = cvar.Cvar_VariableValue('m_pitch') if cvar.Cvar_FindVar('m_pitch') else 0.022
 
     # 3. Apply the scaling: (Delta * Sensitivity * QuakeConstant)
     # The cl_sensitivity.value is updated LIVE by your console logic
-    view_x = total_dx * cl_sensitivity.value * m_yaw
-    view_y = total_dy * cl_sensitivity.value * m_pitch
+    view_x = total_dx * cl_sensitivity * m_yaw
+    view_y = total_dy * cl_sensitivity * m_pitch
 
     # 4. Apply to the client's view angles
     # Index 1 is Yaw (Left/Right), Index 0 is Pitch (Up/Down)
-    client.cl.viewangles[1] -= view_x
-    client.cl.viewangles[0] += view_y
+    cl_main.cl.viewangles[1] -= view_x
+    cl_main.cl.viewangles[0] += view_y
 
     # 5. Clamp the pitch so the player can't flip upside down
-    if client.cl.viewangles[0] > 80:  client.cl.viewangles[0] = 80
-    if client.cl.viewangles[0] < -70: client.cl.viewangles[0] = -70
+    if cl_main.cl.viewangles[0] > 80:  cl_main.cl.viewangles[0] = 80
+    if cl_main.cl.viewangles[0] < -70: cl_main.cl.viewangles[0] = -70
 
     # 6. RESET the accumulation for the next frame
     total_dx = 0
@@ -465,3 +490,26 @@ def IN_SDL2_FilterMouseEvents_Logic(userdata, event_ptr):
 
 # This MUST be a global variable to prevent Garbage Collection
 IN_SDL2_FilterMouseEvents_Callback = SDL_EVENTFILTER_PTR(IN_SDL2_FilterMouseEvents_Logic)
+
+def IN_UpdateInputMode():
+    import cvar
+    global textmode
+
+    want_textmode = keys.Key_TextEntry()
+
+    if textmode != want_textmode:
+        if textmode:
+            sdl2.SDL_StartTextInput()
+            if cvar.Cvar_GetCvar('in_debugkeys').value:
+                console.Con_Printf('SDL_StartTextInput time %g' % sys_sdl_unix.Sys_DoubleTime())
+        else:
+            sdl2.SDL_StopTextInput()
+            if cvar.Cvar_GetCvar('in_debugkeys').value:
+                console.Con_Printf('SDL_StopTextInput time %g' % sys_sdl_unix.Sys_DoubleTime())
+
+
+def IN_Commands():
+    return
+    # not implemented
+
+

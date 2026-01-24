@@ -1,7 +1,7 @@
 #gl_fog.py
 
 import OpenGL
-import OpenGL.GL
+import OpenGL.GL as gl
 
 
 import _cmd
@@ -11,7 +11,7 @@ import client
 DEFAULT_DENSITY = 0.0
 DEFAULT_GRAY    = 0.3
 
-fog_density = 0.0                            
+fog_density = 0.0
 fog_red     = 0.0
 fog_green   = 0.0
 fog_blue    = 0.0
@@ -31,23 +31,23 @@ def Fog_Update ( density, red, green, blue, time ):
 
     if time > 0:
         if fade_done > client.cl.time:
-            f = (fade_done - client.cl.time) / fade_time;                  
+            f = (fade_done - client.cl.time) / fade_time;
             old_density = f * old_density + (1.0 - f) * fog_density
-            old_red     = f * old_red     + (1.0 - f) * fog_red            
-            old_green   = f * old_green   + (1.0 - f) * fog_green      
-            old_blue    = f * old_blue    + (1.0 - f) * fog_blue         
+            old_red     = f * old_red     + (1.0 - f) * fog_red
+            old_green   = f * old_green   + (1.0 - f) * fog_green
+            old_blue    = f * old_blue    + (1.0 - f) * fog_blue
         else:
             old_density = fog_density;
-            old_red = fog_red;        
-            old_green = fog_green;    
-            old_blue = fog_blue;      
+            old_red = fog_red;
+            old_green = fog_green;
+            old_blue = fog_blue;
 
-    fog_density = density      
-    fog_red = red              
-    fog_green = green          
-    fog_blue = blue            
-    fade_time = time           
-    fade_done = cl.time + time 
+    fog_density = density
+    fog_red = red
+    fog_green = green
+    fog_blue = blue
+    fade_time = time
+    fade_done = cl.time + time
 
 
 def Fog_FogCommand_f():
@@ -102,7 +102,7 @@ def Fog_FogCommand_f():
         r = 0.0
     if r > 1.0:
         r = 1.0
- 
+
     if g < 0.0:
         g = 0.0
     if g > 1.0:
@@ -112,11 +112,11 @@ def Fog_FogCommand_f():
         b = 0.0
     if b > 1.0:
         b = 1.0
-    
+
     Fog_Update(d, r, g, b, t)
 
 def Fog_SetupState():
-    OpenGL.GL.glFogi(OpenGL.GL.GL_FOG_MODE, OpenGL.GL.GL_EXP2)
+    gl.glFogi(OpenGL.GL.GL_FOG_MODE, OpenGL.GL.GL_EXP2)
 
 def Fog_Init():
     global fog_density, fog_red, fog_green, fog_blue
@@ -124,9 +124,14 @@ def Fog_Init():
     _cmd.Cmd_AddCommand('fog', Fog_FogCommand_f)
 
     fog_density = DEFAULT_DENSITY
-    fog_red     = DEFAULT_GRAY       
-    fog_green   = DEFAULT_GRAY     
+    fog_red     = DEFAULT_GRAY
+    fog_green   = DEFAULT_GRAY
     fog_blue    = DEFAULT_GRAY
- 
+
     Fog_SetupState()
+
+def Fog_SetupFrame():
+    gl.glFogfv(gl.GL_FOG_COLOR, Fog_GetColor())
+    gl.glFogf(gl.GL_FOG_DENSITY, Fog_GetDensity())
+
 

@@ -127,7 +127,7 @@ def Host_Status_f():
         print_fn(f'{NET_QSocketGetAddressString(client.netconnection)}')
 
 def Host_Quit_f():
-    if keys.key_dest != keys.keydest_t.key_console and client.cls.state != client.cactive_t.ca_dedicated:
+    if keys.key_dest != keys.keydest_t.key_console and cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
         menu.M_Menu_Quit_f()
         return
 
@@ -918,20 +918,20 @@ def Host_Startdemos_f():
         cl_main.cls.demonum = -1
 
 def Host_Demos_f():
-    if cls.state == ca_dedicated:
+    if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
         return
-    if cls.demonum == -1:
-        cls.demonum = 1
-    CL_Disconnect_f()
-    CL_NextDemo()
+    if cl_main.cls.demonum == -1:
+        cl_main.cls.demonum = 1
+    cl_main.CL_Disconnect_f()
+    cl_main.CL_NextDemo()
 
 def Host_Stopdemo_f():
-    if cls.state == ca_dedicated:
+    if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
         return
-    if not cls.demoplayback:
+    if not cl_main.cls.demoplayback:
         return
-    CL_StopPlayback()
-    CL_Disconnect()
+    cl_main.CL_StopPlayback()
+    cl_main.CL_Disconnect()
 
 def Host_Viewmodel_f():
     raise NotImplementedError

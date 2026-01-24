@@ -3,6 +3,7 @@
 import sys
 from datetime import datetime
 from enum import Enum
+import OpenGL.GL as gl
 
 import cvar
 import _cmd
@@ -49,7 +50,7 @@ con_initialized = False
 
 con_displaylines = 0    # This MUST match the name in Con_CheckResize
 console_is_open = True  # SET TO TRUE so it slides down automatically on start
-CON_SPEED = 12
+CON_SPEED = 24
 
 def LOG_Init():
     global log_file
@@ -196,55 +197,65 @@ def Con_Init():
     con_initialized = True
 
 def Con_DrawConsole():
-    global con_text, con_displaylines, con_totallines, con_input_buffer
+    global con_text, con_displaylines, con_totallines, con_input_buffer, con_backscroll
+    import gl_vidsdl
 
     if con_displaylines <= 0 or con_text is None:
         return
 
-    # 1. Background (Slides down from top)
-    gl_draw.Draw_Fill(0, 0, 640, con_displaylines, 200)
+    # 1. Setup Scaling
+    scr_width = gl_vidsdl._vid.width
+    scr_height = gl_vidsdl._vid.height
+    ui_scale = scr_width / 640.0
+    line_height = 8 * ui_scale
+    char_width = 8 * ui_scale
 
-    # 2. Draw History
-    # We want the text to "stick" to the bottom of the sliding console
-    for i in range(25):
-        line_index = (con_totallines - 25 + i)
+    # 2. SCISSOR TEST
+    # OpenGL Scissor starts from BOTTOM-LEFT.
+    # This prevents text from drawing below the moving console background.
+    gl.glEnable(gl.GL_SCISSOR_TEST)
+    gl.glScissor(0, int(scr_height - con_displaylines), int(scr_width), int(con_displaylines))
+
+    # 3. Background (Slides down)
+    gl_draw.Draw_Fill(0, 0, scr_width, con_displaylines, 200)
+
+    # 4. Draw History (Stationary relative to top)
+    # Calculate how many lines fit in the target height (400)
+    max_vis_lines = int(400 // line_height) - 1
+
+    for i in range(max_vis_lines):
+        # Apply backscroll here for your PageUp/PageDown logic
+        line_index = (con_totallines - max_vis_lines - con_backscroll + i)
+        if line_index < 0: continue
+
         start = line_index * 80
         try:
             line_data = con_text[start:start+80].decode('ascii', 'replace')
-        except:
-            continue
+        except: continue
 
-        # Calculate Y relative to the current bottom (con_displaylines)
-        # Newest history line is 16px above the prompt
-        text_y = (con_displaylines - 24) - ((24 - i) * 8)
+        # FIXED Y: The text is always drawn from Y=0 downwards
+        # It doesn't move when con_displaylines changes!
+        text_y = i * line_height
 
-        if text_y >= 0:
-            gl_draw.Draw_String(8, text_y, line_data)
+        gl_draw.Draw_String(char_width, text_y, line_data, scale=ui_scale)
 
-
-    # 3. Draw Prompt & Input Buffer
-    prompt_y = con_displaylines - 8
-
-    # print(f"Debug: Buffer is '{con_input_buffer}' at Y: {prompt_y}")
-
+    # 5. Draw Prompt (Moves with the bottom edge)
+    prompt_y = con_displaylines - line_height
     if prompt_y >= 0:
-        # Draw the prompt symbol ']' followed by your typed buffer
         full_input_line = "]" + con_input_buffer
-        gl_draw.Draw_String(8, prompt_y, full_input_line)
+        gl_draw.Draw_String(char_width, prompt_y, full_input_line, scale=ui_scale)
 
-        # Draw the blinking cursor at the end of the text
-        # Logic: 8 pixels per character (prompt + buffer length)
-        cursor_x = 8 + (len(full_input_line)) * 8
-
-        # Simple blink based on system time
+        cursor_x = char_width + (len(full_input_line)) * char_width
         if int(host.realtime * 2) % 2 == 0:
-            gl_draw.Draw_Character(cursor_x, prompt_y, 11) # 11 is the Quake cursor
+            gl_draw.Draw_Character(cursor_x, prompt_y, 11, scale=ui_scale)
+
+    gl.glDisable(gl.GL_SCISSOR_TEST)
 
 
 def Con_CheckResize():
     global con_displaylines, console_is_open
 
-    target = 200 if console_is_open else 0
+    target = 400 if console_is_open else 0
 
     if con_displaylines < target:
         con_displaylines += CON_SPEED
@@ -254,3 +265,4 @@ def Con_CheckResize():
         con_displaylines -= CON_SPEED
         if con_displaylines < target:
             con_displaylines = target
+

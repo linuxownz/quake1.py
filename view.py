@@ -1,9 +1,11 @@
 #view.py
 
+import bspfile
 import _cmd
 import client
 import cvar
 import quakedef
+import cl_main
 
 v_punchangles = []; #johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous valu
 
@@ -12,11 +14,17 @@ cshift_water = quakedef.cshift_t([130, 80, 50],128)
 cshift_slime = quakedef.cshift_t([0, 25, 5],150)
 cshift_lava  = quakedef.cshift_t([255, 80, 0],150)
 
+v_dmg_time = 0.0
+v_dmg_roll = 0.0
+v_dmg_pitch = 0.0
+
+v_blend : list[float] = [0.0, 0.0, 0.0, 0.0]
+
 def V_cshift_f():
-    cshift_empty.destcolor[0] = int(Cmd_Argv(1))
-    cshift_empty.destcolor[1] = int(Cmd_Argv(2))
-    cshift_empty.destcolor[2] = int(Cmd_Argv(3))
-    cshift_empty.percent      = int(Cmd_Argv(1))
+    cshift_empty.destcolor[0] = int(_cmd.Cmd_Argv(1))
+    cshift_empty.destcolor[1] = int(_cmd.Cmd_Argv(2))
+    cshift_empty.destcolor[2] = int(_cmd.Cmd_Argv(3))
+    cshift_empty.percent      = int(_cmd.Cmd_Argv(1))
 
 def V_BonusFlash_f():
     client.cl.cshifts[quakedef.CSHIFT_BONUS].destcolor[0] = 215
@@ -148,4 +156,62 @@ def V_Init():
     cvar.Cvar_RegisterVariable(v_gunkick  )
 
     cvar.Cvar_RegisterVariable(r_viewmodel_quake)
+
+def V_SetContentsColor (contents):
+
+    match (contents):
+        case bspfile.CONTENTS_EMPTY | bspfile.CONTENTS_SOLID | bspfile.CONTENTS_SKY:
+            cl_main.cl.cshifts[quakedef.CSHIFT_CONTENTS] = cshift_empty
+        case bspfile.CONTENTS_LAVA:
+            cl_main.cl.cshifts[quakedef.CSHIFT_CONTENTS] = cshift_lava
+        case bspfile.CONTENTS_SLIME:
+            cl_main.cl.cshifts[quakedef.CSHIFT_CONTENTS] = cshift_slime
+        case _:
+            cl_main.cl.cshifts[quakedef.CSHIFT_CONTENTS] = cshift_water
+
+def V_CalcBlend():
+    cshiftpercent_cvars = [
+        cvar.Cvar_GetCvar('gl_cshiftpercent_contents').value,
+        cvar.Cvar_GetCvar('gl_cshiftpercent_damage').value,
+        cvar.Cvar_GetCvar('gl_cshiftpercent_bonus').value,
+        cvar.Cvar_GetCvar('gl_cshiftpercent_powerup').value
+    ]
+
+    r = 0
+    g = 0
+    b = 0
+    a = 0
+    a2 = 0
+
+    gl_cshiftpercent = cvar.Cvar_GetCvar('gl_cshiftpercent').value
+    for j in range(quakedef.NUM_CSHIFTS):
+        if not gl_cshiftpercent:
+            continue
+
+        if cl_main.cl.intermission and j != quakedef.CSHIFT_CONTENTS:
+            continue
+
+        a2 = ((cl_main.cl.cshifts[j].percent * gl_cshiftpercent) / 100.0) / 255.0
+        a2 *= (cshiftpercent_cvars[j] / 100.0)
+
+        if not a2:
+            continue
+
+        a = a + a2*(1-a)
+        a2 = a2/a
+
+        r = r*(1-a2) + cl_main.cl.cshifts[j].destcolor[0]*a2
+        g = g*(1-a2) + cl_main.cl.cshifts[j].destcolor[1]*a2
+        b = b*(1-a2) + cl_main.cl.cshifts[j].destcolor[2]*a2
+
+    global v_blend
+    v_blend[0] = r/255.0
+    v_blend[1] = g/255.0
+    v_blend[2] = b/255.0
+    v_blend[3] = a
+
+    if v_blend[3] > 1:
+        v_blend[3] = 1
+    if v_blend[3] < 0:
+        v_blend[3] = 0
 

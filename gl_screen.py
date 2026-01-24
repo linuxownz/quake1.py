@@ -2,16 +2,18 @@
 
 import OpenGL
 import OpenGL.GL as gl
+import math
 
 import common
 import console
 import cl_main
 import client
 import cvar
-import menu
+import keys
 import host
 import wad
 import vid
+import sbar
 import _cmd
 import gl_draw
 import gl_rmain
@@ -211,16 +213,119 @@ def SCR_Init():
     global scr_initialized
     scr_initialized = True
 
+
+def AdaptFovx(fov_x, width, height):
+
+    if fov_x < 1 or fov_x > 179:
+        Sys_Error("bad fov")
+
+    if not cvar.Cvar_GetCvar('scr_fov_adapt').value:
+        return fov_x
+
+    x = height/width
+
+    if x == 0.75:
+        return fov_x
+
+    a = math.atan(0.75 / x * math.tan(fov_x / 360 * math.pi))
+    a = a * 360 / math.pi
+
+    return a
+
+def CalcFovy(fov_x, width, height):
+    if fov_x < 1 or fov_x > 179:
+        Sys_Error("bad fov")
+
+    x = width / math.tan(fov_x / 360 * math.pi)
+    a = math.atan(height / x)
+    a = a * 360 / math.pi
+    return a
+
+
+
+
+def SCR_CalcRefdef():
+    global scr_tileclear_updates
+
+    sbar.Sbar_Changed()
+
+    scr_tileclear_updates = 0
+
+    scr_viewsize = cvar.Cvar_GetCvar('scr_viewsize').value
+
+    if scr_viewsize < 30:
+        cvar.Cvar_SetQuickByName('scr_viewsize', "30")
+    elif scr_viewsize > 120:
+        cvar.Cvar_SetQuickByName('scr_viewsize', "120")
+
+    scr_fov = cvar.Cvar_GetCvar('scr_fov').value
+    if scr_fov < 10:
+        cvar.Cvar_SetQuickByName('scr_fov', "10")
+    elif scr_fov > 170:
+        cvar.Cvar_SetQuickByName('scr_fov', "170")
+
+    gl_vidsdl._vid.recalc_refdef = 0
+
+    size = cvar.Cvar_GetCvar('scr_viewsize').value
+    scale = common.CLAMP(1.0, float(cvar.Cvar_GetCvar('scr_sbarscale').value), glwidth / 320.0)
+
+    if size >= 120 or cl_main.cl.intermission or cvar.Cvar_GetCvar('scr_sbaralpha').value < 1:
+        sbar.sb_lines = 0
+    elif size >= 110:
+        sbar.sb_lines = 24  * scale
+    else:
+        sbar.sb_lines = 48 * scale
+
+    size = min(size, 100.0) / 100
+
+
+    gl_rmain.r_refdef.vrect.width = max(glwidth * size, 96.0)
+    gl_rmain.r_refdef.vrect.height = min(glheight * size, glheight - sbar.sb_lines)
+    gl_rmain.r_refdef.vrect.x = ( glwidth - gl_rmain.r_refdef.vrect.width) / 2
+    gl_rmain.r_refdef.vrect.y = ( glheight - sbar.sb_lines - gl_rmain.r_refdef.vrect.height) / 2
+
+    scr_fov = cvar.Cvar_GetCvar('scr_fov').value
+    gl_rmain.r_refdef.fov_x = AdaptFovx(scr_fov, gl_vidsdl._vid.width, gl_vidsdl._vid.height);
+    gl_rmain.r_refdef.fov_y = CalcFovy (gl_rmain.r_refdef.fov_x, gl_rmain.r_refdef.vrect.width, gl_rmain.r_refdef.vrect.height);
+
+    global scr_vrect
+    scr_vrect = gl_rmain.r_refdef.vrect
+
 def SCR_UpdateScreen():
+    global scr_disabled_for_loading
+
+    gl_vidsdl._vid.numpages = 3 if cvar.Cvar_GetCvar('gl_triplebuffer').value else 2
+
+    if scr_disabled_for_loading:
+        if host.realtime - scr_disabled_time > 60:
+            scr_disabled_for_loading = False
+            console.Con_Printf('load failed\n')
+        else:
+            return
+
+    if not scr_initialized or not console.con_initialized:
+        return
+
+    gl_vidsdl.GL_BeginRendering()
+
+    if gl_vidsdl._vid.recalc_refdef:
+        SCR_CalcRefdef()
+
+def SCR_UpdateScreen_gemini():
     # 1. Draw the 3D World first
     # This function handles its own clearing (the blue sky) and 3D projection
     gl_rmain.R_RenderView()
 
     # 2. NOW setup the 2D Viewport/Projection for the overlay
-    gl.glViewport(0, 0, gl_vidsdl._vid.width, gl_vidsdl._vid.height)
+    w = gl_vidsdl._vid.width
+    h = gl_vidsdl._vid.height
+
+    gl.glViewport(0, 0, w, h)
     gl.glMatrixMode(gl.GL_PROJECTION)
     gl.glLoadIdentity()
-    gl.glOrtho(0, 640, 480, 0, -10, 10)
+
+    # CHANGE: Use variables instead of 640 and 480
+    gl.glOrtho(0, w, h, 0, -10, 10)
 
     gl.glMatrixMode(gl.GL_MODELVIEW)
     gl.glLoadIdentity()
@@ -229,6 +334,9 @@ def SCR_UpdateScreen():
     gl.glDisable(gl.GL_DEPTH_TEST)
     gl.glEnable(gl.GL_BLEND)
     gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
+    if keys.key_dest == keys.keydest_t.key_game:
+        SCR_DrawCrosshair()
 
     # 4. Draw the Console last so it covers the world
     console.Con_DrawConsole()
@@ -278,3 +386,46 @@ def SCR_BeginLoadingPlaque():
     scr_disabled_for_loading = True
     scr_disabled_time = host.realtime
 
+
+def SCR_DrawCrosshair():
+    import gl_draw
+    import gl_vidsdl
+
+    if gl_draw.pic_crosshair is None:
+        return
+
+    # Calculate center
+    x = (gl_vidsdl._vid.width // 2) - 4
+    y = (gl_vidsdl._vid.height // 2) - 4
+
+    # The Draw_MakePic function uses SRC_INDEXED (Palette colors)
+    # Color 8 and 9 in the Quake palette are typically Greys/Whites
+    # You can tint it here if you want:
+    gl.glColor4f(1.0, 1.0, 1.0, 1.0)
+
+    gl_draw.Draw_Pic(x, y, gl_draw.pic_crosshair)
+
+
+
+def SCR_Set2D():
+    import gl_vidsdl
+    import OpenGL.GL as gl
+
+    # 1. Use the actual window dimensions
+    width = gl_vidsdl._vid.width
+    height = gl_vidsdl._vid.height
+
+    # 2. Set the Viewport (the actual box on your monitor)
+    gl.glViewport(0, 0, width, height)
+
+    # 3. Setup the Projection Matrix for 2D
+    gl.glMatrixMode(gl.GL_PROJECTION)
+    gl.glLoadIdentity()
+
+    # glOrtho(left, right, bottom, top, near, far)
+    # This makes 0,0 the top-left and width,height the bottom-right
+    gl.glOrtho(0, width, height, 0, -1, 1)
+
+    # 4. Reset the ModelView matrix
+    gl.glMatrixMode(gl.GL_MODELVIEW)
+    gl.glLoadIdentity()

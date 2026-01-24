@@ -1,4 +1,4 @@
-#gl_draw.py 
+#gl_draw.py
 
 import OpenGL.GL as gl
 import struct
@@ -17,6 +17,7 @@ char_texture : gl_texmgr.gltexture_t = None
 pic_ovr : wad.qpic_t = None
 pic_ins : wad.qpic_t = None
 pic_nul : wad.qpic_t = None
+pic_crosshair : wad.qpic_t = None
 
 pic_ovr_data = [
     255,255,255,255,255,255,255,255,
@@ -82,7 +83,7 @@ class glpic_t():
         self.sh = 0.0
         self.th = 0.0
 
-currentcanvas : screen.canvastype = screen.canvastype.CANVAS_NONE 
+currentcanvas : screen.canvastype = screen.canvastype.CANVAS_NONE
 
 class cachepic_t():
     #unpack_string = f'<{MAX_QPATH}s{wad.qpic_t.unpack_string}32B'
@@ -113,33 +114,14 @@ def Draw_CachePic(path) -> wad.qpic_t:
 
 def Scrap_Upload():
     for i in range(MAX_SCRAPS):
-      name = f'scrap{i}' 
+      name = f'scrap{i}'
 
       scrap_textures[i] = \
         gl_texmgr.TexMgr_LoadImage(None, name, BLOCK_WIDTH, BLOCK_HEIGHT, \
           gl_texmgr.srcformat.SRC_INDEXED, scrap_texels[i], '', scrap_texels[i], \
-            gl_texmgr.TEXPREF_ALPHA | gl_texmgr.TEXPREF_OVERWRITE | gl_texmgr.TEXPREF_NOPICMIP) 
-      
+            gl_texmgr.TEXPREF_ALPHA | gl_texmgr.TEXPREF_OVERWRITE | gl_texmgr.TEXPREF_NOPICMIP)
+
       scrap_dirty = False
-  
-
-def Draw_MakePic(name, width, height, data):
-    flags = gl_texmgr.TEXPREF_NEAREST | gl_texmgr.TEXPREF_ALPHA | gl_texmgr.TEXPREF_PERSIST | gl_texmgr.TEXPREF_NOPICMIP | gl_texmgr.TEXPREF_PAD
-
-    pic = wad.qpic_t(width, height, None)
-
-    gl = glpic_t()
-
-    gl.gltexture = gl_texmgr.TexMgr_LoadImage(None, name, width, height, gl_texmgr.srcformat.SRC_INDEXED, \
-        data, '', data, flags)
-    gl.sl = 0
-    gl.sh = float(width)/gl_texmgr.TexMgr_PadConditional(width)
-    gl.tl = 0
-    gl.th = float(height)/gl_texmgr.TexMgr_PadConditional(height)
-
-    pic.data = struct.pack('<BBBB', gl.sl, int(gl.sh), gl.tl, int(gl.th))
-
-    return pic
 
 
 def Scrap_AllocBlock(w, h) -> (int, int, int):
@@ -150,30 +132,30 @@ def Scrap_AllocBlock(w, h) -> (int, int, int):
     for texnum in range(MAX_SCRAPS):
         # Reset best height tracker for this texture
         # NOTE: In the C code, 'best' is used for this, but it's confusingly named.
-        min_required_height = BLOCK_HEIGHT 
+        min_required_height = BLOCK_HEIGHT
 
         for i in range(BLOCK_WIDTH - w + 1): # +1 to include the last valid position
             best2 = 0 # Height of the tallest column in the current w-wide window
 
             for j in range(w):
                 current_height = scrap_allocated[texnum][i + j]
-                
+
                 # C-break condition: if any column is too high, this position fails the overall test (Best-Fit logic is more complex)
                 if current_height >= min_required_height:
                     break
-                
+
                 # Update best2: Find the tallest column in the current window
                 if current_height > best2:
                     best2 = current_height
 
             # C condition: j == w means the inner loop completed successfully (all w columns checked)
             if j == w - 1: # Python's j loop ends at w-1, so checking j==w-1 means it completed
-                
+
                 # CRITICAL FIX: Track the *lowest* required shelf height (best2)
                 if best2 < min_required_height:
                     min_required_height = best2
                     best_x = i
-                    
+
         # After checking all 'i' positions, we have the best spot (best_x, min_required_height)
 
         # Check the final feasibility of the best spot found
@@ -183,7 +165,7 @@ def Scrap_AllocBlock(w, h) -> (int, int, int):
         # Allocation: Use the stored best_x and min_required_height
         for i in range(w):
             scrap_allocated[texnum][best_x + i] = min_required_height + h
-        
+
         return texnum, best_x, min_required_height
 
     # Sys_Error('Scrap_AllocBlock: full') # Replaced with standard Python exception
@@ -212,7 +194,7 @@ def Scrap_AllocBlockFail(w, h) -> (int, int, int):
 
         for i in range(w):
             scrap_allocated[texnum][x + i] = best + h
-        
+
         return texnum, x, y
 
     Sys_Error('Scrap_AllocBlock: full')
@@ -245,7 +227,7 @@ def Draw_PicFromWad(name):
         gl.tl = y/BLOCK_WIDTH
         gl.th = (y + p.height)/BLOCK_WIDTH
     else:
-        texturename = wad.WADFILENAME + ':' + name 
+        texturename = wad.WADFILENAME + ':' + name
 
         # offset = wad.wad_base
 
@@ -284,7 +266,7 @@ def Draw_LoadPics():
     draw_backtile = Draw_PicFromWad('backtile')
 
 def Draw_Init():
-    global pic_ins, pic_ovr, pic_nul
+    global pic_ins, pic_ovr, pic_nul, pic_crosshair
     import cvar
 
     scr_conalpha = {'name': "scr_conalpha", 'value': "0.5", 'flags': cvar.CVAR_ARCHIVE} #johnfitz
@@ -292,64 +274,115 @@ def Draw_Init():
 
     Scrap_Upload()
 
+    pic_crosshair = Draw_MakePic('crosshair', 8, 8, pic_crosshair_data)
+
     pic_ins = Draw_MakePic('ins', 8, 9, pic_ins_data)
     pic_ovr = Draw_MakePic('ovr', 8, 8, pic_ovr_data)
     pic_ins = Draw_MakePic('ins', 8, 8, pic_nul_data)
 
     Draw_LoadPics()
 
-def Draw_Character(x, y, num):
+def Draw_Pic(x, y, pic):
+    if not pic or not hasattr(pic, 'gl_texture') or pic.gl_texture is None:
+        return
+
+    gl.glEnable(gl.GL_TEXTURE_2D)
+    gl.glBindTexture(gl.GL_TEXTURE_2D, pic.gl_texture.texnum)
+
+    gl.glEnable(gl.GL_BLEND)
+    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+
+    sl, sh, tl, th = pic.data
+
+    gl.glBegin(gl.GL_QUADS)
+    gl.glTexCoord2f(sl, tl); gl.glVertex2f(x, y)
+    gl.glTexCoord2f(sh, tl); gl.glVertex2f(x + pic.width, y)
+    gl.glTexCoord2f(sh, th); gl.glVertex2f(x + pic.width, y + pic.height)
+    gl.glTexCoord2f(sl, th); gl.glVertex2f(x, y + pic.height)
+    gl.glEnd()
+
+    # --- CRITICAL FIX ---
+    # Unbind the texture and disable 2D texturing so the 3D world
+    # doesn't inherit the crosshair texture.
+    gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
+    gl.glDisable(gl.GL_TEXTURE_2D)
+
+
+def Draw_MakePic(name, width, height, data):
+    flags = gl_texmgr.TEXPREF_NEAREST | gl_texmgr.TEXPREF_ALPHA | gl_texmgr.TEXPREF_PERSIST | gl_texmgr.TEXPREF_NOPICMIP | gl_texmgr.TEXPREF_PAD
+
+    pic = wad.qpic_t(width, height, None)
+
+    # Load the texture
+    tex = gl_texmgr.TexMgr_LoadImage(None, name, width, height, gl_texmgr.srcformat.SRC_INDEXED,
+                                     data, '', data, flags)
+
+    # Store the texture object inside the pic so we can Bind it later
+    pic.gl_texture = tex
+
+    # Calculate UV coordinates
+    sl = 0.0
+    sh = float(width) / gl_texmgr.TexMgr_PadConditional(width)
+    tl = 0.0
+    th = float(height) / gl_texmgr.TexMgr_PadConditional(height)
+
+    # Store UVs in the data field as a list for easy access
+    pic.data = [sl, sh, tl, th]
+
+    return pic
+
+def Draw_Character(x, y, num, scale=2.0):
     global char_texture
     if not char_texture:
         return
 
-    # THE MISSING MATH:
-    # Quake's conchars is a 16x16 grid. 
-    # Row and Column are derived from the ASCII value (num)
+    # Quake's conchars is a 16x16 grid.
     row = (num >> 4) & 0xF
     col = num & 0xF
-    
+
     # Map to UV coordinates (0.0 to 1.0)
-    # Each cell is 1/16th of the texture (0.0625)
     s1 = col * 0.0625
     t1 = row * 0.0625
     s2 = s1 + 0.0625
     t2 = t1 + 0.0625
+
+    # --- SCALING MATH ---
+    # Instead of a fixed 8x8, we use the scale factor
+    draw_size = 8 * scale
 
     # --- RENDER STATE ---
     gl.glEnable(gl.GL_BLEND)
     gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
     gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glBindTexture(gl.GL_TEXTURE_2D, char_texture.texnum)
-    
-    # White ensures the font isn't tinted
+
     gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-
     gl.glEnable(gl.GL_ALPHA_TEST)
-    gl.glAlphaFunc(gl.GL_GREATER, 0.0) # Only draw pixels with alpha > 0
+    gl.glAlphaFunc(gl.GL_GREATER, 0.0)
 
+    # --- DRAWING ---
     gl.glBegin(gl.GL_QUADS)
     gl.glTexCoord2f(s1, t1); gl.glVertex2f(x, y)
-    gl.glTexCoord2f(s2, t1); gl.glVertex2f(x + 8, y)
-    gl.glTexCoord2f(s2, t2); gl.glVertex2f(x + 8, y + 8)
-    gl.glTexCoord2f(s1, t2); gl.glVertex2f(x, y + 8)
+    gl.glTexCoord2f(s2, t1); gl.glVertex2f(x + draw_size, y)
+    gl.glTexCoord2f(s2, t2); gl.glVertex2f(x + draw_size, y + draw_size)
+    gl.glTexCoord2f(s1, t2); gl.glVertex2f(x, y + draw_size)
     gl.glEnd()
 
-def Draw_String(x, y, text):
-    """Draws a line of text using the conchars font."""
+def Draw_String(x, y, text, scale=2.0):
+    # Characters are 8 pixels wide base, so move by 8 * scale each time
+    step = 8 * scale
     for i, char in enumerate(text):
-        # ord() gets the ASCII integer value of the character
-        Draw_Character(x + (i * 8), y, ord(char)) 
+        Draw_Character(x + (i * step), y, ord(char), scale)
 
 
 def Draw_Fill(x, y, w, h, color_index):
     gl.glDisable(gl.GL_TEXTURE_2D)
     gl.glEnable(gl.GL_BLEND)
-    
+
     # Check if this is the console background (usually index 200-ish)
     if color_index >= 200:
         # Dark grey with 60% opacity (0.6)
-        gl.glColor4f(0.15, 0.15, 0.15, 0.6) 
+        gl.glColor4f(0.15, 0.15, 0.15, 0.6)
     else:
         # Fallback for other UI elements
         gl.glColor4f(0.5, 0.5, 0.5, 1.0)
@@ -360,6 +393,6 @@ def Draw_Fill(x, y, w, h, color_index):
     gl.glVertex2f(x + w, y + h)
     gl.glVertex2f(x, y + h)
     gl.glEnd()
-    
+
     gl.glEnable(gl.GL_TEXTURE_2D)
     gl.glColor4f(1.0, 1.0, 1.0, 1.0) # Reset to white for next draw

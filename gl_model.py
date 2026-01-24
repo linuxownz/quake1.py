@@ -188,3 +188,35 @@ def Mod_ForName(name):
         Mod_LoadBrushModel(mod, buffer)
 
     return mod
+
+def Mod_PointInLeaf(p, model):
+    """
+    Traverses the BSP tree to find the leaf containing point p.
+    p: vec3_t [x, y, z]
+    model: The loaded map model object
+    """
+    if not model or not hasattr(model, 'nodes'):
+        # Equivalent to Sys_Error
+        raise RuntimeError("Mod_PointInLeaf: bad model")
+
+    # Start at the root node
+    node = model.nodes[0]
+
+    while True:
+        # In Quake, contents < 0 indicates the node is actually a leaf
+        # (e.g., CONTENTS_EMPTY, CONTENTS_SOLID, CONTENTS_WATER)
+        if node.contents < 0:
+            return node # This is our mleaf_t
+
+        plane = node.plane
+
+        # Calculate the distance of point p from the plane:
+        # Ax + By + Cz - D = 0
+        d = DotProduct(p, plane.normal) - plane.dist
+
+        if d > 0:
+            # Point is "in front" of the plane
+            node = node.children[0]
+        else:
+            # Point is "behind" or on the plane
+            node = node.children[1]

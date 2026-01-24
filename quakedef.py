@@ -1,6 +1,7 @@
 #quakedef.py
 
 from enum import Enum
+from dataclasses import dataclass, field
 
 VERSION = 1.09
 GLQUAKE_VERSION = 1.00
@@ -138,7 +139,7 @@ MAX_SCOREBOARD = 16
 MAX_SCOREBOARDNAME = 32
 SOUND_CHANNELS = 8
 
-CONTENTS_SOLID = -2
+# bspfile CONTENTS_SOLID = -2
 
 LMBLOCK_WIDTH = 128
 LMBLOCK_HEIGHT = 128
@@ -524,10 +525,54 @@ class modtype_t(Enum):
 
 # quakedef.py
 
+@dataclass
+class vrect_t:
+    x: int = 0
+    y: int = 0
+    width: int = 0
+    height: int = 0
+
 class refdef_t:
     def __init__(self):
-        self.vieworg = [0.0, 0.0, 0.0]    # Player camera position (Origin)
-        self.viewangles = [0.0, 0.0, 0.0] # Player rotation (Pitch, Yaw, Roll)
-        self.fov_x = 90.0
+        # Subwindow in video for refresh
+        self.vrect = vrect_t()
+        self.aliasvrect = vrect_t()
+
+        # Right & bottom screen coords
+        self.vrectright = 0
+        self.vrectbottom = 0
+        self.aliasvrectright = 0
+        self.aliasvrectbottom = 0
+
+        # Floating-point boundaries for clamping and edge lists
+        self.vrectrightedge = 0.0
+        self.fvrectx = 0.0
+        self.fvrecty = 0.0
+        self.fvrectx_adj = 0.0
+        self.fvrecty_adj = 0.0
+
+        # Fixed-point shifted values (Original Quake software optimization)
+        # Note: In Python, we might not need these for an OpenGL renderer,
+        # but they are kept here for structural parity.
+        self.vrect_x_adj_shift20 = 0
+        self.vrectright_adj_shift20 = 0
+
+        self.fvrectright_adj = 0.0
+        self.fvrectbottom_adj = 0.0
+        self.fvrectright = 0.0
+        self.fvrectbottom = 0.0
+
+        # Field of View
+        # 2.0 = 90 degrees
+        self.horizontalFieldOfView = 2.0
+        self.xOrigin = 0.5
+        self.yOrigin = 0.5
+
+        # Camera Position and Orientation
+        self.vieworg = [0.0, 0.0, 0.0]     # vec3_t (x, y, z)
+        self.viewangles = [0.0, 0.0, 0.0]  # vec3_t (pitch, yaw, roll)
+
+        self.fov_x = 0.0
         self.fov_y = 0.0
-        # Add matrix or frustum data here later for culling
+
+        self.ambientlight = 0

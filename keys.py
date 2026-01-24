@@ -5,10 +5,12 @@ from enum import Enum
 
 import host
 import _cmd
-import client
 import console
 import vid
 import menu
+import cl_main
+import quakedef
+import in_sdl
 
 class keydest_t(Enum):
     key_game    = 0
@@ -331,11 +333,6 @@ def Key_EventWithKeycode(key, down, keycode):
     if key < 0 or key >= MAX_KEYS:
         return
 
-    # 1. Handle Fullscreen Toggle (Alt + Enter)
-    if down and (key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
-        vid.VID_Toggle()
-        return
-
     # 2. Maintain keydown state
     # If the key is already down and we aren't in console, ignore repeats
     if down:
@@ -350,6 +347,17 @@ def Key_EventWithKeycode(key, down, keycode):
         return # Key was already up
 
     keydown[key] = down
+
+    # 1. Handle Fullscreen Toggle (Alt + Enter)
+    if down and (key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
+        vid.VID_Toggle()
+        return
+
+    if keydown[K_CTRL]:
+        print('ctrl')
+        if key == ord('l'):
+            print('l')
+
 
     # 3. Handle Input Grab (for binding keys in a menu)
     if key_inputgrab.active:
@@ -382,7 +390,6 @@ def Key_EventWithKeycode(key, down, keycode):
         if down:
             console.Con_ToggleConsole_f()
         return
-
 
     # 5. Handle Key Up Events
     if not down:
@@ -583,6 +590,22 @@ def Key_Unbindall_f():
 def Key_Console(key):
     global key_linepos
 
+    if key == K_PGUP:
+        console.con_backscroll += 5
+        if console.con_backscroll > console.con_totallines - 25:
+            console.con_backscroll = console.con_totallines - 25
+        return True
+
+    if key == K_PGDN:
+        console.con_backscroll -= 5
+        if console.con_backscroll < 0:
+            console.con_backscroll = 0
+        return True
+
+    # Reset scroll when user types or enters command
+    if key == K_ENTER:
+        console.con_backscroll = 0
+
     # Handle Backspace (127 or 8 depending on OS mapping)
     if key == K_BACKSPACE or key == 8:
         if len(console.con_input_buffer) > 0:
@@ -640,3 +663,25 @@ def WriteBindings(file_handle):
     active_binds.sort()
     for bind_name, command in active_binds:
         file_handle.write(f'bind "{bind_name}" "{command}"\n')
+
+def Key_UpdateForDest():
+    global key_dest
+    forced = False
+
+    if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
+        return
+
+    match(key_dest):
+        case keydest_t.key_console:
+            if forced and cl_main.cls.state == quakedef.cactive_t.ca_connected:
+                forced = False
+                in_sdl.IN_Activate()
+                key_dest = keydest_t.key_game
+        case keydest_t.key_game:
+            if cl_main.cls.state != quakedef.cactive_t.ca_connected:
+                forced = True
+                in_sdl.IN_Deactivate()
+                key_dest = keydest_t.key_console
+
+        case _:
+            forced = False
