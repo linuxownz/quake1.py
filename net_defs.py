@@ -2,8 +2,10 @@
 
 from dataclasses import dataclass
 import struct
+import socket
 
 import quakedef
+import net_defs
 
 #NET_HEADERSIZE      (2 * sizeof(unsigned int))
 SIZEOFUNSIGNEDINT = struct.calcsize('I')
@@ -34,6 +36,9 @@ CCREP_RULE_INFO     = 0x85
 
 MAX_NET_DRIVERS = 8
 
+NET_NAMELEN = 64
+NET_MAXMESSAGE = 64000
+
 class qsocket_t():
     def __init__(self):
         self.next : qsocket_t = None
@@ -48,143 +53,145 @@ class qsocket_t():
         self.driver = 0
         self.landriver = 0
 
-        self.socket = 0
-        self.driverdata = None
+        self.socket     : socket.socket = None
+        self.driverdata : net_defs.qsocket_t = None
 
         self.ackSequence = 0
         self.sendSequence = 0
         self.unreliableSendSequence = 0
 
         self.sendMessageLength = 0
-        self.sendMessage : list[bytes] = []
+        self.sendMessage : bytearray(net_defs.NET_MAXMESSAGE)
 
         self.receiveSequence = 0
         self.unreliableReceiveSequence = 0
         self.receiveMessageLength = 0
-        self.receiveMessage : list[bytes] = []
+        self.receiveMessage : bytearray(net_defs.NET_MAXMESSAGE)
 
-        self.addr = None
+        self.addr : tuple[str, str] = ('', '') # host, port
         self.address = ''
 
-class NetLanDriver:
-    def __init__(self):
-        # Data Fields
-        self.name = ""           # const char *name
-        self.initialized = False  # qboolean initialized
-        self.control_sock = -1    # sys_socket_t controlSock
-
-    # Interface Methods (The function pointers from the C struct)
-    def init(self):
-        raise NotImplementedError
-
-    def shutdown(self):
-        raise NotImplementedError
-
-    def listen(self, state):
-        raise NotImplementedError
-
-    def open_socket(self, port):
-        raise NotImplementedError
-
-    def close_socket(self, socketid):
-        raise NotImplementedError
-
-    def connect(self, socketid, qsockaddr_addr):
-        raise NotImplementedError
-
-    def check_new_connections(self):
-        raise NotImplementedError
-
-    def read(self, socketid, buf, length, qsockaddr_addr):
-        """Reads data into a buffer, returns bytes read"""
-        raise NotImplementedError
-
-    def write(self, socketid, buf, length, qsockaddr_addr):
-        """Writes data from a buffer, returns bytes written"""
-        raise NotImplementedError
-
-    def broadcast(self, socketid, buf, length):
-        raise NotImplementedError
-
-    # Address Utilities
-    def addr_to_string(self, qsockaddr_addr):
-        raise NotImplementedError
-
-    def string_to_addr(self, string, qsockaddr_addr):
-        raise NotImplementedError
-
-    def get_socket_addr(self, socketid, qsockaddr_addr):
-        raise NotImplementedError
-
-    def get_name_from_addr(self, qsockaddr_addr):
-        raise NotImplementedError
-
-    def get_addr_from_name(self, name, qsockaddr_addr):
-        raise NotImplementedError
-
-    def addr_compare(self, addr1, addr2):
-        raise NotImplementedError
-
-    def get_socket_port(self, qsockaddr_addr):
-        raise NotImplementedError
-
-    def set_socket_port(self, qsockaddr_addr, port):
-        raise NotImplementedError
-
-
-class NetDriver:
-    def __init__(self):
-        self.name = ""           # const char *name
-        self.initialized = False  # qboolean initialized
-
-    def init(self) -> int:
-        """Equivalent to int (*Init) (void)"""
-        raise NotImplementedError
-
-    def listen(self, state: bool):
-        """Equivalent to void (*Listen) (qboolean state)"""
-        raise NotImplementedError
-
-    def search_for_hosts(self, xmit: bool):
-        """Equivalent to void (*SearchForHosts) (qboolean xmit)"""
-        raise NotImplementedError
-
-    def connect(self, host: str):
-        """
-        Returns a qsocket_t object or None.
-        Equivalent to qsocket_t *(*Connect) (const char *host)
-        """
-        raise NotImplementedError
-
-    def check_new_connections(self):
-        """Returns a qsocket_t or None if no new connection exists."""
-        raise NotImplementedError
-
-    def get_message(self, sock) -> int:
-        """
-        Reads from the socket into net_message buffer.
-        Returns message type (1=data, 2=unreliable, etc)
-        """
-        raise NotImplementedError
-
-    def send_message(self, sock, data) -> int:
-        """Equivalent to int (*QSendMessage) (qsocket_t *sock, sizebuf_t *data)"""
-        raise NotImplementedError
-
-    def send_unreliable_message(self, sock, data) -> int:
-        raise NotImplementedError
-
-    def can_send_message(self, sock) -> bool:
-        raise NotImplementedError
-
-    def can_send_unreliable_message(self, sock) -> bool:
-        raise NotImplementedError
-
-    def close(self, sock):
-        raise NotImplementedError
-
-    def shutdown(self):
-        raise NotImplementedError
+# class NetLanDriver:
+#     def __init__(self):
+#         raise NotImplementedError
+#         # Data Fields
+#         self.name = ""           # const char *name
+#         self.initialized = False  # qboolean initialized
+#         self.control_sock = -1    # sys_socket_t controlSock
+#
+#     # Interface Methods (The function pointers from the C struct)
+#     def init(self):
+#         raise NotImplementedError
+#
+#     def shutdown(self):
+#         raise NotImplementedError
+#
+#     def listen(self, state):
+#         raise NotImplementedError
+#
+#     def open_socket(self, port):
+#         raise NotImplementedError
+#
+#     def close_socket(self, socketid):
+#         raise NotImplementedError
+#
+#     def connect(self, socketid, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def check_new_connections(self):
+#         raise NotImplementedError
+#
+#     def read(self, socketid, buf, length, qsockaddr_addr):
+#         """Reads data into a buffer, returns bytes read"""
+#         raise NotImplementedError
+#
+#     def write(self, socketid, buf, length, qsockaddr_addr):
+#         """Writes data from a buffer, returns bytes written"""
+#         raise NotImplementedError
+#
+#     def broadcast(self, socketid, buf, length):
+#         raise NotImplementedError
+#
+#     # Address Utilities
+#     def addr_to_string(self, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def string_to_addr(self, string, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def get_socket_addr(self, socketid, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def get_name_from_addr(self, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def get_addr_from_name(self, name, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def addr_compare(self, addr1, addr2):
+#         raise NotImplementedError
+#
+#     def get_socket_port(self, qsockaddr_addr):
+#         raise NotImplementedError
+#
+#     def set_socket_port(self, qsockaddr_addr, port):
+#         raise NotImplementedError
+#
+#
+# class NetDriver:
+#     def __init__(self):
+#         raise NotImplementedError
+#         self.name = ""           # const char *name
+#         self.initialized = False  # qboolean initialized
+#
+#     def init(self) -> int:
+#         """Equivalent to int (*Init) (void)"""
+#         raise NotImplementedError
+#
+#     def listen(self, state: bool):
+#         """Equivalent to void (*Listen) (qboolean state)"""
+#         raise NotImplementedError
+#
+#     def search_for_hosts(self, xmit: bool):
+#         """Equivalent to void (*SearchForHosts) (qboolean xmit)"""
+#         raise NotImplementedError
+#
+#     def connect(self, host: str):
+#         """
+#         Returns a qsocket_t object or None.
+#         Equivalent to qsocket_t *(*Connect) (const char *host)
+#         """
+#         raise NotImplementedError
+#
+#     def check_new_connections(self):
+#         """Returns a qsocket_t or None if no new connection exists."""
+#         raise NotImplementedError
+#
+#     def get_message(self, sock) -> int:
+#         """
+#         Reads from the socket into net_message buffer.
+#         Returns message type (1=data, 2=unreliable, etc)
+#         """
+#         raise NotImplementedError
+#
+#     def send_message(self, sock, data) -> int:
+#         """Equivalent to int (*QSendMessage) (qsocket_t *sock, sizebuf_t *data)"""
+#         raise NotImplementedError
+#
+#     def send_unreliable_message(self, sock, data) -> int:
+#         raise NotImplementedError
+#
+#     def can_send_message(self, sock) -> bool:
+#         raise NotImplementedError
+#
+#     def can_send_unreliable_message(self, sock) -> bool:
+#         raise NotImplementedError
+#
+#     def close(self, sock):
+#         raise NotImplementedError
+#
+#     def shutdown(self):
+#         raise NotImplementedError
 
 @dataclass
 class hostcache_t:

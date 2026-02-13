@@ -13,6 +13,8 @@ import cvar
 import io
 import main_sdl
 import net_main
+import host
+import protocol
 
 import sys_sdl_unix
 import console
@@ -43,7 +45,6 @@ com_argv = []
 
 com_gamedir = '.'
 com_basedir = '.'
-
 
 msg_readcount = 0
 msg_badread = False
@@ -103,7 +104,7 @@ class sizebuf_s():
     def __init__(self):
         self.allowoverflow = False
         self.overflowed = False
-        self.data : bytes = None
+        self.data : bytearray = None
         self.maxsize: int = 0
         self.cursize: int = 0
 
@@ -147,6 +148,245 @@ def FloatSwap(f):
 
 def FloatNoSwap(f):
     return f
+
+def MSG_WriteChar(sb: sizebuf_s, c: int):
+    index = SZ_GetSpace(sb, 1)
+    sb.data[index:index+1] = bytes([c & 0xff])
+
+def MSG_WriteByte(sb:sizebuf_s, c: int):
+    index = SZ_GetSpace(sb, 1)
+    sb.data[index:index+1] = bytes([c & 0xff])
+
+def MSG_WriteShort(sb:sizebuf_s, c: int):
+    index = SZ_GetSpace(sb, 2)
+    sb.data[index:index+2] = bytes([c & 0xff, (c >> 8) & 0xff])
+
+def MSG_WriteLong(sb:sizebuf_s, c: int):
+    index = SZ_GetSpace(sb, 4)
+    sb.data[index:index+4] = bytes([c & 0xff, (c >> 8) & 0xff, (c>>16) & 0xff, (c>>24) & 0xff])
+
+def MSG_WriteFloat(sb: sizebuf_s, f: float):
+    index = SZ_GetSpace(sb, 4)
+    float_bytes = struct.pack('<f', f)
+    sb.data[index : index + 4] = float_bytes
+
+def MSG_WriteString(sb: sizebuf_s, s: str):
+    if s is None or s == "":
+        SZ_Write(sb, b'\x00', 1)
+    else:
+        data_bytes = s.encode('ascii') + b'\x00'
+        SZ_Write(sb, data_bytes, len(data_bytes))
+
+def MSG_WriteCoord16(sb:sizebuf_s, f:float):
+    MSG_WriteShort(sb, int(f*8) & 0xFFFF)
+
+def MSG_WriteCoord24(sb:sizebuf_s, f:float):
+    MSG_WriteShort(sb, int(f))
+    MSG_WriteByte(sb, int(f*255) % 255 )
+
+def MSG_WriteCoord32f(sb:sizebuf_s, f:float):
+    MSG_WriteFloat(sb, f)
+
+def MSG_WriteCoord(sb: sizebuf_s, f:float, flags: int):
+    if flags & protocol.PRFL_FLOATCOORD:
+        MSG_WriteFloat(sb, f)
+    elif flags & protocol.PRFL_INT32COORD:
+        MSG_WriteLong(sb, int(f*16))
+    elif flags & protocol.PRFL_24BITCOORD:
+        MSG_WriteCoord24(sb, f)
+    else:
+        MSG_WriteCoord16(sb, f)
+
+def MSG_WriteAngle(sb:sizebuf_s, f: float, flags: int):
+    if flags & protocol.PRFL_FLOATANGLE:
+        MSG_WriteFloat(sb,f)
+    elif flags & protocol.PRFL_SHORTANGLE:
+        MSG_WriteShort(sb, int(f * 65536.0 /360.0) & 65535)
+    else:
+        MSG_WriteByte(sb, int(f * 256.0/360.0) & 255)
+
+def MSG_WriteAngle16(sb:sizebuf_s, f:float, flags: int):
+    if flags & protocol.PRFL_FLOATANGLE:
+        MSG_WriteFloat(sb, f)
+    else:
+        MSG_WriteShort(sb, int(f*65536.0 / 360.0) & 65535)
+
+
+def MSG_BeginReading():
+    global msg_badread, msg_readcount
+
+    msg_readcount = 0
+    msg_badread = False
+
+
+def MSG_ReadChar():
+    global msg_badread, msg_readcount
+
+    if msg_readcount + 1 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    c = net_main.net_message.data[msg_readcount]
+    msg_readcount += 1
+
+    if c > 127:
+        c -=  256
+
+    return c
+
+def MSG_ReadByte():
+    global msg_badread, msg_readcount
+
+    if msg_readcount + 1 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    c = net_main.net_message.data[msg_readcount]
+    msg_readcount += 1
+
+    return c
+
+def MSG_ReadShort():
+    global msg_badread, msg_readcount
+
+    if msg_readcount + 2 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    c = net_main.net_message.data[msg_readcount] + (net_main.net_message.data[msg_readcount + 1] << 8)
+    msg_readcount += 2
+
+    # convert to signed 16-bit int
+    if c > 32767:
+        c -= 65536
+
+    return c
+
+def MSG_ReadLong():
+    global msg_badread, msg_readcount
+
+    if msg_readcount + 4 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    c = net_main.net_message.data[msg_readcount] \
+        + (net_main.net_message.data[msg_readcount + 1] << 8) \
+        + (net_main.net_message.data[msg_readcount + 2] << 16) \
+        + (net_main.net_message.data[msg_readcount + 3] << 24)
+    msg_readcount += 4
+
+    # convert to signed 32-bit int
+    if c > 2147483647:
+        c -= 4294967296
+
+    return c
+
+def MSG_ReadFloat():
+    global msg_badread, msg_readcount
+
+    if msg_readcount + 4 > net_main.net_message.cursize:
+        msg_badread = True
+        return -1
+
+    data = net_main.net_message.data[msg_readcount : msg_readcount + 4]
+    f = struct.unpack('<f', data)[0]
+
+    msg_readcount += 4
+    return f
+
+def MSG_ReadString():
+    global msg_badread, msg_readcount
+
+    data = net_main.net_message.data
+    cursize = net_main.net_message.cursize
+    string_chars = []
+
+    # Loop until we find the null terminator
+    while True:
+        if msg_readcount >= cursize:
+            # We hit the end of the packet without a null terminator
+            msg_badread = True
+            break
+
+        char_code = data[msg_readcount]
+        msg_readcount += 1
+
+        if char_code == 0:
+            break
+
+        string_chars.append(chr(char_code))
+
+    return "".join(string_chars)
+
+def MSG_ReadCoord16() -> float:
+    return MSG_ReadShort() * ( 1.0 / 8 )
+
+def MSG_ReadCoord24() -> float:
+    return MSG_ReadShort() + MSG_ReadByte() * ( 1.0 / 255 )
+
+def MSG_ReadCoord32f() -> float:
+    return MSG_ReadFloat()
+
+def MSG_ReadCoord(flags: int) -> float:
+    if flags & protocol.PRFL_FLOATCOORD:
+        return MSG_ReadFloat()
+    elif flags & protocol.PRFL_INT32COORD:
+        return MSG_ReadLong() * ( 1.0 / 16.0 )
+    elif flags & protocol.PRFL_24BITCOORD:
+        return MSG_ReadCoord24()
+    else:
+        return MSG_ReadCoord16()
+
+def MSG_ReadAngle(flags:int) -> float:
+    if flags & protocol.PRFL_FLOATANGLE:
+        return MSG_ReadFloat()
+    elif flags & protocol.PRFL_SHORTANGLE:
+        return MSG_ReadShort() * ( 360.0 / 65536)
+    else:
+        return MSG_ReadChar() * (360.0/256)
+
+def MSG_ReadAngle16(flags: int) -> float:
+    if flags & protocol.PRFL_FLOATANGLE:
+        return MSG_ReadFloat()
+    else:
+        return MSG_ReadShort() * ( 360.0 / 65536)
+
+
+
+def SZ_Alloc(buf: sizebuf_s, startsize: int):
+    if startsize < 256:
+        startsize = 256
+    buf.data = bytearray(startsize)
+    buf.maxsize = startsize
+    buf.cursize = 0
+
+def SZ_Clear(buf: sizebuf_s):
+    buf.cursize = 0
+
+def SZ_GetSpace(buf: sizebuf_s, length: int):
+    if buf.cursize + length > buf.maxsize:
+        if not buf.allowoverflow:
+            host.Host_Error('SZ_GetSpace: overflow without allowoverflow set')
+
+        if length > buf.maxsize:
+            sys_sdl_unix.Sys_Error('SZ_GetSpace: %i is > full buffer size' % length)
+
+        buf.overflowed = True
+        console.Con_Printf('SZ_GetSpace: overflow\n')
+        SZ_Clear(buf)
+
+    data_start_index = buf.cursize
+    buf.cursize += length
+    return data_start_index
+
+def SZ_Write(buf: sizebuf_s, data, length: int):
+    start_index = SZ_GetSpace(buf, length)
+    buf.data[start_index : start_index + length] = data[:length]
+
+def SZ_Print(buf: sizebuf_s, string: str):
+    data_bytes = (string + '\0').encode('ascii')
+    length = len(data_bytes)
+    SZ_Write(buf, data_bytes, length)
 
 def COM_InitArgv():
     global safemode
@@ -391,7 +631,7 @@ def COM_AddGameDirectory(base, dir):
             else:
                 old = com_modified
                 if been_here:
-                    base = main_sdl.parms.userdir
+                    base = host.parms.userdir
                 qspak = COM_LoadPackFile(f'{base}/quakespasm.pak')
                 com_modified = old
 
@@ -408,9 +648,9 @@ def COM_AddGameDirectory(base, dir):
         if not pak:
             break
 
-        if not been_here and main_sdl.parms.userdir != main_sdl.parms.basedir:
+        if not been_here and host.parms.userdir != host.parms.basedir:
             been_here = True
-            com_gamedir = f'{main_sdl.parms.userdir}/{dir}'
+            com_gamedir = f'{host.parms.userdir}/{dir}'
             sys_sdl_unix.Sys_mkdir(com_gamedir)
             # goto _add_path
 
@@ -472,7 +712,7 @@ def COM_InitFilesytem():
     if i != 0 and i < com_argc - 1:
         com_basedir = com_argv[i + 1]
     else:
-        com_basedir = main_sdl.parms.basedir
+        com_basedir = host.parms.basedir
 
     if len(com_basedir) == 0:
         sys_sdl_unix.Sys_Error("bad argument to -basedir")
@@ -779,26 +1019,6 @@ def COM_FileGetExtension(file):
 
 def COM_AddExtension(name, ext):
     return name + ext
-
-def MSG_BeginReading():
-    global msg_readcount
-    global msg_badread
-
-    msg_readcount = 0
-    msg_badread = False
-
-def MSG_ReadByte():
-    global msg_readcount
-    global msg_badread
-
-    if msg_readcount+1 > net_main.net_message.cursize:
-        msg_badread = True
-        return -1
-
-    c = net_main.net_message.data[msg_readcount]
-    msg_readcount += 1
-
-    return c
 
 def COM_SkipPath(pathname):
     return os.path.basename(pathname)

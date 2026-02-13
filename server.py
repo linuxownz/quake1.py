@@ -34,7 +34,7 @@ class client_t():
         self.msgbug = bytearray()
 
         raise NotImplementedError
-        self.edict = 0
+        self.edict : progs.edict_t = 0
         self.edict_index = 0 # <<<<<<<<<<<<<< need this as edict is a pointer
 
         self.name = ''

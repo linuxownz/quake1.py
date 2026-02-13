@@ -27,12 +27,24 @@ class cvar_t():
 __cvars: list[cvar_t] = []
 
 def Cvar_List_f():
-    arg = _cmd.Cmd_Argv(1)
-    for cvar in sorted(__cvars, key=lambda x: x.name):
-        if arg and not cvar.name.startswith(arg):
-            continue
-        console.Con_Printf('%s %s %i %f %s' % (cvar.name, cvar.string, cvar.flags, cvar.value, cvar.default_string))
-    console.Con_Printf(f'{len(__cvars)} cvars defined\n')
+    """
+    Lists all cvars. If an argument is provided, only lists those
+    starting with that string.
+    """
+    match = _cmd.Cmd_Argv(1)
+    var = Cvar_FindVarAfter("", 0) # Start from the beginning
+
+    count = 0
+    while var:
+        if not match or var.name.startswith(match):
+            # Quake format: [A] cvar_name "value"
+            # [A] denotes an ARCHIVE flag
+            prefix = "A" if (var.flags & CVAR_ARCHIVE) else " "
+            console.Con_Printf(f"{prefix} {var.name:20} \"{var.string}\"\n")
+            count += 1
+        var = Cvar_FindVarAfter(var.name, 0)
+
+    console.Con_Printf(f"{count} cvars\n")
 
 def Cvar_Toggle_f():
     pass
@@ -71,6 +83,34 @@ def Cvar_FindVar(name) -> cvar_t:
         if var.name == name:
             return var
     return None
+
+def Cvar_FindVarAfter(prev_name: str, with_flags: int) -> cvar_t:
+    """
+    Finds the next cvar_t in the list after prev_name that matches the flags.
+    Matches the logic of the C version you provided.
+    """
+    found_prev = False
+
+    # If prev_name is empty, we start from the very first cvar
+    if not prev_name:
+        found_prev = True
+
+    for var in __cvars:
+        if not found_prev:
+            if var.name == prev_name:
+                found_prev = True
+            continue
+
+        # Search for the next cvar matching the needed flags
+        # (var->flags & with_flags) || !with_flags
+        if not with_flags or (var.flags & with_flags):
+            return var
+
+    return None
+
+
+
+
 
 def Cvar_RegisterVariable(variable):
     name   = variable['name']

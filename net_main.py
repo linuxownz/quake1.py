@@ -59,7 +59,7 @@ def SetNetTime():
     net_time = sys_sdl_unix.Sys_DoubleTime()
     return net_time
 
-def NET_NewQSocket():
+def NET_NewQSocket() -> net_defs.qsocket_t:
     global net_freeSockets
     global net_activeSockets
     if net_freeSockets is None:
@@ -575,7 +575,7 @@ def NET_Init():
             continue
         i += 1
 
-        net_bsd.net_drivers[net_driverlevel].Initialized = True
+        net_bsd.net_drivers[net_driverlevel].initialized = True
         if listening:
             net_bsd.net_drivers[net_driverlevel].Listen(True)
 
