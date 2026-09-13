@@ -1,9 +1,9 @@
 #gl_rlight.py
 
-import cvar
 import cl_main
-import quakedef
+import cvar
 import gl_rmain
+import quakedef
 
 r_dlightframecount = 0
 

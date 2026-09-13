@@ -3,6 +3,7 @@
 import console
 import sv_main
 
+
 def PR_Profile_f():
     if not sv_main.sv.active:
         return

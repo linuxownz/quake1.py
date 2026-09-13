@@ -2,8 +2,8 @@
 
 import common
 import cvar
-import glquake
 import gl_texmgr
+import glquake
 
 ABSOLUTE_MAX_PARTICLES =  32768
 ABSOLUTE_MIN_PARTICLES =  512  
@@ -46,7 +46,7 @@ def R_ParticleTextureLookup(x, y, sharpness):
 
     r = x * x + y * y
 
-    r = 255 if r > 255 else r
+    r = min(r, 255)
     a = sharpness * ( 255 - r )
     a = min(a, 255)
     return a

@@ -1,12 +1,10 @@
 #r_alias.py 
-import OpenGL
-import OpenGL.GL
 
+import gl_rmisc
+import gl_texmgr
+import gl_vidsdl
 import glquake
 import quakedef
-import gl_vidsdl
-import gl_texmgr
-import gl_rmisc
 
 playertextures : list[gl_texmgr.gltexture_t] = [ None for i in range(quakedef.MAX_SCOREBOARD)]
 
@@ -745,7 +743,7 @@ entalpha = 0.0
 overbright = False
 shading = True
 
-class lerpdata_t():
+class lerpdata_t:
     def __init__(self):
         self.pose1 = 0
         self.pose2 = 0

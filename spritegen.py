@@ -2,6 +2,7 @@
 
 from enum import IntEnum
 
+
 class Synctype(IntEnum):
     ST_SYNC = 0
     ST_RAND = 1

@@ -1,16 +1,18 @@
 #keys.py
 
 from __future__ import annotations
+
 from enum import Enum
 
-import host
 import _cmd
-import console
-import vid
-import menu
 import cl_main
-import quakedef
+import console
+import host
 import in_sdl
+import menu
+import quakedef
+import vid
+
 
 class keydest_t(Enum):
     key_game    = 0
@@ -276,7 +278,7 @@ class keydest_t(Enum):
     key_message = 2
     key_menu    = 3
 
-class key_inputgrab_t():
+class key_inputgrab_t:
     def __init__(self):
         self.active = False
         self.lastkey = 0
@@ -305,7 +307,7 @@ def History_Init():
     global key_lines
     try:
         with open(f'{host.parms.userdir}/{HISTORY_FILE_NAME}', 'rt') as hf:
-            key_lines = [ line.rstrip() for line in hf.readlines() ]
+            key_lines = [ line.rstrip() for line in hf ]
         key_lines.insert(0, ']')
     except:
         pass
@@ -592,14 +594,12 @@ def Key_Console(key):
 
     if key == K_PGUP:
         console.con_backscroll += 5
-        if console.con_backscroll > console.con_totallines - 25:
-            console.con_backscroll = console.con_totallines - 25
+        console.con_backscroll = min(console.con_backscroll, console.con_totallines - 25)
         return True
 
     if key == K_PGDN:
         console.con_backscroll -= 5
-        if console.con_backscroll < 0:
-            console.con_backscroll = 0
+        console.con_backscroll = max(console.con_backscroll, 0)
         return True
 
     # Reset scroll when user types or enters command

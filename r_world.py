@@ -1,8 +1,8 @@
 #r_world.py 
 
-import glquake
-import gl_vidsdl
 import gl_rmisc
+import gl_vidsdl
+import glquake
 
 vertAttrIndex      = 0
 texCoordsAttrIndex = 1

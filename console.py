@@ -2,20 +2,17 @@
 
 import sys
 from datetime import datetime
-from enum import Enum
+
 import OpenGL.GL as gl
 
-import cvar
 import _cmd
-import host
-import keys
 import cl_main
-import client
 import common
+import cvar
 import gl_draw
 import gl_vidsdl
-import cvar
-
+import host
+import keys
 
 # class keydest_t(Enum):
 #     key_game    = 0
@@ -198,7 +195,6 @@ def Con_Init():
 
 def Con_DrawConsole():
     global con_text, con_displaylines, con_totallines, con_input_buffer, con_backscroll
-    import gl_vidsdl
 
     if con_displaylines <= 0 or con_text is None:
         return
@@ -259,10 +255,8 @@ def Con_CheckResize():
 
     if con_displaylines < target:
         con_displaylines += CON_SPEED
-        if con_displaylines > target:
-            con_displaylines = target
+        con_displaylines = min(con_displaylines, target)
     elif con_displaylines > target:
         con_displaylines -= CON_SPEED
-        if con_displaylines < target:
-            con_displaylines = target
+        con_displaylines = max(con_displaylines, target)
 

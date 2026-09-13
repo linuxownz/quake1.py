@@ -1,26 +1,24 @@
 #gl_vidsdl.py
 
-from enum import Enum
-import sdl2
-import sdl2.ext
-
+import ctypes
 import os
 import sys
-import sdl2
-import sdl2.ext
-import ctypes
+from enum import Enum
+
 import OpenGL
 import OpenGL.GL
+import sdl2
+import sdl2.ext
 
-import cfgfile
 import _cmd
+import cfgfile
 import common
 import console
 import cvar
 import gl_draw
+import gl_rmisc
 import gl_screen
 import gl_vidsdl
-import gl_rmisc
 import host
 import in_sdl
 import keys
@@ -44,7 +42,7 @@ MAXHEIGHT      = 10000
 
 DEFAULT_REFRESHRATE = 60
 
-class vmode_t():
+class vmode_t:
     def __init__(self, width, height, refreshrate, bpp):
         self.width = width
         self.height = height
@@ -104,7 +102,7 @@ class vid_opt_e(Enum):
 
 video_options_cursor = 0
 
-class vid_menu_mode():
+class vid_menu_mode:
     def __init__(self):
         self.width = 0
         self.height = 0
@@ -492,18 +490,14 @@ def GL_CheckExtensions():
 
     if common.COM_CheckParm('-nocombine'):
         console.Con_Warning('texture_env_combine disabled at command line')
-    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_combine'):
-        gl_texture_env_combine = True
-    elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_combine'):
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_combine') or GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_combine'):
         gl_texture_env_combine = True
     else:
         console.Con_Warning('texture_env_combine not supported')
 
     if common.COM_CheckParm('-noadd'):
         console.Con_Warning('texture_env_add disabled at command line')
-    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_add'):
-        gl_texture_env_add = True
-    elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_add'):
+    elif GL_ParseExtensionList(gl_extensions, 'GL_ARB_texture_env_add') or GL_ParseExtensionList(gl_extensions, 'GL_EXT_texture_env_add'):
         gl_texture_env_add = True
     else:
         console.Con_Warning('texture_env_add not supported')
@@ -594,9 +588,7 @@ def GL_CheckExtensions():
     if common.COM_CheckParm('-nowarpmipmaps'):
         console.Con_Warning('glGenerateMipmap disabled at command line')
     else:
-        if gl_version_major >= 3 or GL_ParseExtensionList(gl_extensions, 'GL_ARB_framebuffer_object'):
-            console.Con_Printf('Found: glGenerateMipmap')
-        elif GL_ParseExtensionList(gl_extensions, 'GL_EXT_framebuffer_object'):
+        if gl_version_major >= 3 or GL_ParseExtensionList(gl_extensions, 'GL_ARB_framebuffer_object') or GL_ParseExtensionList(gl_extensions, 'GL_EXT_framebuffer_object'):
             console.Con_Printf('Found: glGenerateMipmap')
         else:
             console.Con_Warning('glGenerateMipmap not available, liquids wont have mipmaps')

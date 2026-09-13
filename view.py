@@ -1,11 +1,10 @@
 #view.py
 
-import bspfile
 import _cmd
-import client
+import bspfile
+import cl_main
 import cvar
 import quakedef
-import cl_main
 
 v_punchangles = []; #johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous valu
 
@@ -210,8 +209,6 @@ def V_CalcBlend():
     v_blend[2] = b/255.0
     v_blend[3] = a
 
-    if v_blend[3] > 1:
-        v_blend[3] = 1
-    if v_blend[3] < 0:
-        v_blend[3] = 0
+    v_blend[3] = min(v_blend[3], 1)
+    v_blend[3] = max(v_blend[3], 0)
 

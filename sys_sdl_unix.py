@@ -1,13 +1,14 @@
 # sys_sdl_unix.py
 
-import os, sys, io
+import io
+import os
+import sys
+
 import sdl2
 
-import in_sdl
 import common
-import cvar
 import host
-import main_sdl
+import in_sdl
 
 isDedicated = False
 stdinIsATTY = False
@@ -39,7 +40,6 @@ def Sys_GetUserDir():
 
 def Sys_mkdir():
     print("Sys_mkdir pass")
-    pass
 
 def Sys_Init():
     global stdinIsATTY

@@ -1,8 +1,8 @@
 # wad.py
 
 import struct
+
 import common
-import zone
 
 # WAD2 Lump structure is 32 bytes
 WADFILENAME = 'gfx.wad'

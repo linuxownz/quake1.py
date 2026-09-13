@@ -1,26 +1,63 @@
 #gl_model.py
 
 import struct
+
 import bspfile
-import host
 import common
-import sys_sdl_unix
-import quakedef
+import host
 import modelgen
-import spritegen
+import quakedef
 import r_brush
+import spritegen
+import sys_sdl_unix
+import zone
+import mathlib
 
 MAX_MOD_KNOWN = 2048
 mod_known: list[quakedef.qmodel_t] = [None] * MAX_MOD_KNOWN
-mod_numknown = 0
+mod_numknown:int = 0
 
-r_notexture_mip = None
+r_notexture_mip: quakedef.texture_t  = None
+r_notexture_mip2: quakedef.texture_t = None
 loadmodel: quakedef.qmodel_t = None
 loadname = ''
 
+def Mod_Init():
+    global cvar, _cmd, console
+    import _cmd
+    import console
+    import cvar
+
+    _cmd.Cmd_AddCommand('mcache', Mod_Print )
+
+    cvar.Cvar_RegisterVariable({'name':'external_vis',      'value':'1', 'flags': cvar.CVAR_ARCHIVE})
+    cvar.Cvar_RegisterVariable({'name':'external_textures', 'value':'1', 'flags': cvar.CVAR_ARCHIVE})
+    cvar.Cvar_RegisterVariable({'name':'external_ents',     'value':'1', 'flags': cvar.CVAR_ARCHIVE})
+
+    global r_notexture_mip, r_notexture_mip2
+    r_notexture_mip = quakedef.texture_t("notexture", 32, 32)
+    r_notexture_mip2 = quakedef.texture_t("notexture", 32, 32)
+
+    print("Model Subsystem Initialized.")
+
+def Mod_Extradata(mod: quakedef.qmodel_t):
+    r = zone.Cache_Check(mod.cache)
+    if r:
+        return r
+
+    Mod_LoadModel(mod, True)
+
+    if not mod.cache.data:
+        sys_sdl_unix.Sys_Error('Mod_Extradata: caching failed')
+
+    return mod.cache.data
+
+
+
+
 # --- Geometry Verbs ---
 
-def GL_BuildPolygon(model, face):
+def GL_BuildPolygon(model: quakedef.qmodel_t, face):
     """Converts BSP face into a GL-friendly 7-float vertex array."""
     # This logic stays here because it is part of the GL frontend
     tex = face.texinfo
@@ -44,8 +81,8 @@ def GL_BuildPolygon(model, face):
         for j in range(2):
             val = (v[0] * tex.vecs[j][0] + v[1] * tex.vecs[j][1] +
                    v[2] * tex.vecs[j][2] + tex.vecs[j][3])
-            if val < mins[j]: mins[j] = val
-            if val > maxs[j]: maxs[j] = val
+            mins[j] = min(mins[j], val)
+            maxs[j] = max(maxs[j], val)
 
     face.texturemins = [int(mins[0] // 16), int(mins[1] // 16)]
     face.extents = [int(maxs[0] // 16) - int(mins[0] // 16),
@@ -146,11 +183,6 @@ def Mod_LoadModel(mod, crash):
         # Defaults to BSP
         return Mod_LoadBrushModel(mod, buf)
 
-def Mod_Init():
-    global r_notexture_mip
-    r_notexture_mip = quakedef.texture_t("notexture", 16, 16)
-    print("Model Subsystem Initialized.")
-
 def Mod_FindName(name):
     global mod_numknown
     for i in range(mod_numknown):
@@ -212,7 +244,7 @@ def Mod_PointInLeaf(p, model):
 
         # Calculate the distance of point p from the plane:
         # Ax + By + Cz - D = 0
-        d = DotProduct(p, plane.normal) - plane.dist
+        d = mathlib.DotProduct(p, plane.normal) - plane.dist
 
         if d > 0:
             # Point is "in front" of the plane
@@ -220,3 +252,15 @@ def Mod_PointInLeaf(p, model):
         else:
             # Point is "behind" or on the plane
             node = node.children[1]
+
+def Mod_DecompressVis(_in: bytes, model: quakedef.qmodel_t) -> bytes:
+    pass
+
+def Mod_Print():
+    import console
+    console.Con_Printf('Cached models:\n')
+
+    for i, mod in enumerate(mod_known):
+        console.Con_Printf(f'{mod.name}')
+
+    console.Con_Printf('{i} known images in cache')

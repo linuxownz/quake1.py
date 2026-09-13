@@ -1,23 +1,24 @@
 #gl_rmain.py
 
-import OpenGL.GL as gl
 import math
 
+import OpenGL.GL as gl
+
 import bspfile
-import mathlib
+import cl_main
 import common
 import console
-import r_brush
-import gl_rlight
-import gl_fog
-import render
-import quakedef
-import cl_main
-import gl_screen
-import gl_model
 import cvar
-import view
+import gl_fog
+import gl_model
+import gl_rlight
+import gl_screen
+import mathlib
+import quakedef
+import r_brush
+import render
 import sys_sdl_unix
+import view
 
 modelorg    = [0, 0, 0]
 r_entorigin = [0, 0, 0]
@@ -194,6 +195,7 @@ def gl_rmain_Init():
 def R_SetView():
     import OpenGL.GL as gl
     import OpenGL.GLU as glu
+
     import gl_vidsdl
 
     # 1. Projection (The Lens)

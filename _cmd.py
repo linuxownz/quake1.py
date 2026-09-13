@@ -1,11 +1,12 @@
 #cmd.py
 from __future__ import annotations
-from enum import Enum
 
 import shlex
+from enum import Enum
 
-import console
 import common
+import console
+import _cmd
 
 MAX_ALIAS_NAME = 32
 CMDLINE_LENGTH = 256
@@ -16,7 +17,7 @@ cmd_argv : list[str] = []
 cmd_null_string = ''
 cmd_args = ''
 
-class cmdalias_t():
+class cmdalias_t:
     def __init__(self, name, value, next):
         self.name = name
         self.value = value
@@ -40,7 +41,7 @@ class cmd_source_t(Enum):
     src_client = 0
     src_command = 1
 
-cmd_source = cmd_source_t.src_client
+cmd_source: cmd_source_t = None
 
 def Cbuf_Init():
     global cmd_text
@@ -131,7 +132,7 @@ def Cmd_Init():
 
     Cmd_List_f()
 
-def Cmd_Argc():
+def Cmd_Argc() -> int:
     return cmd_argc
 
 def Cmd_Argv(arg) -> str:
@@ -210,15 +211,19 @@ def Cbuf_Execute():
                     current_cmd_tokens.append(clean_token)
 
             if current_cmd_tokens:
-                Cmd_ExecuteString(" ".join(current_cmd_tokens))
+                thecmd = " ".join(current_cmd_tokens)
+                Cmd_ExecuteString(thecmd, cmd_source_t.src_command)
 
         except ValueError as e:
             console.Con_Printf(f"Config parse error on line [{line}]: {e}\n")
 
 
-def Cmd_ExecuteString(text: str):
+def Cmd_ExecuteString(text: str, src: _cmd.cmd_source_t):
     import cvar
     global cmd_argv, cmd_argc
+    global cmd_source
+
+    cmd_source = src
 
     try:
         # posix=False treats backslashes as literal characters
@@ -230,7 +235,10 @@ def Cmd_ExecuteString(text: str):
     except Exception:
         cmd_argv = text.split()
 
+    cmd_argc = len(cmd_argv)
+
     if not cmd_argv:
+        assert(cmd_argc == 0)
         return
 
     cmd_argc = len(cmd_argv)

@@ -1,11 +1,11 @@
 #net_defs.py
 
-from dataclasses import dataclass
-import struct
 import socket
+import struct
+from dataclasses import dataclass
 
-import quakedef
 import net_defs
+import quakedef
 
 #NET_HEADERSIZE      (2 * sizeof(unsigned int))
 SIZEOFUNSIGNEDINT = struct.calcsize('I')
@@ -39,7 +39,7 @@ MAX_NET_DRIVERS = 8
 NET_NAMELEN = 64
 NET_MAXMESSAGE = 64000
 
-class qsocket_t():
+class qsocket_t:
     def __init__(self):
         self.next : qsocket_t = None
         self.connecttime = 0

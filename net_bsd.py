@@ -1,10 +1,11 @@
 #net_bsd.py
 
-import net_loop
 import net_dgrm
+import net_loop
 import net_udp
 
-class net_driver_t():
+
+class net_driver_t:
     def __init__(self, name, initialized, Init, Listen,
                 SearchForHosts, Connect, CheckNewConnections,
                 QGetMessage, QSendMessage, SendUnreliableMessage,
@@ -63,7 +64,7 @@ net_drivers = [
 
 net_numdrivers = len(net_drivers)
 
-class net_landriver_t():
+class net_landriver_t:
     def __init__(self, Init, Shutdown, Listen, OpenSocket, CloseSocket, Connect, CheckNewConnections,
     Read, Write, Broadcast, AddrToString, StringToAddr, GetSocketAddr, GetNameFromAddr, GetAddrFromName, AddrCompare,
     GetSocketPort, SetSocketPort):

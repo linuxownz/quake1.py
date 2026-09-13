@@ -255,7 +255,7 @@ TE_EXPLOSION2= 12
 TE_BEAM =   13
 # PGM 01/21/97
 
-class entity_state_t():
+class entity_state_t:
     def __init__(self):
         self.origin : List[float] = [ 0., 0., 0. ]
         self.angles : List[float] = [ 0., 0., 0. ]
@@ -267,7 +267,7 @@ class entity_state_t():
         self.scale = 0
         self.effects = 0
 
-class usercmd_t():
+class usercmd_t:
     def __init__(self):
         self.viewangles : List[float] = [ 0., 0., 0. ]
 

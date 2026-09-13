@@ -1,14 +1,15 @@
-#render.py 
+#render.py
 
-import protocol
 import gl_model
+import protocol
 
 MAXCLIPPLANES = 11
 
 TOP_RANGE = 16
 BOTTOM_RANGE = 96
 
-class entity_t():
+class entity_t:
+    """ dont confuse this with bspfile.entity_t """
     def __init__(self):
         self.forcelink = False
         self.update_type = 0
@@ -44,15 +45,9 @@ class entity_t():
         self.currentorigin = [0, 0, 0]
         self.previousangles = [0, 0, 0]
         self.currentangles = [0, 0, 0]
-        
 
 
-
-
-
-
-
-class efrag_t():
+class efrag_t:
     def __init__(self):
         self.leafnext : efrag_t = None
         self.entity : entity_t = None

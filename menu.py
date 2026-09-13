@@ -4,16 +4,14 @@ from enum import Enum
 from random import randint
 
 import _cmd
-import console
 import cl_main
+import console
 import cvar
+import gl_vidsdl
 import in_sdl
 import keys
-import gl_vidsdl
-import vid
-
 import sv_main
-
+import vid
 
 vid_menucmdfn = None
 vid_menudrawfn = None

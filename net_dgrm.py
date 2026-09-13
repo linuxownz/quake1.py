@@ -1,20 +1,20 @@
 #net_dgrm.py
 
-import struct
 import socket
+import struct
 
 import _cmd
-import cvar
 import common
 import console
+import cvar
+import gl_screen
 import menu
-import net_main
-import net_defs
 import net_bsd
+import net_defs
+import net_main
 import net_udp
 import quakedef
 import sv_main
-import gl_screen
 
 net_landriverlevel = 0
 
@@ -730,10 +730,10 @@ def errorReturn(sock):
 def errorReturn2(sock):
     net_bsd.net_landrivers[net_landriverlevel].CloseSocket(sock)
     import gl_vidsdl
-    import vid
     import in_sdl
     import keys
     import menu
+    import vid
 
     if menu.m_return_onerror:
         in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.MS_WINDOWED)

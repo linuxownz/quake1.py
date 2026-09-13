@@ -2,18 +2,18 @@
 
 import OpenGL.GL as gl
 
-import host
 import _cmd
-import gl_screen
-import gl_vidsdl
 import cl_main
-import wad
-import quakedef
+import common
 import cvar
 import gl_draw
-import screen
-import common
+import gl_screen
+import gl_vidsdl
+import host
 import protocol
+import quakedef
+import screen
+import wad
 
 sb_updates : int = 0
 

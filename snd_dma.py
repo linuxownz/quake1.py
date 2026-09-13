@@ -1,12 +1,11 @@
-#snd_dma.py 
+#snd_dma.py
 
-import sdl2.sdlmixer
 
 import _cmd
-import cvar
+import quakedef
 import common
-import bspfile
 import console
+import cvar
 import q_sound
 import snd_mix
 import snd_sdl
@@ -38,7 +37,7 @@ MAX_SFX = 1024
 known_sfx : list[q_sound.sfx_t] = []
 num_sfx = 0
 
-ambient_sfx : list[q_sound.sfx_t] = [q_sound.sfx_t() for _ in range(bspfile.NUM_AMBIENTS)]
+ambient_sfx : list[q_sound.sfx_t] = [q_sound.sfx_t() for _ in range(quakedef.NUM_AMBIENTS)]
 
 sound_started = False
 
@@ -53,7 +52,7 @@ def S_ClearBuffer():
         return
 
     SNDDMA_LockBuffer()
-    
+
 
 def S_StopAllSounds(clear):
     if not sound_started:
@@ -136,7 +135,7 @@ def S_FindName(name):
     global num_sfx
     if not name:
         Sys_Error('S_FindName : name is Null')
-    
+
     i = 0
     for i in range(num_sfx):
         if known_sfx[i].name == name:
@@ -187,7 +186,7 @@ def S_Startup():
         console.Con_Printf('failed to init sound')
     else:
         console.Con_Printf("Audio: %d bit, %s, %d Hz\n" % ( shm.samplebits, 'stereo' if shm.channels == 2 else "mono", shm.speed))
-    
+
 def S_Init():
     global known_sfx
     global num_sfx
@@ -198,7 +197,7 @@ def S_Init():
     if snd_initialized:
         console.Con_Printf('sound already initialized')
 
-    bgmvolume         = {'name': "bgmvolume",         'value': "1",     'flags' : cvar.CVAR_ARCHIVE};        
+    bgmvolume         = {'name': "bgmvolume",         'value': "1",     'flags' : cvar.CVAR_ARCHIVE};
     sfxvolume         = {'name': "volume",            'value': "0.7",   'flags' : cvar.CVAR_ARCHIVE};
     precache          = {'name': "precache",          'value': "1",     'flags' : cvar.CVAR_NONE};
     loadas8bit        = {'name': "loadas8bit",        'value': "0",     'flags' : cvar.CVAR_NONE};
@@ -207,7 +206,7 @@ def S_Init():
 
     snd_filterquality = {'name':"snd_filterquality",  'value':SND_FILTERQUALITY_DEFAULT, 'flags': cvar.CVAR_NONE};
 
-    nosound           = {'name': "nosound",           'value': "0",     'flags' : cvar.CVAR_NONE};                    
+    nosound           = {'name': "nosound",           'value': "0",     'flags' : cvar.CVAR_NONE};
     ambient_level     = {'name': "ambient_level",     'value': "0.3",   'flags' : cvar.CVAR_NONE};
     ambient_fade      = {'name': "ambient_fade",      'value': "100",   'flags' : cvar.CVAR_NONE};
     snd_noextraupdate = {'name': "snd_noextraupdate", 'value': "0",     'flags' : cvar.CVAR_NONE};
@@ -236,7 +235,7 @@ def S_Init():
     console.Con_Printf('\nSound Initialization\n')
 
     import _cmd
-    _cmd.Cmd_AddCommand("play",      S_Play) 
+    _cmd.Cmd_AddCommand("play",      S_Play)
     _cmd.Cmd_AddCommand("playvol",   S_PlayVol)
     _cmd.Cmd_AddCommand("stopsound", S_StopAllSoundsC)
     _cmd.Cmd_AddCommand("soundlist", S_SoundList)
@@ -263,7 +262,7 @@ def S_Init():
     S_Startup()
     if sound_started == 0:
         return
-    
+
     global ambient_sfx
     ambient_sfx[bspfile.AMBIENT_WATER] = S_PrecacheSound('ambience/water1.wav')
     ambient_sfx[bspfile.AMBIENT_SKY]   = S_PrecacheSound('ambience/wind2.wav')

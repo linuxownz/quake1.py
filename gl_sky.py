@@ -1,7 +1,7 @@
 #gl_sky.py 
 
-import console
 import _cmd
+import console
 import gl_texmgr
 
 MAX_CLIP_VERTS  = 64

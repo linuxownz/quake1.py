@@ -1,18 +1,16 @@
 #in_sdl.py
 
-from enum import Enum
-from enum import Flag, auto
+
+import ctypes
 
 import sdl2
 import sdl2.ext
-import ctypes
 
-# import cvar
+import cl_input
 import cl_main
-import client
-import keys
 import common
 import console
+import keys
 import sys_sdl_unix
 
 windowhasfocus = True
@@ -125,7 +123,7 @@ def IN_StartupJoystick():
         console.Con_Warning('could not initialize game controller')
         return
 
-    controllerdb = f'{common.com_basedir}/gamecontrollerdb.txt'.encode('utf-8')
+    controllerdb = f'{common.com_basedir}/gamecontrollerdb.txt'.encode()
     nummappings = sdl2.SDL_GameControllerAddMappingsFromFile(controllerdb)
 
     if nummappings > 0:
@@ -171,7 +169,6 @@ def IN_MouseMotion(dx, dy):
         cl_main.cl.viewangles[0] = -70
 
 def IN_SendKeyEvents():
-    import cvar
     global joy_active_controller
     global joy_active_instanceid
     global windowhasfocus
@@ -218,23 +215,23 @@ def IN_SendKeyEvents():
 
                     # --- STRAFING (A/D) ---
                     if key == ord('w'):
-                        client.in_forward.state = (client.in_forward.state | 1 | 2) if down else (client.in_forward.state & ~1)
+                        cl_input.in_forward.state = (cl_input.in_forward.state | 1 | 2) if down else (cl_input.in_forward.state & ~1)
                     elif key == ord('s'):
-                        client.in_back.state = (client.in_back.state | 1 | 2) if down else (client.in_back.state & ~1)
+                        cl_input.in_back.state = (cl_input.in_back.state | 1 | 2) if down else (cl_input.in_back.state & ~1)
                     elif key == ord('a'):
-                        client.in_strafe_left.state = (client.in_strafe_left.state | 1 | 2) if down else (client.in_strafe_left.state & ~1)
+                        cl_input.in_strafe_left.state = (cl_input.in_strafe_left.state | 1 | 2) if down else (cl_input.in_strafe_left.state & ~1)
                     elif key == ord('d'):
-                        client.in_strafe_right.state = (client.in_strafe_right.state | 1 | 2) if down else (client.in_strafe_right.state & ~1)
+                        cl_input.in_strafe_right.state = (cl_input.in_strafe_right.state | 1 | 2) if down else (cl_input.in_strafe_right.state & ~1)
 
                     # --- TURNING (Arrow Keys) ---
                     if key == keys.K_LEFTARROW:
-                        client.in_turn_left.state = (client.in_turn_left.state | 1) if down else 0
+                        cl_input.in_turn_left.state = (cl_input.in_turn_left.state | 1) if down else 0
                     elif key == keys.K_RIGHTARROW:
-                        client.in_turn_right.state = (client.in_turn_right.state | 1) if down else 0
+                        cl_input.in_turn_right.state = (cl_input.in_turn_right.state | 1) if down else 0
                     elif key == keys.K_UPARROW:
-                        client.in_pitch_up.state = (client.in_pitch_up.state | 1) if down else 0
+                        cl_input.in_pitch_up.state = (cl_input.in_pitch_up.state | 1) if down else 0
                     elif key == keys.K_DOWNARROW:
-                        client.in_pitch_down.state = (client.in_pitch_down.state | 1) if down else 0
+                        cl_input.in_pitch_down.state = (cl_input.in_pitch_down.state | 1) if down else 0
 
                 # 2. If console is open, handle navigation keys
                 if keys.key_dest == keys.keydest_t.key_console:
@@ -297,7 +294,7 @@ def IN_SendKeyEvents():
                 console.Con_Printf('Ignoring SDL_CONTROLLERDEVICEREMAPPED\n')
 
             case sdl2.SDL_QUIT:
-                client.CL_Disconnect()
+                cl_main.CL_Disconnect()
                 sys_sdl_unix.Sys_Quit()
 
 def IN_SDL2_ScancodeToQuakeKey(scancode):
@@ -453,8 +450,8 @@ def IN_MouseMove():
     cl_main.cl.viewangles[0] += view_y
 
     # 5. Clamp the pitch so the player can't flip upside down
-    if cl_main.cl.viewangles[0] > 80:  cl_main.cl.viewangles[0] = 80
-    if cl_main.cl.viewangles[0] < -70: cl_main.cl.viewangles[0] = -70
+    cl_main.cl.viewangles[0] = min(cl_main.cl.viewangles[0], 80)
+    cl_main.cl.viewangles[0] = max(cl_main.cl.viewangles[0], -70)
 
     # 6. RESET the accumulation for the next frame
     total_dx = 0

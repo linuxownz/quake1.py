@@ -1,10 +1,10 @@
 #snd_sdl.py 
+
 import sdl2
 import sdl2.ext
-import ctypes
 
-import cvar
 import console
+import cvar
 import q_sound
 
 buffersize = 0

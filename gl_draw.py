@@ -1,13 +1,18 @@
 #gl_draw.py
 
-import OpenGL.GL as gl
+from __future__ import annotations
+from typing import TYPE_CHECKING
+
+if TYPE_CHECKING:
+    import gl_texmgr
+
+
 import struct
+import OpenGL.GL as gl
 
-import wad
-import gl_texmgr
+#import gl_texmgr
 import screen
-from quakedef import MAX_QPATH
-
+import wad
 
 draw_disc     : wad.qpic_t = None
 draw_backtile : wad.qpic_t = None
@@ -75,7 +80,7 @@ pic_crosshair_data = [
     255,255,255,255,255,255,255,255
 ]
 
-class glpic_t():
+class glpic_t:
     def __init__(self):
         self.gltexture : gl_texmgr.gltexture_t = None
         self.sl = 0.0
@@ -85,7 +90,7 @@ class glpic_t():
 
 currentcanvas : screen.canvastype = screen.canvastype.CANVAS_NONE
 
-class cachepic_t():
+class cachepic_t:
     #unpack_string = f'<{MAX_QPATH}s{wad.qpic_t.unpack_string}32B'
     def __init__(self):
         self.name = ''
@@ -105,7 +110,7 @@ TEXEL_SIZE = BLOCK_WIDTH * BLOCK_HEIGHT
 
 scrap_allocated = [[0 for i in range(BLOCK_WIDTH)] for _ in range(MAX_SCRAPS)]
 scrap_texels    = [bytearray(TEXEL_SIZE) for _ in range(MAX_SCRAPS)]
-scrap_textures : list[gl_texmgr.gltexture_t] = [gl_texmgr.gltexture_t() for _ in range(MAX_SCRAPS)]
+#scrap_textures : list[gl_texmgr.gltexture_t] = [gl_texmgr.gltexture_t() for _ in range(MAX_SCRAPS)]
 
 scrap_dirty = False
 
@@ -145,8 +150,7 @@ def Scrap_AllocBlock(w, h) -> (int, int, int):
                     break
 
                 # Update best2: Find the tallest column in the current window
-                if current_height > best2:
-                    best2 = current_height
+                best2 = max(best2, current_height)
 
             # C condition: j == w means the inner loop completed successfully (all w columns checked)
             if j == w - 1: # Python's j loop ends at w-1, so checking j==w-1 means it completed
@@ -183,8 +187,7 @@ def Scrap_AllocBlockFail(w, h) -> (int, int, int):
             for j in range(w):
                 if scrap_allocated[texnum][i + j] >= best:
                     break
-                if scrap_allocated[texnum][i + j] >= best2:
-                    best2 = scrap_allocated[texnum][i + j]
+                best2 = max(scrap_allocated[texnum][i + j], best2)
 
             if j == w:
                 x = i
@@ -267,7 +270,12 @@ def Draw_LoadPics():
 
 def Draw_Init():
     global pic_ins, pic_ovr, pic_nul, pic_crosshair
+    global scrap_textures
+    global gl_texmgr, cvar
     import cvar
+    import gl_texmgr
+
+    scrap_textures = [gl_texmgr.gltexture_t() for _ in range(MAX_SCRAPS)]
 
     scr_conalpha = {'name': "scr_conalpha", 'value': "0.5", 'flags': cvar.CVAR_ARCHIVE} #johnfitz
     cvar.Cvar_RegisterVariable(scr_conalpha)

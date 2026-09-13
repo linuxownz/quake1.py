@@ -1,8 +1,8 @@
 #cvar.py
 
-import _cmd
-import console
+#import _cmd
 import host
+import console
 
 CVAR_NONE       = 0
 CVAR_ARCHIVE    = 1 << 0
@@ -15,7 +15,7 @@ CVAR_LOCKED     = 1 << 8
 CVAR_REGISTERED = 1 << 10
 CVAR_CALLBACK   = 1 << 16
 
-class cvar_t():
+class cvar_t:
     def __init__(self, name, string, flags, value, default_string, callback):
         self.name = name
         self.string = string
@@ -65,6 +65,12 @@ def Cvar_ResetCfg_f():
     pass
 
 def Cvar_Init():
+    global _cmd
+    import _cmd
+    #import console
+    #import host
+    #import sys_sdl_unix
+
     _cmd.Cmd_AddCommand('cvarlist', Cvar_List_f)
     _cmd.Cmd_AddCommand('toggle', Cvar_Toggle_f)
     _cmd.Cmd_AddCommand('cycle', Cvar_Cycle_f)
@@ -161,7 +167,7 @@ def Cvar_SetCallback(Cvar:dict, callback):
     cvar = Cvar_FindVar(Cvar['name'])
 
     if cvar is None:
-        Sys_Error(f'could not find cvar {Cvar['name']} to set callback')
+        sys_sdl_unix.Sys_Error(f'could not find cvar {Cvar['name']} to set callback')
 
     cvar.callback = callback
 

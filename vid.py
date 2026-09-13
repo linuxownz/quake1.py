@@ -14,7 +14,7 @@ class modestate_t(Enum):
 
 # pixel_t : bytes = b'\x00'
 
-class vrect_t():
+class vrect_t:
     def __init__(self):
         self.x = 0
         self.y = 0
@@ -22,7 +22,7 @@ class vrect_t():
         self.height = 0
         self.next = None
 
-class viddef_t():
+class viddef_t:
     def __init__(self):
         self.buffer : bytes = None
         self.colormap: bytes = None

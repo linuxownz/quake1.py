@@ -10,12 +10,12 @@ if __name__ == "__main__":
     # 2. Allocate two blocks
     p1 = zone.Z_Malloc(1024)
     p2 = zone.Z_Malloc(1024)
-    print(f"Allocated two 1KB blocks. Rover moved.")
+    print("Allocated two 1KB blocks. Rover moved.")
 
     # 3. Free them
     zone.Z_Free(p1)
     zone.Z_Free(p2)
-    print(f"Freed blocks. If coalesce worked, we should have one large free block again.")
+    print("Freed blocks. If coalesce worked, we should have one large free block again.")
     
     # Check the first block's size (should be roughly 4MB minus whatever Hunk used)
     first_b = zone.mainzone_manager.blocklist.next

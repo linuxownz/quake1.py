@@ -2,6 +2,7 @@
 
 from enum import Enum
 
+
 class canvastype(Enum):
     CANVAS_NONE         = 0       
     CANVAS_DEFAULT      = 1    

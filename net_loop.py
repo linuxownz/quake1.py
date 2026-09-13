@@ -1,11 +1,11 @@
 #net_loop.py
 
+import cl_main
+import console
+import cvar
 import net_defs
 import net_main
-import cl_main
-import cvar
 import sv_main
-import console
 import sys_sdl_unix
 
 localconnectpending = False
@@ -97,7 +97,8 @@ def Loop_CheckNewConnections():
 
     return loop_server
 
-import common # Assuming SZ_Clear and SZ_Write are here
+import common  # Assuming SZ_Clear and SZ_Write are here
+
 
 def IntAlign(value):
     # Mimics C's (value + 3) & ~3 for 4-byte alignment

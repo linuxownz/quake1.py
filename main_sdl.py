@@ -2,22 +2,21 @@
 # main_sdl.py for main_sdl.c
 
 import sys
-import os
 import atexit
+
 import sdl2
 import sdl2.ext
-import ctypes
+
+import cl_main
 
 #from common import COM_InitArgv
-
 import common
 import console
-import client
-import cl_main
 import gl_vidsdl
 import host
 import sys_sdl_unix
 import sys_sdl_unix as unix
+
 
 def Sys_AtExit():
     sdl2.SDL_Quit()
@@ -32,11 +31,12 @@ def Sys_InitSDL():
     if sdl2.SDL_Init(0) < 0:
         #Sys_Error("Couldn't init SDL: %s" % SDL_GetError());
         print("Couldn't init SDL: %s" % sdl2.SDL_GetError());
-        exit(1)
+        sys.exit(1)
 
     atexit.register( Sys_AtExit )
 
 def main():
+    global cvar
     import cvar
     host.membase = bytearray(host.memsize)
 

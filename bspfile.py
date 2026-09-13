@@ -1,87 +1,8 @@
 # bspfile.py
 
 import struct
+
 import gl_model
-import quakedef
-
-# --- Constants ---
-MAXLIGHTMAPS = 4
-HEADER_LUMPS = 15
-BSPVERSION   = 29
-
-MAX_MAP_HULLS       = 4
-MAX_MAP_MODELS      = 256
-MAX_MAP_BRUSHES     = 4096
-MAX_MAP_ENTITIES    = 1024
-MAX_MAP_ENTSTRING   = 65536
-MAX_MAP_PLANES      = 32767
-MAX_MAP_NODES       = 32767
-MAX_MAP_CLIPNODES   = 32767
-MAX_MAP_VERTS       = 65535
-MAX_MAP_FACES       = 65535
-MAX_MAP_MARKSURFACES=  65535
-MAX_MAP_TEXINFO     = 4096
-MAX_MAP_EDGES       = 256000
-MAX_MAP_SURFEDGES   = 512000
-MAX_MAP_TEXTURES    = 512
-MAX_MAP_MIPTEX      = 0x200000
-MAX_MAP_LIGHTING    = 0x100000
-MAX_MAP_VISIBILITY  = 0x100000
-MAX_MAP_PORTALS     = 65536
-
-MAX_KEY = 32
-MAX_VALUE = 1024
-
-# Lump Indices
-LUMP_ENTITIES     = 0
-LUMP_PLANES       = 1
-LUMP_TEXTURES     = 2
-LUMP_VERTEXES     = 3
-LUMP_VISIBILITY   = 4
-LUMP_NODES        = 5
-LUMP_TEXINFO      = 6
-LUMP_FACES        = 7
-LUMP_LIGHTING     = 8
-LUMP_CLIPNODES    = 9
-LUMP_LEAFS        = 10
-LUMP_MARKSURFACES = 11
-LUMP_EDGES        = 12
-LUMP_SURFEDGES    = 13
-LUMP_MODELS       = 14
-
-NUM_AMBIENTS      = 4
-
-
-CONTENTS_EMPTY         = -1
-CONTENTS_SOLID         = -2
-CONTENTS_WATER         = -3
-CONTENTS_SLIME         = -4
-CONTENTS_LAVA          = -5
-CONTENTS_SKY           = -6
-CONTENTS_ORIGIN        = -7
-CONTENTS_CLIP          = -8
-
-CONTENTS_CURRENT_0     = -9
-CONTENTS_CURRENT_90    = -10
-CONTENTS_CURRENT_180   = -11
-CONTENTS_CURRENT_270   = -12
-CONTENTS_CURRENT_UP    = -13
-CONTENTS_CURRENT_DOWN  = -14
-
-PLANE_X       = 0
-PLANE_Y       = 1
-PLANE_Z       = 2
-
-PLANE_ANYX    = 3
-PLANE_ANYY    = 4
-PLANE_ANYZ    = 5
-
-
-
-class lump_t:
-    def __init__(self, fileofs, filelen):
-        self.fileofs = fileofs
-        self.filelen = filelen
 
 # --- Core Loader ---
 

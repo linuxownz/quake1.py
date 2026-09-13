@@ -1,16 +1,16 @@
 #net_main.py
 
-import cl_main
 import _cmd
+import cl_main
 import common
 import console
 import cvar
+import host
 import net_bsd
 import net_defs
+import quakedef
 import sv_main
 import sys_sdl_unix
-import host
-import quakedef
 
 net_activeSockets : net_defs.qsocket_t = None
 net_freeSockets   : net_defs.qsocket_t = None
@@ -95,6 +95,7 @@ def NET_NewQSocket() -> net_defs.qsocket_t:
 def NET_FreeQSocket(sock: net_defs.qsocket_t):
     global net_activeSockets
     global net_freeSockets
+    global net_activeconnections # Keep the count in sync
 
     if sock == net_activeSockets:
         net_activeSockets = net_activeSockets.next
@@ -105,20 +106,20 @@ def NET_FreeQSocket(sock: net_defs.qsocket_t):
                 s.next = sock.next
                 break
             s = s.next
-
-        if s is None:
-            sys_sdl_unix.Sys_Error("NET_FreeQSocket: not active")
+        else: # Python's while-else: runs if no 'break' occurred
+             sys_sdl_unix.Sys_Error("NET_FreeQSocket: not active")
 
     sock.next = net_freeSockets
     net_freeSockets = sock
     sock.disconnected = True
+    net_activeconnections -= 1
 
 
-def NET_QSocketGetTime(s: net_defs.qsocket_t):
+def NET_QSocketGetTime(s: net_defs.qsocket_t) -> str:
     return s.connecttime
 
 
-def NET_QSocketGetAddressString(s: net_defs.qsocket_t):
+def NET_QSocketGetAddressString(s: net_defs.qsocket_t) -> str:
     return s.address
 
 
@@ -314,11 +315,15 @@ def NET_CheckNewConnections():
     for net_driverlevel in range(net_bsd.net_numdrivers):
         if not net_bsd.net_drivers[net_driverlevel].initialized:
             continue
+
+        # Only check non-loopback drivers if we are actually hosting
         if not IS_LOOP_DRIVER(net_driverlevel) and not listening:
             continue
-            result = net_bsd.net_drivers[net_driverlevel].CheckNewConnections()
-            if result:
-                return result
+
+        # This must be outside the 'if' block to actually run!
+        result = net_bsd.net_drivers[net_driverlevel].CheckNewConnections()
+        if result:
+            return result
 
     return None
 
@@ -334,7 +339,7 @@ def NET_Close(sock: net_defs.qsocket_t):
     NET_FreeQSocket(sock)
 
 
-def NET_GetMessage(sock: net_defs.qsocket_t):
+def NET_GetMessage(sock: net_defs.qsocket_t) -> int:
     global messagesReceived
     global unreliableMessagesReceived
 
@@ -366,21 +371,35 @@ def NET_GetMessage(sock: net_defs.qsocket_t):
 
     return ret
 
-def NET_SendMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
-    global messagesSent
-    if not sock:
-        return -1
-
-    if sock.disconnected:
-        console.Con_Printf("Net_SendMessage: disconnected socket\n")
-        return -1
-
+def NET_SendMessages():
+    global net_activeSockets
     SetNetTime()
-    res = net_bsd.net_drivers[sock.driver].QSendMessage(sock, data)
-    if res == 1 and not IS_LOOP_DRIVER(sock.driver):
-        messagesSent += 1
 
-    return res
+    # Use a local reference to traverse the active list
+    sock = net_activeSockets
+    while sock:
+        # Save the next pointer immediately; NET_Close can destroy 'sock'
+        next_sock = sock.next
+
+        if sock.disconnected:
+            sock = next_sock
+            continue
+
+        # 1. Handle Reliable Retransmissions
+        # If we are waiting for an ACK (canSend is False)
+        if not sock.canSend:
+            # Check if 1.0 second (standard Quake timeout) has passed
+            if (net_time - sock.lastMessageTime) > 1.0:
+                # Call the driver-specific retransmit (Datagram_ReSendMessage)
+                net_bsd.net_drivers[sock.driver].ReSendMessage(sock)
+
+        # 2. Handle Large Message Fragmentation
+        # If there is more data in the queue for a multi-part message
+        elif sock.sendNext:
+            # Call the driver-specific next fragment (Datagram_SendMessageNext)
+            net_bsd.net_drivers[sock.driver].SendMessageNext(sock)
+
+        sock = next_sock
 
 def NET_SendUnreliableMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
     global messagesSent
@@ -472,8 +491,7 @@ def MaxPlayers_f():
         console.Con_Printf('maxplayers cannot be changed while server is running \n')
 
     n = int(_cmd.Cmd_Argv(1))
-    if n < 1:
-        n = 1
+    n = max(n, 1)
 
     if n > sv_main.svs.maxclientslimit:
         n = sv_main.svs.maxclientslimit
@@ -529,6 +547,9 @@ def NET_Init():
 
     import common
     net_message = common.sizebuf_s()
+    net_message.data = bytearray(quakedef.MAX_DATAGRAM)
+    net_message.maxsize = quakedef.MAX_DATAGRAM
+    net_message.cursize = 0
 
     i = common.COM_CheckParm('-port')
     if i == 0:
@@ -618,3 +639,14 @@ def SchedulePollProcedure( proc: net_defs.PollProcedure, timeOffset):
     proc.next = pp
     prev.next =  proc
 
+def NET_SendMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
+    if sock.disconnected:
+        return
+    # Hand off to the driver (e.g., Datagram_SendMessage in net_dgrm.py)
+    net_bsd.net_drivers[sock.driver].SendMessage(sock, data)
+
+# def NET_SendUnreliableMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
+#     if sock.disconnected:
+#         return
+#     # Hand off to the driver (e.g., Datagram_SendUnreliableMessage in net_dgrm.py)
+#     net_bsd.net_drivers[sock.driver].SendUnreliableMessage(sock, data)

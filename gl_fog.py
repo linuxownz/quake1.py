@@ -3,10 +3,8 @@
 import OpenGL
 import OpenGL.GL as gl
 
-
 import _cmd
 import console
-import client
 
 DEFAULT_DENSITY = 0.0
 DEFAULT_GRAY    = 0.3
@@ -95,23 +93,16 @@ def Fog_FogCommand_f():
             b = float(_cmd.Cmd_Argv(1))
             t = float(_cmd.Cmd_Argv(1))
 
-    if d < 0.0:
-        d = 0.0
+    d = max(d, 0.0)
 
-    if r < 0.0:
-        r = 0.0
-    if r > 1.0:
-        r = 1.0
+    r = max(r, 0.0)
+    r = min(r, 1.0)
 
-    if g < 0.0:
-        g = 0.0
-    if g > 1.0:
-        g = 1.0
+    g = max(g, 0.0)
+    g = min(g, 1.0)
 
-    if b < 0.0:
-        b = 0.0
-    if b > 1.0:
-        b = 1.0
+    b = max(b, 0.0)
+    b = min(b, 1.0)
 
     Fog_Update(d, r, g, b, t)
 

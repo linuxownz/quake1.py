@@ -2,21 +2,21 @@
 
 import os
 
-import cl_main
-import client
-import console
-import common
-import sv_main
-import menu
-import in_sdl
 import _cmd
-import net_main
+import cl_main
+import common
+import console
 import gl_screen
 import host
-import quakedef
 import host_cmd
+import in_sdl
 import keys
+import menu
+import net_main
+import quakedef
+import sv_main
 import sys_sdl_unix
+
 
 class filelist_item_t:
     def __init__(self, name, path_id, next: filelist_item_t):
@@ -416,7 +416,6 @@ def Host_Tell_f():
 
 def Host_Color_f():
     raise NotImplementedError
-    pass
 
 def Host_Kill_f():
     if _cmd.cmd_source == src_command:
@@ -744,8 +743,7 @@ def Host_Savegame_f():
     Host_SavegameComment(comment)
     file.write(f'{comment}\n')
 
-    for i in range(NUM_SPAWN_PARMS):
-        file.write(f'{svs.client.spawn_parms[i]}\n')
+    file.writelines(f'{svs.client.spawn_parms[i]}\n' for i in range(NUM_SPAWN_PARMS))
 
     file.write(f'{current_skill}\n')
     file.write(f'{sv.name}\n')

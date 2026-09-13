@@ -1,31 +1,26 @@
 #gl_texmgr.py
 
+import array
+import ctypes
+from enum import Enum
+
+import numpy as np
 import OpenGL
 import OpenGL.GL
-import array
-import numpy as np
-from typing import Union
-
-import struct
-import ctypes
-
-from enum import Enum
-from enum import Flag, auto
 
 import _cmd
-import cvar
-import crc
 import common
 import console
-import glquake
+import crc
+import cvar
 import gl_model
-import gl_vidsdl
-import gl_texmgr
 import gl_rmain
+import gl_texmgr
+import gl_vidsdl
 import gl_warp
+import glquake
 import r_brush
 import sys_sdl_unix
-
 
 TEXPREF_NONE       = 0x0000
 TEXPREF_MIPMAP     = 0x0001  # generate mipmaps TEXPREF_NEAREST and TEXPREF_LINEAR aren't supposed to be ORed with TEX_MIPMAP
@@ -47,7 +42,7 @@ class srcformat(Enum):
     SRC_RGBA            = 2,
     SRC_INDEXED_PALETTE = 3
 
-class gltexture_t():
+class gltexture_t:
     def __init__(self):
         self.texnum = 0
         self.next  : gltexture_t       = None
@@ -91,7 +86,7 @@ d_8to24table_nobright       = array.array('B', [0] * 1024)
 d_8to24table_nobright_fence = array.array('B', [0] * 1024)
 d_8to24table_conchars       = array.array('B', [0] * 1024)
 
-class glmode_t():
+class glmode_t:
     def __init__(self, magfilter, minfilter, name):
         self.magfilter = magfilter
         self.minfilter = minfilter
@@ -109,7 +104,7 @@ glmodes : list[glmode_t] = [
 NUM_GLMODES = len(glmodes)
 glmode_idx  = NUM_GLMODES - 1
 
-currenttexture = [glquake.GL_UNUSED_TEXTURE, glquake.GL_UNUSED_TEXTURE, glquake.GL_UNUSED_TEXTURE]
+currenttexture:list[float] = []
 currenttarget = OpenGL.GL.GL_TEXTURE0
 mtexenabled = False
 
@@ -435,11 +430,9 @@ def TexMgr_SafeTextureSize (s):
 
     if p > 0:
         p = TexMgr_Pad(p)
-        if p < s:
-            s = p
+        s = min(s, p)
 
-    if s > gl_hardware_maxsize:
-        s = gl_hardware_maxsize
+    s = min(s, gl_hardware_maxsize)
 
     return s
 
@@ -547,7 +540,6 @@ def TexMgr_LoadImage(owner:gl_model.qmodel_t, name, width, height, format : gl_t
 
     if glt is None:
         breakpoint()
-        pass
 
 
     glt.owner = owner
@@ -732,6 +724,9 @@ def TexMgr_Init():
     global active_gltextures
     global numgltextures
     global gl_hardware_maxsize
+    global currenttexture
+    import glquake
+    currenttexture = [glquake.GL_UNUSED_TEXTURE] * 3
 
     notexture_data   = bytes([159,91,83,255,0,0,0,255,0,0,0,255,159,91,83,255])
     nulltexture_data = bytes([127,191,255,255,0,0,0,255,0,0,0,255,127,191,255,255])

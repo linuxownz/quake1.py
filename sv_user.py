@@ -1,6 +1,5 @@
 #sv_user.py 
 
-import cvar
 
 sv_player : edict_t = None
 

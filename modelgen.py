@@ -21,7 +21,7 @@ class aliasskintype_t(Enum):
     ALIAS_SKIN_SINGLE = 0
     ALIAS_SKIN_GROUP  = 1
 
-class mdl_t():
+class mdl_t:
     def __init__(self):
         self.ident = 0
         self.version = 0
@@ -38,18 +38,18 @@ class mdl_t():
         self.flags = 0
         self.size = 0.0
 
-class stvert_t():
+class stvert_t:
     def __init__(self):
         self.onseam = 0
         self.s = 0
         self.t = 0
 
-class dtriangle_t():
+class dtriangle_t:
     def __init__(self):
         self.facesfront = 0
         self.vertindex = [0, 0, 0]
 
-class trivertx_t():
+class trivertx_t:
     def __init__(self):
         self.v = [0, 0, 0]
         self.lightnormalindex = 0

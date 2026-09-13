@@ -2,10 +2,10 @@
 
 import OpenGL.GL as gl
 
-import glquake
-import quakedef
 import cl_main
 import gl_model
+import glquake
+import quakedef
 
 r_refdef = quakedef.refdef_t()
 r_visframecount = 0

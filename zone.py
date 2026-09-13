@@ -22,17 +22,17 @@ class MemBlock:
     def is_free(self):
         return self.tag == 0
 
-class cache_user_t():
+class cache_user_t:
     def __init__(self):
         self.data = None
 
-class hunk_t():
+class hunk_t:
     def __init__(self, sentinel, size, name):
         self.sentinel = 0
         self.size = 0
         self.name = ''
 
-class GlobalMemory():
+class GlobalMemory:
     hunk_base = None
     hunk_size = 0
     hunk_low_used = 0
@@ -41,7 +41,7 @@ class GlobalMemory():
     hunk_tempmark = 0
     mainzone = None
 
-class CacheManager():
+class CacheManager:
     def __init__(self):
         # A list of headers that we can search through
         self.headers = []
@@ -79,7 +79,6 @@ class ZoneManager:
 
 def Cache_Flush():
     raise NotImplementedError
-    pass
 
 def Cache_Init():
     global cache_system

@@ -2,25 +2,17 @@
 
 from __future__ import annotations
 
+import io
 import os
-import sys
 import struct
+import sys
 
-import console
-import cl_main
 import _cmd
 import cvar
-import io
-import main_sdl
-import net_main
 import host
+import net_main
 import protocol
-
 import sys_sdl_unix
-import console
-
-from enum import Enum
-from enum import Flag, auto
 
 standard_quake = True
 safemode = False
@@ -49,6 +41,14 @@ com_basedir = '.'
 msg_readcount = 0
 msg_badread = False
 
+PAK0_COUNT     =    339
+PAK0_CRC_V100  =    13900
+PAK0_CRC_V101  =    62751
+PAK0_CRC_V106  =    32981
+PAK0_CRC       =    (PAK0_CRC_V106)
+PAK0_COUNT_V091=    308
+PAK0_CRC_V091  =    28804
+
 pop = [
     0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,0x0000,
     0x0000,0x0000,0x6600,0x0000,0x0000,0x0000,0x6600,0x0000,
@@ -68,6 +68,30 @@ pop = [
     0x0000,0x0000,0x0000,0x0000,0x6400,0x0000,0x0000,0x0000
 ]
 
+class link_t:
+    def __init__(self):
+        self.prev: link_t = None
+        self.next: link_t = None
+
+def ClearLink(l: link_t):
+    l.prev = l.next = l
+
+def RemoveLink(l: link_t):
+    l.next.prev = l.prev
+    l.prev.next = l.next
+
+def InsertLinkBefore(l: link_t, before: link_t):
+    l.next = before
+    l.prev = before.prev
+    l.prev.next = l
+    l.next.prev = l
+
+def InsertLinkAfter(l:link_t, after: link_t):
+    l.next = after.next
+    l.prev = after
+    l.prev.next = l
+    l.next.prev = l
+
 class _fshandle_t:
     def __init__(self, file, pak, start, length, pos):
         self.file : io.FileIO = file
@@ -76,13 +100,13 @@ class _fshandle_t:
         self.length = length
         self.pos = pos
 
-class packfile_t():
+class packfile_t:
     def __init__(self, name, filepos, filelen):
         self.name = name
         self.filepos = filepos
         self.filelen = filelen
 
-class pack_t():
+class pack_t:
     def __init__(self, filename, handle, numfiles, files: List[packfile_t] | None):
         self.filename = filename
         self.handle = handle #file object
@@ -91,7 +115,7 @@ class pack_t():
     def __str__(self):
         return f'{self.filename} numfiles: {self.numfiles}, files: {"has files" if self.files else "None"} handle: {self.handle}'
 
-class searchpath_t():
+class searchpath_t:
     def __init__(self, path_id, filename, pack:pack_t, next: searchpath_t | None):
         self.path_id = path_id
         self.filename = filename
@@ -100,7 +124,7 @@ class searchpath_t():
     def __str__(self):
         return f'{self.filename} {self.path_id} {self.pack}'
 
-class sizebuf_s():
+class sizebuf_s:
     def __init__(self):
         self.allowoverflow = False
         self.overflowed = False
@@ -354,8 +378,7 @@ def MSG_ReadAngle16(flags: int) -> float:
 
 
 def SZ_Alloc(buf: sizebuf_s, startsize: int):
-    if startsize < 256:
-        startsize = 256
+    startsize = max(startsize, 256)
     buf.data = bytearray(startsize)
     buf.maxsize = startsize
     buf.cursize = 0
@@ -408,6 +431,23 @@ def COM_InitArgv():
     if '-hipnotic' in sys.argv or '-quoth' in sys.argv:
         hipnotic = True
         standard_quake = False
+
+    i = 1
+    while i < len(sys.argv):
+        if sys.argv[i] == '-basedir':
+            if i + 1 < len(sys.argv):
+                host.parms.basedir = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+        elif sys.argv[i] == '-userdir':
+            if i + 1 < len(sys.argv):
+                host.parms.userdir = sys.argv[i + 1]
+                i += 2
+            else:
+                i += 1
+        else:
+            i += 1
 
     print(f'COM_InitArgv safemode:{safemode} rogue:{rogue} hipnotic:{hipnotic}')
 
@@ -464,13 +504,13 @@ def COM_Game_f():
     CL_Disconnect()
     Host_ShutdownServer(True)
 
-class dpackfile_t():
+class dpackfile_t:
     def __init__(self, name, filepos, filelen):
         self.name = name
         self.filepos = filepos
         self.filelen = filelen
 
-class dpackheader_t():
+class dpackheader_t:
     def __init__(self, id, dirofs, dirlen):
         self.id = id
         self.dirofs = dirofs
@@ -655,7 +695,6 @@ def COM_AddGameDirectory(base, dir):
             # goto _add_path
 
         break
-    pass
 
     s = com_searchpaths
     while s:
@@ -663,7 +702,6 @@ def COM_AddGameDirectory(base, dir):
         s = s.next
 
     #breakpoint()
-    pass
 
 def COM_CheckRegistered():
     # Unpack 4 values
@@ -781,8 +819,7 @@ def FS_fseek(fh:_fshandle_t, offset, whence) -> int:
     if offset < 0:
         return -1
 
-    if offset > fh.length:
-        offset = fh.length
+    offset = min(offset, fh.length)
 
     fh.pos = fh.file.seek(fh.start + offset, io.SEEK_SET)
 
@@ -843,8 +880,7 @@ def FS_fgets(size, fh:_fshandle_t) -> str:
     if FS_feof(fh):
         return None
 
-    if size > ( fh.length - fh.pos ) + 1:
-        size = ( fh.length - fh.pos ) + 1
+    size = min(size, ( fh.length - fh.pos ) + 1)
 
     data = fh.file.read(size)
     fh.pos = fh.file.tell() - fh.start
@@ -1025,3 +1061,5 @@ def COM_SkipPath(pathname):
 
 def COM_StripExtension(name):
     return os.path.splitext(name)[0]
+
+import console

@@ -1,10 +1,11 @@
-#pr_edict.py 
+#pr_edict.py
 
 import _cmd
-import cvar
 import console
-import sv_main
+import cvar
+import host
 import pr_exec
+import sv_main
 
 progs : dprograms_t = None
 pr_functions : dfunction_t = None
@@ -40,7 +41,7 @@ def ED_PrintNum(ent):
 def ED_PrintEdict_f():
     if not sv_main.sv.active:
         return
-    
+
     i = int(_cmd.Cmd_Argv(1))
 
     if i < 0 or i >= sv_main.sv.num_edicts:
@@ -62,7 +63,7 @@ def ED_Count():
 
     if not sv_main.sv.active:
         return
-    
+
     for i in range(sv_main.sv.num_edicts):
         ent = EDICT_NUM(i)
 
@@ -76,7 +77,7 @@ def ED_Count():
             models += 1
         if ent.v.movetype == server.MOVETYPE_STEP:
             step += 1
-    
+
     console.Con_Printf(f'num_edicts: {sv_main.sv.num_edicts}')
     console.Con_Printf(f'active    : {active}')
     console.Con_Printf(f'view      : {models}')
@@ -119,7 +120,35 @@ def PR_Init():
     cvar.Cvar_RegisterVariable(saved3)
     cvar.Cvar_RegisterVariable(saved4)
 
+def EDICT_NUM(n):
+    """
+    Returns the edict (entity) at the specified index.
+    Ported from the QuakeSpasm C source.
+    """
+    # 1. Bounds checking against the server's current max_edicts cvar
+    if n < 0 or n >= sv_main.sv.max_edicts:
+        host.Host_Error(f"EDICT_NUM: bad number {n}")
 
+    # 2. Return the object from your edict list/array
+    # In C, this is pointer arithmetic: (byte *)sv.edicts + (n * pr_edict_size)
+    # In Python, this is a simple list access.
+    return sv_main.sv.edicts[n]
 
+def NUM_FOR_EDICT(e):
+    """
+    Returns the index (number) for a given edict object.
+    Ported from host.c.
+    """
+    try:
+        # 1. Find the index of the edict object in the server's edict list
+        # This replaces the C pointer subtraction: (byte *)e - (byte *)sv.edicts
+        b = sv_main.sv.edicts.index(e)
+    except ValueError:
+        # If the object is not in the list at all, it's a "bad pointer"
+        host.Host_Error("NUM_FOR_EDICT: bad pointer")
 
+    # 2. Bounds checking against active edicts
+    if b < 0 or b >= sv_main.sv.num_edicts:
+        host.Host_Error("NUM_FOR_EDICT: bad pointer")
 
+    return b

@@ -5,20 +5,19 @@ import ctypes
 import OpenGL
 import OpenGL.GL
 
-import client
 import _cmd
-import cvar
 import console
+import cvar
 import gl_model
 import gl_rmain
 import gl_screen
-import glquake
 import gl_texmgr
 import gl_vidsdl
+import glquake
 import host
 import quakedef
-import r_part
 import r_brush
+import r_part
 import sys_sdl_unix
 
 gl_programs = [0 for i in range(16)]
@@ -157,7 +156,6 @@ def R_SetSlimealpha_f(var:cvar.cvar_t):
 
 
 def R_Init():
-    import cvar
     _cmd.Cmd_AddCommand('timerefresh', R_TimeRefresh_f)
     _cmd.Cmd_AddCommand('pointfile', R_ReadPointFile_f)
 

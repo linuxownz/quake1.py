@@ -1,12 +1,70 @@
 #server.py
 
 from enum import Enum
-from enum import Flag, auto
 
-import gl_model
-import progs
 import net_defs
+import progs
 import protocol
+import quakedef
+
+#import common
+
+NUM_PING_TIMES = 16
+NUM_SPAWN_PARMS = 16
+
+
+MAX_SIGNON_BUFFERS = 256
+
+MOVETYPE_NONE         = 0
+MOVETYPE_ANGLENOCLIP  = 1
+MOVETYPE_ANGLECLIP    = 2
+MOVETYPE_WALK         = 3
+MOVETYPE_STEP         = 4
+MOVETYPE_FLY          = 5
+MOVETYPE_TOSS         = 6
+MOVETYPE_PUSH         = 7
+MOVETYPE_NOCLIP       = 8
+MOVETYPE_FLYMISSILE   = 9
+MOVETYPE_BOUNCE       = 10
+MOVETYPE_GIB          = 11
+
+SOLID_NOT             = 0
+SOLID_TRIGGER         = 1
+SOLID_BBOX            = 2
+SOLID_SLIDEBOX        = 3
+SOLID_BSP             = 4
+
+DEAD_NO               = 0
+DEAD_DYING            = 1
+DEAD_DEAD             = 2
+
+DAMAGE_NO             = 0
+DAMAGE_YES            = 1
+DAMAGE_AIM            = 2
+
+FL_FLY                = 1
+FL_SWIM               = 2
+FL_CONVEYOR           = 4
+FL_CLIENT             = 8
+FL_INWATER            = 16
+FL_MONSTER            = 32
+FL_GODMODE            = 64
+FL_NOTARGET           = 128
+FL_ITEM               = 256
+FL_ONGROUND           = 512
+FL_PARTIALGROUND      = 1024
+FL_WATERJUMP          = 2048
+FL_JUMPRELEASED       = 4096
+
+EF_BRIGHTFIELD        = 1
+EF_MUZZLEFLASH        = 2
+EF_BRIGHTLIGHT        = 4
+EF_DIMLIGHT           = 8
+
+SPAWNFLAG_NOT_EASY        = 256
+SPAWNFLAG_NOT_MEDIUM      = 512
+SPAWNFLAG_NOT_HARD        = 1024
+SPAWNFLAG_NOT_DEATHMATCH  = 2048
 
 class sendsignon_e(Enum):
     PRESPAWN_DONE = 0
@@ -14,7 +72,7 @@ class sendsignon_e(Enum):
     PRESPAWN_SIGNONBUFS = 2
     PRESPAWN_SIGNONMSG = 3
 
-class client_t():
+class client_t:
     def __init__(self):
         self.active = False
         self.spawned = False
@@ -30,8 +88,8 @@ class client_t():
         self.cmd : protocol.usercmd_t = None
         self.wishdir: list[float] = [0., 0., 0.]
 
-        self.message = bytearray()
-        self.msgbug = bytearray()
+        self.message : common.sizebuf_s = None
+        self.msgbuf = bytearray()
 
         raise NotImplementedError
         self.edict : progs.edict_t = 0
@@ -48,11 +106,11 @@ class client_t():
         self.old_frags = 0
 
 
-class server_static_t():
+class server_static_t:
     def __init__(self):
         self.maxclients = 0
         self.maxclientslimit = 0
-        self.clients : list[client_t]= []
+        self.clients : list[client_t] = []
         self.serverflags = 0
         self.changelevel_issued = False
 
@@ -61,8 +119,10 @@ class server_state_t(Enum):
     ss_loading = 0
     ss_active  = 1
 
-class server_t():
+class server_t:
     def __init__(self):
+        #from common import  sizebuf_s
+        import common
         self.active = False
         self.paused = False
         self.loadgame = False
@@ -74,26 +134,29 @@ class server_t():
         self.name = ''
         self.modelname = ''
 
-        self.worldmodel: gl_model.qmodel_t = None
-        self.model_precache = ''
-        self.models: list[gl_model.qmodel_t] = []
+        self.worldmodel: quakedef.qmodel_t = None
+        self.model_precache : list[str] = ['' for i in range(quakedef.MAX_MODELS)]
+        self.models: list[quakedef.qmodel_t] = [quakedef.qmodel_t for i in range (quakedef.MAX_MODELS)]
 
-        self.sound_precache = ''
-        self.lightstyles = ''
+        self.sound_precache : list[str] = ['' for i in range(quakedef.MAX_SOUNDS)]
+        self.lightstyles : list[str] = ['' for i in range(quakedef.MAX_LIGHTSTYLES)]
 
         self.num_edicts = 0
         self.max_edicts = 0
 
         self.edicts : list[progs.edict_t] = []
 
-        self.state : server.server_state_t = server_state_t.ss_loading
+        self.state : server_state_t = server_state_t.ss_loading
 
-        self.datagram = bytearray()
-        self.datagram_buf = bytearray()
+        self.datagram : common.sizebuf_s = common.sizebuf_s()
+        self.datagram_buf = bytearray(quakedef.MAX_DATAGRAM)
 
-        self.signon: bytearray = bytearray()
+        self.reliable_datagram : common.sizebuf_s = common.sizebuf_s()
+        self.reliable_datagram_buf = bytearray(quakedef.MAX_DATAGRAM)
+
+        self.signon : common.sizebuf_s = common.sizebuf_s()
         self.num_signon_buffers = 0
-        self.signon_buffers : list[bytearray] = []
+        self.signon_buffers : list[common.sizebuf_s] = [common.sizebuf_s() for i in range(MAX_SIGNON_BUFFERS)]
 
         self.protocol = 0
         self.protocolflags = 0

@@ -1,27 +1,22 @@
 #cl_main.py
 
-from enum import Enum
 import math
+from enum import Enum
 
-import keys
-import snd_dma
-import cl_main
-import client
-import cl_demo
 import _cmd
+import cl_demo
+import cl_input
+import cl_main
+import common
 import console
 import gl_screen
-import quakedef
-import sv_main
 import host
+import keys
+import net_main
+import quakedef
+import snd_dma
+import sv_main
 
-# from console import Con_DPrintf
-
-from typing import (
-    IO,  # Use if you do not know the encoding of the file object
-    TextIO, # Use if you know you are working with a text encoded file
-    BinaryIO # Use if you know you are working with a non-text encoded file
-)
 
 class cactive_t(Enum):
     ca_dedicated    = 0
@@ -31,19 +26,22 @@ class cactive_t(Enum):
 cls = quakedef.client_static_t()
 cl  = quakedef.client_state_t()
 
-cl_static_entities                        = [None for _ in range(quakedef.MAX_STATIC_ENTITIES)]
+cl_static_entities: list[quakedef.entity_t] = [None for _ in range(quakedef.MAX_STATIC_ENTITIES)]
 cl_lightstyle : list[quakedef.lightstyle_t] = [None for _ in range(quakedef.MAX_LIGHTSTYLES)]
 cl_dlights    : list[quakedef.dlight_t]     = [None for _ in range(quakedef.MAX_DLIGHTS)]
 
-cl_entities = None
+cl_entities: quakedef.entity_t = None
 
 cl_max_edicts = 0
 cl_numvisedicts = 0
 
+cl_visedicts: list[quakedef.entity_t] = [None] * quakedef.MAX_VISEDICTS
+
 
 def CL_Init():
-    import cvar
+    global _cmd, cvar
     import _cmd
+    import cvar
 
     cl_name       = {'name': "_cl_name",      'value': "player", 'flags': cvar.CVAR_ARCHIVE}
     cl_color      = {'name': "_cl_color",     'value': "0",      'flags': cvar.CVAR_ARCHIVE}
@@ -133,11 +131,11 @@ def CL_Disconnect():
             cl_main.CL_Stop_f()
 
         console.Con_DPrintf('sending clc_disconnect\n')
-        SZ_Clear(cls.message)
-        MSG_WriteByte(cl_main.cls.clc_disconnect)
-        NET_SendUnreliableMessage(cl_main.cls.netcon, cl_main.cls.message)
-        SZ_Clear(cl_main.cls.message)
-        Net_Close(cls.netcon)
+        common.SZ_Clear(cls.message)
+        common.MSG_WriteByte(cl_main.cls.clc_disconnect)
+        common.NET_SendUnreliableMessage(cl_main.cls.netcon, cl_main.cls.message)
+        common.SZ_Clear(cl_main.cls.message)
+        net_main.Net_Close(cls.netcon)
 
         cl_main.cls.state = cl_main.cactive_t.ca_disconnected
         if sv_main.sv.active:
@@ -173,10 +171,10 @@ def CL_Move(time_step):
 
     # 1. Update Angles (Rotation)
     turn_speed = 140.0 * time_step
-    if client.in_turn_left.state & 1:   cl_main.cl.viewangles[1] += turn_speed
-    if client.in_turn_right.state & 1:  cl_main.cl.viewangles[1] -= turn_speed
-    if client.in_pitch_up.state & 1:    cl_main.cl.viewangles[0] -= turn_speed
-    if client.in_pitch_down.state & 1:  cl_main.cl.viewangles[0] += turn_speed
+    if cl_input.in_turn_left.state & 1:   cl_main.cl.viewangles[1] += turn_speed
+    if cl_input.in_turn_right.state & 1:  cl_main.cl.viewangles[1] -= turn_speed
+    if cl_input.in_pitch_up.state & 1:    cl_main.cl.viewangles[0] -= turn_speed
+    if cl_input.in_pitch_down.state & 1:  cl_main.cl.viewangles[0] += turn_speed
 
     # Clamp Pitch to prevent looking too far up/down
     cl_main.cl.viewangles[0] = max(-80, min(80, cl_main.cl.viewangles[0]))
@@ -187,13 +185,13 @@ def CL_Move(time_step):
 
     # Forward/Back Vector
     fwd_move = 0
-    if client.in_forward.state & 1: fwd_move += 1
-    if client.in_back.state & 1:    fwd_move -= 1
+    if cl_input.in_forward.state & 1: fwd_move += 1
+    if cl_input.in_back.state & 1:    fwd_move -= 1
 
     # Strafe Vector
     side_move = 0
-    if client.in_strafe_right.state & 1: side_move += 1
-    if client.in_strafe_left.state & 1:  side_move -= 1
+    if cl_input.in_strafe_right.state & 1: side_move += 1
+    if cl_input.in_strafe_left.state & 1:  side_move -= 1
 
     # Apply math to the origin (vieworg)
     # Forward calculation

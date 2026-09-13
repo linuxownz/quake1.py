@@ -1,25 +1,24 @@
 #gl_screen.py
 
-import OpenGL
-import OpenGL.GL as gl
 import math
 
+import OpenGL
+import OpenGL.GL as gl
+
+import _cmd
+import cl_main
 import common
 import console
-import cl_main
-import client
 import cvar
-import keys
-import host
-import wad
-import vid
-import sbar
-import _cmd
 import gl_draw
 import gl_rmain
 import gl_vidsdl
+import host
+import keys
+import sbar
 import sys_sdl_unix
-
+import vid
+import wad
 
 glx = 0
 gly = 0
@@ -56,8 +55,8 @@ scr_notifystring = ''
 scr_drawdialog = False
 
 def SCR_Conwidth_f(var):
-    import cvar
     import common  # Assuming CLAMP is in common
+    import cvar
 
     # 1. Pull the raw values
     scr_conwidth = cvar.Cvar_GetCvar('scr_conwidth').value
@@ -408,8 +407,9 @@ def SCR_DrawCrosshair():
 
 
 def SCR_Set2D():
-    import gl_vidsdl
     import OpenGL.GL as gl
+
+    import gl_vidsdl
 
     # 1. Use the actual window dimensions
     width = gl_vidsdl._vid.width

@@ -1,7 +1,9 @@
 #gl_rsurf.py 
 
 import OpenGL.GL as gl
+
 import gl_texmgr
+
 
 def R_DrawBaseSurface(fa):
     poly = fa.polys

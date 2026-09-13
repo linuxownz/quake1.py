@@ -1,7 +1,91 @@
 #quakedef.py
-
-from enum import Enum
+import ctypes
+import io
 from dataclasses import dataclass, field
+from enum import Enum
+
+#import bspfile
+
+# --- Constants ---
+MAXLIGHTMAPS = 4
+HEADER_LUMPS = 15
+BSPVERSION   = 29
+
+BSP2VERSION_2PSB = int.from_bytes(b'BSP2', byteorder='big')
+BSP2VERSION_BSP2 = int.from_bytes(b'BSP2', byteorder='little')
+MAX_MAP_HULLS       = 4
+MAX_MAP_MODELS      = 256
+MAX_MAP_BRUSHES     = 4096
+MAX_MAP_ENTITIES    = 1024
+MAX_MAP_ENTSTRING   = 65536
+MAX_MAP_PLANES      = 32767
+MAX_MAP_NODES       = 32767
+MAX_MAP_CLIPNODES   = 32767
+MAX_MAP_VERTS       = 65535
+MAX_MAP_FACES       = 65535
+MAX_MAP_MARKSURFACES=  65535
+MAX_MAP_TEXINFO     = 4096
+MAX_MAP_EDGES       = 256000
+MAX_MAP_SURFEDGES   = 512000
+MAX_MAP_TEXTURES    = 512
+MAX_MAP_MIPTEX      = 0x200000
+MAX_MAP_LIGHTING    = 0x100000
+MAX_MAP_VISIBILITY  = 0x100000
+MAX_MAP_PORTALS     = 65536
+
+MAX_KEY = 32
+MAX_VALUE = 1024
+
+# Lump Indices
+LUMP_ENTITIES     = 0
+LUMP_PLANES       = 1
+LUMP_TEXTURES     = 2
+LUMP_VERTEXES     = 3
+LUMP_VISIBILITY   = 4
+LUMP_NODES        = 5
+LUMP_TEXINFO      = 6
+LUMP_FACES        = 7
+LUMP_LIGHTING     = 8
+LUMP_CLIPNODES    = 9
+LUMP_LEAFS        = 10
+LUMP_MARKSURFACES = 11
+LUMP_EDGES        = 12
+LUMP_SURFEDGES    = 13
+LUMP_MODELS       = 14
+
+AMBIENT_WATER =  0
+AMBIENT_SKY   =  1
+AMBIENT_SLIME =  2
+AMBIENT_LAVA  =  3
+
+NUM_AMBIENTS      = 4
+
+
+CONTENTS_EMPTY         = -1
+CONTENTS_SOLID         = -2
+CONTENTS_WATER         = -3
+CONTENTS_SLIME         = -4
+CONTENTS_LAVA          = -5
+CONTENTS_SKY           = -6
+CONTENTS_ORIGIN        = -7
+CONTENTS_CLIP          = -8
+
+CONTENTS_CURRENT_0     = -9
+CONTENTS_CURRENT_90    = -10
+CONTENTS_CURRENT_180   = -11
+CONTENTS_CURRENT_270   = -12
+CONTENTS_CURRENT_UP    = -13
+CONTENTS_CURRENT_DOWN  = -14
+
+PLANE_X       = 0
+PLANE_Y       = 1
+PLANE_Z       = 2
+
+PLANE_ANYX    = 3
+PLANE_ANYY    = 4
+PLANE_ANYZ    = 5
+
+
 
 VERSION = 1.09
 GLQUAKE_VERSION = 1.00
@@ -144,7 +228,25 @@ SOUND_CHANNELS = 8
 LMBLOCK_WIDTH = 128
 LMBLOCK_HEIGHT = 128
 
-class quakeparms_t():
+
+vec3_t = ctypes.c_float * 3
+vec4_t = ctypes.c_float * 4
+vec5_t = ctypes.c_float * 5
+
+class cache_user_t:
+    """Python equivalent of cache_user_t handle."""
+    def __init__(self, data=None):
+        self.data = data  # Holds the actual model data (or None if evicted)
+
+    @property
+    def is_loaded(self) -> bool:
+        return self.data is not None
+
+    def purge(self):
+        """Evicts data so garbage collector can clean it up."""
+        self.data = None
+
+class quakeparms_t:
     def __init__(self):
         self.basedir = ''
         self.userdir = ''
@@ -156,7 +258,7 @@ class quakeparms_t():
         self.errstate = 0
 
 # start of every frame, never reset
-class filelist_item_t():
+class filelist_item_t:
     def __init__(self):
         self.name = ''
         self.path_id = 0
@@ -171,8 +273,26 @@ EF_QEX_QUADLIGHT   = 16
 EF_QEX_PENTALIGHT  = 32
 EF_QEX_CANDLELIGHT = 64
 
+class lump_t:
+    def __init__(self, fileofs, filelen):
+        self.fileofs = fileofs
+        self.filelen = filelen
 
-# --- Classes ---
+class epair_t:
+    def __init__(self):
+        self.next: epair_t | None = None
+        self.key: str = ''
+        self.value: str = ''
+
+class entity_t:
+    """ dont confuse this with renderer.entity_t """
+    def __init__(self):
+        self.origin: list[float] = [0., 0., 0.]
+        self.firstbrush: int = 0
+        self.numbrushes: int = 0
+        self.epairs: epair_t = None
+
+
 
 class dmodel_t:
     def __init__(self):
@@ -184,15 +304,155 @@ class dmodel_t:
         self.firstface = 0
         self.numfaces = 0
 
-class mvertex_t():
+class dheader_t:
+    def __init__(self):
+        self.version: int = 0
+        self.lumps: list[lump_t] = [ None for i in range(HEADER_LUMPS)]
+
+class dmiplexlump_t:
+    def __init__(self):
+        self.nummiptex: int = 0
+        self.dataofs: list[int] = [0, 0, 0, 0]
+
+class miptex_t:
+    def __init__(self):
+        self.name: str = ''
+        self.width: int = 0
+        self.height: int = 0
+        self.offsets:list[int] = [0, 0, 0, 0]
+
+class mvertex_t:
     def __init__(self, position):
         self.position : list[float] = position
+
+class dvertex_t:
+    def __init__(self):
+        self.points: list[float] = [0., 0., 0.]
+
+class dplane_t:
+    def __init__(self):
+        self.normal: list[float] = [0., 0., 0.]
+        self.dist: float = 0.0
+        self.type: int = 0
+
+class dsnode_t:
+    def __init__(self):
+        self.planenum: int = 0
+        self.children: list[int] = [0, 0]
+        self.mins: list[int] = [0, 0, 0]
+        self.maxs: list[int] = [0, 0, 0]
+        self.firstface = 0
+        self.numfaces = 0
+
+
+class dl1node_t:
+    def __init__(self):
+        self.planenum = 0
+        self.children: list[int] = [0, 0]
+        self.mins: list[int] = [0, 0, 0]
+        self.maxs: list[int] = [0, 0, 0]
+        self.firstface = 0
+        self.numfaces = 0
+
+class dl2node_t:
+    def __init__(self):
+        self.planenum = 0
+        self.children: list[int] = [0, 0]
+        self.mins: list[int] = [0, 0, 0]
+        self.maxs: list[int] = [0, 0, 0]
+        self.firstface = 0
+
+class dsclipnode_t:
+    def __init__(self):
+        self.planenum: int = 0
+        self.children:list[int] = [0, 0]
+
+class dlclipnode_t:
+    def __init__(self):
+        self.planenum: int = 0
+        self.children:list[int] = [0, 0]
+
+
+class texinfo_t:
+    def __init__(self):
+        self.miptex: int = 0
+        self.flags:  int = 0
+
+        self.vecs: list[list[float]] = [
+            [0.0, 0.0, 0.0, 0.0],
+            [0.0, 0.0, 0.0, 0.0]
+        ]
+
+class dsedge_t:
+    def __init__(self):
+        self.v: list[int] = [0, 0]
+
+class dledge_t:
+    def __init__(self):
+        self.v: list[int] = [0, 0]
+
+MAXLIGHTMAPS = 4
+
+class dsface_t:
+    def __init__(self):
+        self.planenum: int = 0
+        self.side: int = 0
+        self.firstedge: int = 0
+        self.numedges: int = 0
+        self.texinfo: int = 0
+        self.styles: list[bytes] = [0, 0, 0, 0] #
+        self.lightofs: int = 0
+
+class dlface_t:
+    def __init__(self):
+        self.planenum: int = 0
+        self.side: int = 0
+        self.firstedge: int = 0
+        self.numedges: int = 0
+        self.texinfo: int = 0
+        self.styles: list[bytes] = [0, 0, 0, 0] #
+        self.lightofs: int = 0
+
+
+class dsleaf_t:
+    def __init__(self):
+        self.contents: int = 0
+        self.visofs: int = 0
+        self.mins:list[int] = [0, 0, 0]
+        self.maxs:list[int] = [0, 0, 0]
+        self.firstmarksurface: int = 0
+        self.nummarksurface: int = 0
+        self.ambient_level: list[int] = [0] * bspfile.NUM_AMBIENTS
+
+
+class dl1leaf_t:
+    def __init__(self):
+        self.contents: int = 0
+        self.visofs: int = 0
+        self.mins:list[int] = [0, 0, 0]
+        self.maxs:list[int] = [0, 0, 0]
+        self.firstmarksurface: int = 0
+        self.nummarksurface: int = 0
+        self.ambient_level: list[int] = [0] * bspfile.NUM_AMBIENTS
+
+class dl2leaf_t:
+    def __init__(self):
+        self.contents: int = 0
+        self.visofs: int = 0
+        self.mins:list[int] = [0, 0, 0]
+        self.maxs:list[int] = [0, 0, 0]
+        self.firstmarksurface: int = 0
+        self.nummarksurface: int = 0
+        self.ambient_level: list[int] = [0] * bspfile.NUM_AMBIENTS
+
+
+
 
 SIDE_FRONT = 0
 SIDE_BACK  = 1
 SIDE_ON    = 2
 
-class mplane_t():
+class mplane_t:
     def __init__(self, normal, dist, _type, signbits):
         self.normal : list[float] = normal
         self.dist = dist
@@ -205,7 +465,7 @@ class texchain_t(Enum):
     chain_world = 0
     chain_model = 1
 
-class texture_t():
+class texture_t:
     def __init__(self, name, width, height, shift = 0,
                 gltexture = None, fullbright = None,
                 warpimage = None, update_warp = False,
@@ -241,12 +501,12 @@ SURF_DRAWSLIME      = 0x800
 SURF_DRAWTELE       = 0x1000
 SURF_DRAWWATER      = 0x2000
 
-class medge_t():
+class medge_t:
     def __init__(self):
         self.v = []
         self.cachededgeoffset = 0
 
-class mtexinfo_t():
+class mtexinfo_t:
     def __init__(self):
         self.vecs = [[0., 0., 0., 0.], [0., 0., 0., 0.]]
         self.texture : Optional[texture_t] = None
@@ -254,14 +514,14 @@ class mtexinfo_t():
 
 VERTEXSIZE = 7
 
-class glpoly_t():
+class glpoly_t:
     def __init__(self):
-        self.next  : Optional['glpoly_t'] = None
-        self.chain : Optional['glpoly_t'] = None
+        self.next  : Optional[glpoly_t] = None
+        self.chain : Optional[glpoly_t] = None
         self.numverts = 0
         self.verts = [] # Initialize empty, built in GL_BuildPolygon
 
-class msurface_t():
+class msurface_t:
     def __init__(self):
         self.visframe = 0
         self.mins = [0, 0, 0]
@@ -275,13 +535,13 @@ class msurface_t():
         self.light_s = 0
         self.light_t = 0
         self.polys : Optional[glpoly_t] = None
-        self.texturechain : Optional['msurface_t'] = None
+        self.texturechain : Optional[msurface_t] = None
         self.texinfo : Optional[mtexinfo_t] = None
         self.styles = [0, 0, 0, 0]
         self.lightofs = -1
         self.lightmap_texture = 0
 
-class mnode_t():
+class mnode_t:
     def __init__(self):
         self.contents = 0             # 0 or greater for nodes
         self.parent = None            # Set by Mod_SetParent
@@ -292,7 +552,7 @@ class mnode_t():
         self.firstface = 0
         self.numfaces = 0
 
-class mleaf_t():
+class mleaf_t:
     def __init__(self):
         self.contents = -1            # Negative for leaves (e.g., CONTENTS_SOLID)
         self.parent = None            # Set by Mod_SetParent
@@ -355,15 +615,17 @@ class qmodel_t:
         self.submodels = []       # List of dmodel_t (Submodel info)
         self.numsubmodels = 0
 
+        self.cache = cache_user_t()
 
-class lightstyle_t():
+
+class lightstyle_t:
     def __init__(self):
         self.length = 0
         self.map = ''
         self.average = 0
         self.peak = 0
 
-class scoreboard_t():
+class scoreboard_t:
     def __init__(self):
         self.name = ''
         self.entertime = 0.0
@@ -371,7 +633,7 @@ class scoreboard_t():
         self.colors = 0
         self.translations = []
 
-class cshift_t():
+class cshift_t:
     def __init__(self, destcolor, percent):
         self.destcolor = destcolor
         self.percent = percent
@@ -393,7 +655,7 @@ MAX_VISEDICTS       = 4096    # larger, now we support BSP2
 
 
 
-class dlight_t():
+class dlight_t:
     def __init__(self):
         self.origin = [0, 0, 0]
         self.radius = 0
@@ -405,7 +667,7 @@ class dlight_t():
 
 MAX_BEAMS = 32
 
-class beam_t():
+class beam_t:
     def __init__(self):
         self.entity = 0
         self.model : gl_model.qmodel_t = None
@@ -422,7 +684,7 @@ class cactive_t(Enum):
     ca_disconnected = 1
     ca_connected = 2
 
-class client_static_t():
+class client_static_t:
     def __init__(self):
         self.state : cactive_t = cactive_t.ca_disconnected
         self.spawnparms = ''
@@ -447,7 +709,7 @@ class client_static_t():
 
         self.message = bytearray()
 
-class client_state_t():
+class client_state_t:
     def __init__(self):
         self.movemessages = 0
         self.cmd : protocol.usercmd_t = None
@@ -576,3 +838,5 @@ class refdef_t:
         self.fov_y = 0.0
 
         self.ambientlight = 0
+
+
