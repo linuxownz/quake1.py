@@ -1,5 +1,6 @@
 #progs.py
 
+import progdefs
 import protocol
 import sv_main
 
@@ -21,13 +22,14 @@ class edict_t:
         self.num_leafs: int = 0
         self.leafnums : list[int] = [0 for i in range(MAX_ENT_LEAFS)]
 
-        self.baseline : protocol.entity_state_t = None
+        self.baseline : protocol.entity_state_t =protocol.entity_state_t()
         self.alpha : int = 0
         self.scale : int = 0
         self.sendinterval : bool = False
         self.oldframe : float = 0.0
         self.oldthinktime : float = 0.0
         self.freetime : float = 0.0
+        self.v: progdefs.entvars_t = progdefs.entvars_t()
 
 def EDICT_TO_PROG(e):
     """

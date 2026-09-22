@@ -2,6 +2,7 @@
 
 import gl_model
 import protocol
+import quakedef
 
 MAXCLIPPLANES = 11
 
@@ -19,7 +20,7 @@ class entity_t:
         self.origin = [0, 0, 0]
         self.msg_angles = [ [0, 0, 0], [0, 0, 0]]
         self.angles = [0, 0, 0]
-        self.model : gl_model.qmodel_t = None
+        self.model : quakedef.qmodel_t = None
         self.efrag : efrag_t = None # will this cause circular dep or undef
         self.frame = 0
         self.syncbase = 0.0

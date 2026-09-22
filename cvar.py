@@ -1,8 +1,10 @@
 #cvar.py
 
-#import _cmd
-import host
+import io
+
+import _cmd
 import console
+import host
 
 CVAR_NONE       = 0
 CVAR_ARCHIVE    = 1 << 0
@@ -16,15 +18,24 @@ CVAR_REGISTERED = 1 << 10
 CVAR_CALLBACK   = 1 << 16
 
 class cvar_t:
-    def __init__(self, name, string, flags, value, default_string, callback):
-        self.name = name
+    def __init__(self, name, string, flags, value, default_string, callback, next):
+        self.name: str = name
         self.string = string
         self.flags = flags
         self.value = value
         self.default_string = default_string
         self.callback = callback
+        self.next = next
 
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
 __cvars: list[cvar_t] = []
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A linked list
 
 def Cvar_List_f():
     """
@@ -47,22 +58,66 @@ def Cvar_List_f():
     console.Con_Printf(f"{count} cvars\n")
 
 def Cvar_Toggle_f():
-    pass
+    match _cmd.Cmd_Argc():
+        case _, 1:
+            console.Con_Printf('toggle <cvar> : toggle cvar')
+        case 2:
+            if Cvar_VariableValue(_cmd.Cmd_Argv(1)):
+                Cvar_Set(_cmd.Cmd_Argv(1), '0')
+            else:
+                Cvar_Set(_cmd.Cmd_Argv(1), '1')
+
 
 def Cvar_Cycle_f():
-    pass
+    if _cmd.Cmd_Argc() < 3:
+        console.Con_Printf('cycle <cvar> <unique value list> : cycle cvar through a list of values')
+        return
+
+    val1 = _cmd.Cmd_Argv(1)
+    val2 = _cmd.Cmd_Argv(2)
+
+    for i in range(2, _cmd.Cmd_Argc()):
+        if float(_cmd.Cmd_Argv(i)) == 0:
+            if _cmd.Cmd_Argv(i) == Cvar_VariableString(val1):
+                break
+        else:
+            if _cmd.Cmd_Argv(i) == Cvar_VariableValue(val1):
+                break
+
+    if i == _cmd.Cmd_Argc():
+        Cvar_Set(val1, val2)
+    elif i + 1 == _cmd.Cmd_Argc():
+        Cvar_Set(val1, val2)
+    else:
+        Cvar_Set(val1, _cmd.Cmd_Argv(i + 1))
+
 
 def Cvar_Inc_f():
-    pass
+    match _cmd.Cmd_Argc():
+        case _, 1:
+            console.Con_Printf('inc <cvar> [amount] : increment cvar\n')
+        case 2:
+            Cvar_SetValue( _cmd.Cmd_Argv(1), Cvar_VariableValue(_cmd.Cmd_Argv(1))+1)
+        case 3:
+            Cvar_SetValue (_cmd.Cmd_Argv(1), Cvar_VariableValue(_cmd.Cmd_Argv(1)) + _cmd.Cmd_Argv(2))
+
 
 def Cvar_Reset_f():
-    pass
+    match _cmd.Cmd_Argc():
+        case _, 1:
+            console.Con_Printf('reset <cvar> : reset cvar to default')
+        case 2:
+            Cvar_Reset(_cmd.Cmd_Argv(1))
+
 
 def Cvar_ResetAll_f():
-    pass
+    for cvar in __cvars:
+        Cvar_Reset(cvar.name)
 
 def Cvar_ResetCfg_f():
-    pass
+    for cvar in __cvars:
+        if cvar.flags & CVAR_ARCHIVE:
+            Cvar_Reset(cvar.name)
 
 def Cvar_Init():
     global _cmd
@@ -79,10 +134,34 @@ def Cvar_Init():
     _cmd.Cmd_AddCommand('resetall', Cvar_ResetAll_f)
     _cmd.Cmd_AddCommand('resetcfg', Cvar_ResetCfg_f)
 
-def Cvar_VariableValue(varname):
-    var = Cvar_FindVar(varname)
-    return var.value
+def Cvar_VariableValue(varname) -> float:
+    var: cvar_t = Cvar_FindVar(varname)
+    if var:
+        return float(var.value)
 
+def Cvar_VariableString(varname):
+    var: cvar_t = Cvar_FindVar(varname)
+    if not var:
+        return '' #cvar_null_string
+    return var.string
+
+def Cvar_CompleteVariable(partial: str):
+    if not partial:
+        return None
+
+    for cvar in __cvars:
+        if cvar.name.startswith(partial):
+            return cvar.name
+
+    return None
+
+def Cvar_Reset(name):
+    cvar: cvar_t = Cvar_FindVar(name)
+
+    if not cvar:
+        console.Con_Printf(f'variable {name} not found')
+    else:
+        Cvar_SetQuick(cvar, cvar.default_string)
 
 def Cvar_FindVar(name) -> cvar_t:
     for var in __cvars:
@@ -115,8 +194,19 @@ def Cvar_FindVarAfter(prev_name: str, with_flags: int) -> cvar_t:
     return None
 
 
+def Cvar_LockVar(var_name):
+    var: cvar_t = Cvar_FindVar(var_name)
+    if var:
+        var.flags |= CVAR_LOCKED
 
+def Cvar_UnlockVar(var_name):
+    var: cvar_t = Cvar_FindVar(var_name)
+    if var:
+        var.flags &= ~CVAR_LOCKED
 
+def Cvar_UnlockAll():
+    for cvar in __cvars:
+        cvar.flags &= ~CVAR_LOCKED
 
 def Cvar_RegisterVariable(variable):
     name   = variable['name']
@@ -151,12 +241,14 @@ def Cvar_RegisterVariable(variable):
         flags=flags | CVAR_REGISTERED,
         value=initial_val,
         default_string=initial_str,
-        callback=variable.get('callback')
+        callback=variable.get('callback'),
+        next = None
     )
 
     __cvars.append(new_cvar)
 
 def Cvar_GetCvar(name) -> cvar_t:
+    """ convert __cvars to a hash """
     for cvar in __cvars:
         if cvar.name == name:
             return cvar
@@ -278,18 +370,8 @@ def Cvar_Command(args: list[str]) -> bool:
     return True
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+def Cvar_WriteVariables(f: io.FileIO):
+    for cvar in __cvars:
+        if cvar.flags & CVAR_ARCHIVE:
+            f.write(f'{cvar.name} "{cvar.string}"')
 

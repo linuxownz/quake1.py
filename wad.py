@@ -28,29 +28,32 @@ wad_buffer = None  # This will hold the memoryview of the whole WAD
 
 def W_LoadWadFile(filename):
     global lumpinfo, wad_buffer
-    
+
     # Load the entire WAD into the Hunk
-    wad_buffer = common.COM_LoadHunkFile(filename)
-    if not wad_buffer:
+    result = common.COM_LoadHunkFile(filename)
+    if not result or result[0] is None:
         common.sys_sdl_unix.Sys_Error(f"W_LoadWadFile: {filename} not found")
+
+    # Unpack the raw bytes buffer from the tuple (buffer, size)
+    wad_buffer = result[0] if isinstance(result, tuple) else result
 
     # Header: magic (4), numlumps (4), infotableofs (4)
     magic, numlumps, infotableofs = struct.unpack_from("<4sII", wad_buffer, 0)
-    
+
     if magic != b'WAD2':
         common.sys_sdl_unix.Sys_Error(f"W_LoadWadFile: {filename} is not a WAD2 file")
 
     lumpinfo = []
     for i in range(numlumps):
         entry_offset = infotableofs + (i * 32)
-        
+
         filepos, disksize, size, l_type, comp, pad, name_bytes = struct.unpack_from(
             WAD_LUMP_FORMAT, wad_buffer, entry_offset
         )
-        
-        # Clean the name
-        name = name_bytes.split(b'\0', 1)[0].decode('ascii').upper()
-        
+
+        # Clean the name (strip null bytes and convert to uppercase)
+        name = name_bytes.split(b'\0', 1)[0].decode('ascii', errors='ignore').upper()
+
         lumpinfo.append(lumpinfo_t(name, filepos, size, l_type))
 
     print(f"W_LoadWadFile: {filename} loaded with {len(lumpinfo)} lumps")
@@ -61,7 +64,7 @@ def W_GetLumpName(name):
     for i, lump in enumerate(lumpinfo):
         if lump.name == name:
             return W_GetLumpNum(i)
-    
+
     # Instead of hard error, return None so gl_draw can use pic_nul
     return None, 0
 
@@ -69,13 +72,13 @@ def W_GetLumpNum(num):
     """Returns (memoryview_slice, filepos)."""
     if num < 0 or num >= len(lumpinfo):
         return None, 0
-        
+
     lump = lumpinfo[num]
     start = lump.filepos
     end = start + lump.size
-    
+
     return wad_buffer[start:end], lump.filepos
-    
+
 def W_CleanupName(name: str) -> str:
     # Quake lump names are max 16 chars, often null-padded
     # This ensures "palette" becomes "PALETTE" and matches correctly

@@ -4,10 +4,14 @@ from __future__ import annotations
 
 import io
 import os
+import re
 import struct
 import sys
+from enum import Enum
 
 import _cmd
+import cl_main
+import console
 import cvar
 import host
 import net_main
@@ -31,7 +35,7 @@ com_modified = False
 com_filesize = 0
 com_cmdline = '.'
 
-com_token = ''
+com_token = []
 com_argc = 0
 com_argv = []
 
@@ -67,6 +71,10 @@ pop = [
     0x0000,0x0000,0x0000,0x0000,0x6500,0x0000,0x0000,0x0000,
     0x0000,0x0000,0x0000,0x0000,0x6400,0x0000,0x0000,0x0000
 ]
+
+class cpe_mode(Enum):
+    CPE_NOTRUNC = 0
+    CPE_ALLOWTRUNC = 1
 
 class link_t:
     def __init__(self):
@@ -107,7 +115,7 @@ class packfile_t:
         self.filelen = filelen
 
 class pack_t:
-    def __init__(self, filename, handle, numfiles, files: List[packfile_t] | None):
+    def __init__(self, filename, handle, numfiles, files: list[packfile_t] | None):
         self.filename = filename
         self.handle = handle #file object
         self.numfiles = numfiles
@@ -128,7 +136,7 @@ class sizebuf_s:
     def __init__(self):
         self.allowoverflow = False
         self.overflowed = False
-        self.data : bytearray = None
+        self.data : bytearray = bytearray()
         self.maxsize: int = 0
         self.cursize: int = 0
 
@@ -392,7 +400,7 @@ def SZ_GetSpace(buf: sizebuf_s, length: int):
             host.Host_Error('SZ_GetSpace: overflow without allowoverflow set')
 
         if length > buf.maxsize:
-            sys_sdl_unix.Sys_Error('SZ_GetSpace: %i is > full buffer size' % length)
+            sys_sdl_unix.Sys_Error(f'SZ_GetSpace: {length} is > full buffer size')
 
         buf.overflowed = True
         console.Con_Printf('SZ_GetSpace: overflow\n')
@@ -481,28 +489,65 @@ def COM_Init():
 
 def COM_Path_f():
     for path in com_searchpaths:
-        Con_Printf (path.filename)
+        console.Con_Printf (path.filename)
 
-def COM_Game_f():
-    if Cmd_Argc() <= 1:
-        Con_Printf(f"com_gamedir {com_gamedir}")
+
+def COM_WriteFile(filename: str, data: bytes | str, length: int) -> None:
+    if length <= 0:
         return
 
-    p = Cmd_Argv(1)
-    p2 = Cmd_Argv(2)
+    # 1. Ensure game directory exists
+    sys_sdl_unix.Sys_mkdir(com_gamedir)
+
+    name = f"{com_gamedir}/{filename}"
+
+    # 2. Convert string data to raw 8-bit bytes (latin-1 preserves Quake's high ASCII bits)
+    if isinstance(data, str):
+        byte_data = data.encode('latin-1', errors='ignore')[:length]
+    else:
+        byte_data = bytes(data[:length])
+
+    # 3. Create parent subdirectories if filename contains subpaths (e.g., "saves/s0.sav")
+    dirname = os.path.dirname(name)
+    if dirname:
+        sys_sdl_unix.Sys_mkdir(dirname)
+
+    # 4. Open, write, and close
+    handle = sys_sdl_unix.Sys_FileOpenWrite(name)
+    if handle is not None:
+        sys_sdl_unix.Sys_FileWrite(handle, byte_data)
+        sys_sdl_unix.Sys_FileClose(handle)
+    else:
+        console.Con_Printf(f"COM_WriteFile: failed on {name}\n")
+
+def COM_CreatePath(path: str):
+    sys_sdl_unix.Sys_mkdir(path)
+
+def COM_filelength(handle:io.FileIO):
+    return sys_sdl_unix.Sys_filelength(handle)
+
+def COM_Game_f():
+    global com_modified
+
+    if _cmd.Cmd_Argc() <= 1:
+        console.Con_Printf(f"com_gamedir {com_gamedir}")
+        return
+
+    p = _cmd.Cmd_Argv(1)
+    p2 = _cmd.Cmd_Argv(2)
 
     if p2 != 'hipnotic' and p2 != 'rogue' and p2 != 'quoth':
-        Con_Printf("invalid mission pack argument to -game")
+        console.Con_Printf("invalid mission pack argument to -game")
         return
 
     if not os.path.isdir(com_basedir + p):
-        Con_Printf("no such 'game' directory")
+        console.Con_Printf("no such 'game' directory")
         return
 
     com_modified = True
 
-    CL_Disconnect()
-    Host_ShutdownServer(True)
+    cl_main.CL_Disconnect()
+    host.Host_ShutdownServer(True)
 
 class dpackfile_t:
     def __init__(self, name, filepos, filelen):
@@ -522,7 +567,7 @@ def COM_FileBase(path):
 
 def COM_LoadFile(path):
     # Unpack the 4th variable locally
-    handle, filelen, pathid, is_pak = COM_OpenFile(path)
+    handle, filelen, _, is_pak = COM_OpenFile(path)
 
     if handle is None or handle == -1:
         return None
@@ -536,7 +581,7 @@ def COM_LoadFile(path):
     return data
 
 def COM_LoadMallocFile(filename):
-    h, size, path_id, is_pak = COM_FindFile(filename)
+    h, size, _, is_pak = COM_FindFile(filename)
     if h is None or size <= 0:
         return None
 
@@ -554,7 +599,7 @@ def COM_LoadMallocFile(filename):
 
     return buf
 
-def COM_LoadHunkFile(filename):
+def COM_LoadHunkFile(filename) -> tuple[bytes, int]:
     h, size, path_id, is_pak = COM_FindFile(filename)
     if h is None or size <= 0:
         return None
@@ -569,10 +614,12 @@ def COM_LoadHunkFile(filename):
     if not is_pak:
         sys_sdl_unix.Sys_FileClose(h)
 
-    return buf
+    return buf, path_id
 
 
 def COM_LoadPackFile(packfile) -> pack_t:
+    global com_modified
+
     (handle, filelength) = sys_sdl_unix.Sys_FileOpenRead(packfile)
 
     if filelength == -1:
@@ -586,7 +633,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
     magic, dirofs, dirlen = struct.unpack(PAK_HEADER_FORMAT, header_data)
 
     if magic != b'PACK':
-        Sys_Error(f'{packfile} is not a packfile')
+        sys_sdl_unix.Sys_Error(f'{packfile} is not a packfile')
 
     print (f'{magic} {dirofs} {dirlen}')
 
@@ -595,15 +642,15 @@ def COM_LoadPackFile(packfile) -> pack_t:
     print (f'num pack files in pack: {numpackfiles}')
 
     if dirlen < 0 or dirofs < 0:
-        Sys_Error(f'invalid packfile {packfile} {dirlen} {dirofs}')
+        sys_sdl_unix.Sys_Error(f'invalid packfile {packfile} {dirlen} {dirofs}')
 
     if numpackfiles == 0:
-        Sys_Printf(f'Warning packfile {packfile} has no files')
-        Sys_FileClose(handle)
+        sys_sdl_unix.Sys_Printf(f'Warning packfile {packfile} has no files')
+        sys_sdl_unix.Sys_FileClose(handle)
         return None
 
     if numpackfiles > 2048:
-        Sys_Error(f'packfile {packfile} has too many files {numpackfiles} > 2048')
+        sys_sdl_unix.Sys_Error(f'packfile {packfile} has too many files {numpackfiles} > 2048')
 
     if numpackfiles != 339:
         sys_sdl_unix.Sys_Printf("Warning: packfile has been modified, count mismatch.  count != 339")
@@ -622,7 +669,7 @@ def COM_LoadPackFile(packfile) -> pack_t:
 
         try:
             name = name_bytes.strip(b'\x00').decode('ascii')
-        except:
+        except UnicodeDecodeError:
             name = name_bytes.split(b'\x00A')[0]
             if name == b'progs.dat':
                 name = name.decode('ascii')
@@ -636,7 +683,87 @@ def COM_LoadPackFile(packfile) -> pack_t:
     pack = pack_t(packfile, handle, len(newfiles), newfiles)
     return pack
 
+def COM_LoadMallocFile_TextMode_OSPath(path: str) -> tuple[bytearray | None, int]:
+    if not os.path.exists(path):
+        return None, 0
 
+    try:
+        with open(path, 'rt', encoding='latin-1', errors='ignore') as f:
+            data_str = f.read()
+            data_bytes = bytearray(data_str.encode('latin-1'))
+            return data_bytes, len(data_bytes)
+    except OSError:
+        return None, 0
+
+
+def COM_ParseIntNewline(buffer: str | None) -> tuple[int | None, str | None]:
+    """
+    Parses an integer (%i format: dec, hex 0x, octal 0) followed by a newline from buffer.
+    Returns (parsed_value, remaining_buffer_tail).
+    Returns (None, original_buffer) if parsing fails.
+    """
+    if not buffer:
+        return None, buffer
+
+    # Regex matches %i integer (hex/octal/dec) followed by newline
+    # Group 1: Integer string, Group 2: Full matched length including \n
+    match = re.match(r'^\s*(0x[0-9a-fA-F]+|0[0-7]+|-?\d+)\s*\n', buffer)
+    if not match:
+        return None, buffer
+
+    int_str = match.group(1)
+    consumed_len = match.end()
+
+    # Parse integer string base dynamically (base=0 auto-detects 0x hex and 0 octal)
+    parsed_value = int(int_str, 0)
+
+    # Return parsed int and string offset tail (buffer + consumed)
+    return parsed_value, buffer[consumed_len:]
+
+def COM_ParseFloatNewline(buffer: str | None) -> tuple[float | None, str | None]:
+    """
+    Parses a float (%f format) followed by a newline from buffer.
+    Returns (parsed_value, remaining_buffer_tail).
+    Returns (None, original_buffer) if parsing fails.
+    """
+    if not buffer:
+        return None, buffer
+
+    # Regex matches %f float (decimals, integers, scientific notation) followed by newline
+    # Group 1: Float string matched
+    match = re.match(r'^\s*([-+]?(?:\d*\.\d+|\d+\.?)(?:[eE][-+]?\d+)?)\s*\n', buffer)
+    if not match:
+        return None, buffer
+
+    float_str = match.group(1)
+    consumed_len = match.end()
+
+    parsed_value = float(float_str)
+
+    # Return parsed float and string offset tail (buffer + consumed)
+    return parsed_value, buffer[consumed_len:]
+
+def COM_ParseStringNewline(buffer: str | None) -> tuple[str | None, str | None]:
+    """
+    Parses a single string token into global `com_token`, consumes trailing newline,
+    and returns (com_token, remaining_buffer_tail).
+    Returns (None, original_buffer) if parsing fails.
+    """
+    global com_token
+    com_token = ""
+
+    if not buffer:
+        return None, buffer
+
+    # Matches non-whitespace string (up to 1023 chars) followed by trailing newline
+    match = re.match(r'^\s*([^\s]{1,1023})\s*\n', buffer)
+    if not match:
+        return None, buffer
+
+    com_token = match.group(1)
+    consumed_len = match.end()
+
+    return com_token, buffer[consumed_len:]
 
 def COM_AddGameDirectory(base, dir):
     global com_searchpaths
@@ -705,7 +832,7 @@ def COM_AddGameDirectory(base, dir):
 
 def COM_CheckRegistered():
     # Unpack 4 values
-    handle, filelen, path_id, is_pak = COM_OpenFile('gfx/pop.lmp')
+    handle, _, _, is_pak = COM_OpenFile('gfx/pop.lmp')
 
     if handle == -1 or handle is None:
         cvar.Cvar_SetROM('registered', '0')
@@ -729,7 +856,7 @@ def COM_CheckRegistered():
         datapos += 2
 
         if short != sdata1:
-            Sys_Error('Corrupted data file')
+            sys_sdl_unix.Sys_Error('Corrupted data file')
 
     cvar.Cvar_SetROM('cmdline', com_cmdline)
     cvar.Cvar_SetROM('registered', '1')
@@ -737,7 +864,7 @@ def COM_CheckRegistered():
 
 def COM_InitFilesytem():
     global com_basedir
-    global com_base_searchpaths, com_searchpaths
+    global com_base_searchpaths
 
     cvar.Cvar_RegisterVariable(registered)
     cvar.Cvar_RegisterVariable(cmdline)
@@ -770,8 +897,7 @@ def COM_InitFilesytem():
             if item == '-game':
                 gamename = sys.argv[item+1]
 
-        if gamename:
-            if gamename != '-rogue' and gamename != 'rogue' and gamename != '-hipnotic' and gamename != 'hipnotic':
+        if gamename and gamename != '-rogue' and gamename != 'rogue' and gamename != '-hipnotic' and gamename != 'hipnotic':
                 COM_AddGameDirectory(com_basedir, gamename)
 
     COM_CheckRegistered()
@@ -786,7 +912,7 @@ def COM_CheckParm(parm) -> int:
     return 0
 
 
-def FS_fread(size, fh:_fshandle_t) -> str:
+def FS_fread(size, fh:_fshandle_t) -> bytes:
     if fh is None:
         return 0
 
@@ -904,93 +1030,6 @@ def FS_filelength(fh:_fshandle_t):
 
     return fh.length
 
-def Host_Say_f():
-    Host_Say(False)
-
-def Host_Say_Team_f():
-    Host_Say(True)
-
-def Host_Tell_f():
-    quoted = False
-
-    if _cmd.cmd_source == src_command:
-        Cmd_ForwardToServer()
-        return
-
-    if Cmd_Argc() < 3:
-        return
-
-    text = Cmd_Args()
-
-    text.replace('"', '')
-    text = host_client.name + ': ' + text
-    text = text[:256]
-
-    save = host_client
-    for client in svs.clients:
-        if not client.active or not client.spawned:
-            continue
-        if client.name != Cmd_Argv(1):
-            continue
-
-        host_client = client
-        SV_ClientPrintf(text)
-        break
-
-    host_client = save
-
-def Host_Color_f():
-    raise NotImplementedError
-
-def Host_Kill_f():
-    if _cmd.cmd == src_command:
-        Cmd_ForwardToServer()
-        return
-
-    if sv_player.v.health <= 0:
-        SV_ClientPrintf('cant suicide -- already dead')
-        return
-
-    pr_global_struct.time = sv.time
-    pr_global_struct.self = EDICT_TO_PROG(sv_player)
-    PR_ExecuteProgram(pr_global_struct.ClientKill)
-
-def Host_Pause_f():
-    if cls.demoplayback:
-        cls.demopaused = not cls.demopaused
-        cl.paused = cls.demopaused
-        return
-
-    if _cmd.cmd_source == src_command:
-        Cmd_ForwardToServer()
-        return
-
-    if not pausable.value:
-        SV_ClientPrintf('pause not allowed\n')
-    else:
-        sv.paused ^= 1;
-
-        if sv.paused:
-            SV_BroadcastPrintf(f'{PR_GetString(sv_player.v.netname)} paused the game')
-        else:
-            SV_BroadcastPrintf(f'{PR_GetString(sv_player.v.netname)} unpaused the game')
-
-        MSG_WriteByte(sv.reliable_datagram, svc_setpause)
-        MSG_WriteByte(sv.reliable_datagram, sv.paused)
-
-def Host_Spawn_f():
-    if _cmd.cmd_source == src_command:
-        console.Con_Printf('spawn is not valid from the console\n')
-        return
-    if host_client.spawned:
-        console.Con_Printf('spawn not valid -- already spawned\n')
-        return
-
-    if sv.loadgame:
-        sv.paused = False
-    else:
-        ent = host_client.edict
-
 BigShort    = ShortSwap
 LittleShort = ShortNoSwap
 BigLong     = LongSwap
@@ -1020,6 +1059,13 @@ def COM_FindFile(filename) -> (io.FileIO, int, int, bool): # Added bool
                 return (handle, length, path_id, False) # Return False for loose file
 
         search = search.next
+
+    extensions = ('.pcx', '.tga', '.lit', '.vis', '.ent')
+    if not filename.lower().endswith(extensions):
+        console.Con_DPrintf(f"FindFile: can't find {filename}\n")
+    else:
+        console.Con_DPrintf2(f"FindFile: can't find {filename}\n")
+
     return (None, 0, 0, False)
 
 
@@ -1028,7 +1074,7 @@ def COM_FileIOFromHandle(handle) -> io.FileIO:
     return sys_sdl_unix.sys_handles[handle]
 
 def COM_FileExists(filename, path_id) -> bool:
-    h, size, path_id, is_pak = COM_FindFile(filename)
+    _, size, _, _ = COM_FindFile(filename)
     return size >= 0
 
 
@@ -1037,21 +1083,21 @@ def COM_OpenFile(filename):
     return COM_FindFile(filename)
 
 def COM_CloseFile(handle):
-    global com_searchpaths
-
     search = com_searchpaths
 
     while search:
         if search.pack and search.pack.handle == handle:
             return # dont really close a pack file
 
-    Sys_FileClose(handle)
+    sys_sdl_unix.Sys_FileClose(handle)
 
-def COM_FOpenFile(filename) -> (int, int, int, bool):
+def COM_FOpenFile(filename) -> (io.FileIO, int, int, bool):
     return COM_FindFile(filename)
 
-def COM_FileGetExtension(file):
-    raise NotImplementedError
+def COM_FileGetExtension(file:str):
+    if '.' in file:
+        return file.rsplit('.')[1]
+    return ''
 
 def COM_AddExtension(name, ext):
     return name + ext
@@ -1062,4 +1108,84 @@ def COM_SkipPath(pathname):
 def COM_StripExtension(name):
     return os.path.splitext(name)[0]
 
-import console
+def COM_Parse(data: str):
+    return COM_ParseEx(data)
+
+def COM_ParseEx(data: str, mode: cpe_mode = cpe_mode.CPE_ALLOWTRUNC) -> str | None:
+    global com_token
+    com_token = ''
+
+    if not data:
+        return None
+
+    pos = 0
+    length = len(data)
+
+    # 1. Skip whitespace and comments
+    while pos < length:
+        # Skip whitespace (ASCII <= 32)
+        if data[pos] <= ' ':
+            pos += 1
+            continue
+
+        # Skip // comments
+        if data[pos] == '/' and pos + 1 < length and data[pos + 1] == '/':
+            pos += 2
+            while pos < length and data[pos] != '\n':
+                pos += 1
+            continue
+
+        # Skip /* ... */ comments
+        if data[pos] == '/' and pos + 1 < length and data[pos + 1] == '*':
+            pos += 2
+            while pos + 1 < length and not (data[pos] == '*' and data[pos + 1] == '/'):
+                pos += 1
+            if pos + 1 < length:
+                pos += 2  # Skip past '*/'
+            continue
+
+        break  # Reached actual token data
+
+    if pos >= length:
+        return None  # End of text
+
+    # 2. Handle quoted strings
+    if data[pos] == '"':
+        pos += 1
+        token_chars = []
+        while pos < length and data[pos] != '"':
+            token_chars.append(data[pos])
+            pos += 1
+
+        if pos < length and data[pos] == '"':
+            pos += 1  # Skip closing quote
+
+        com_token = "".join(token_chars)
+        return data[pos:]
+
+    # 3. Handle single punctuation characters
+    if data[pos] in ('{', '}', '(', ')', "'", ':'):
+        com_token = data[pos]
+        return data[pos + 1:]
+
+    # 4. Handle regular words
+    token_chars = []
+    while pos < length and data[pos] > ' ':
+        if data[pos] in ('{', '}', '(', ')', "'"):
+            break
+        token_chars.append(data[pos])
+        pos += 1
+
+    com_token = "".join(token_chars)
+    return data[pos:]
+
+
+
+
+
+
+
+
+
+
+

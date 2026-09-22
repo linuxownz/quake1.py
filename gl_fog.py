@@ -4,6 +4,8 @@ import OpenGL
 import OpenGL.GL as gl
 
 import _cmd
+import cl_main
+import common
 import console
 
 DEFAULT_DENSITY = 0.0
@@ -28,8 +30,8 @@ def Fog_Update ( density, red, green, blue, time ):
     global fade_time, fade_done
 
     if time > 0:
-        if fade_done > client.cl.time:
-            f = (fade_done - client.cl.time) / fade_time;
+        if fade_done > cl_main.cl.time:
+            f = (fade_done - cl_main.cl.time) / fade_time;
             old_density = f * old_density + (1.0 - f) * fog_density
             old_red     = f * old_red     + (1.0 - f) * fog_red
             old_green   = f * old_green   + (1.0 - f) * fog_green
@@ -45,8 +47,17 @@ def Fog_Update ( density, red, green, blue, time ):
     fog_green = green
     fog_blue = blue
     fade_time = time
-    fade_done = cl.time + time
+    fade_done = cl_main.cl.time + time
 
+def Fog_ParseServerMessage():
+    density = common.MSG_ReadByte() / 255
+    red     = common.MSG_ReadByte() / 255
+    green   = common.MSG_ReadByte() / 255
+    blue    = common.MSG_ReadByte() / 255
+    time    = common.MSG_ReadByte() / 255
+    time = max(time, 0.0)
+
+    Fog_Update(density, red, green, blue, time)
 
 def Fog_FogCommand_f():
     d = r = g = b = t = 0
@@ -106,6 +117,116 @@ def Fog_FogCommand_f():
 
     Fog_Update(d, r, g, b, t)
 
+
+def Fog_ParseWorldspawn():
+    global fog_density, fog_red, fog_green, fog_blue
+    global old_density, old_red, old_green, old_blue
+    global fade_done, fade_time
+
+    fog_density = DEFAULT_DENSITY
+    fog_red     = DEFAULT_GRAY
+    fog_green   = DEFAULT_GRAY
+    fog_blue    = DEFAULT_GRAY
+
+    old_density = DEFAULT_DENSITY
+    old_red     = DEFAULT_GRAY
+    old_green   = DEFAULT_GRAY
+    old_blue    = DEFAULT_GRAY
+
+    fade_time = 0.0
+    fade_done = 0.0
+
+    data = common.COM_Parse(cl_main.cl.worldmodel.entities)
+    if not data:
+        return
+
+    if common.com_token[0] != '{':
+        return
+
+    while True:
+        data = common.COM_Parse(data)
+        if not data:
+            return
+        if common.com_token[0] == '}':
+            break
+        if common.com_token[0] == '_':
+            key = common.com_token[1:]
+        else:
+            key = common.com_token[:]
+
+        key = key.rstrip(' ')
+
+        data = common.COM_ParseEx(data)
+
+        if not data:
+            return
+
+        value = common.com_token[:]
+
+        if key == 'fog':
+            parts = value.split()
+            if len(parts) >= 4:
+                try:
+                    fog_density, fog_red, fog_green, fog_blue = map(float, parts[:4])
+                except ValueError:
+                    pass
+        """ gemini suggested setting old_* fog values here """
+
+
+def Fog_GetColor() -> list[float]:
+    c: list[float] = [0, 0, 0, 0]
+    if fade_done > cl_main.cl.time and fade_time > 0:
+        f = ( fade_done - cl_main.cl.time ) / fade_time
+
+        c[0] = f * old_red   + ( 1.0 - f) * fog_red
+        c[1] = f * old_green + ( 1.0 - f) * fog_green
+        c[2] = f * old_blue  + ( 1.0 - f) * fog_blue
+        c[3] = 1.0
+    else:
+        c[0] = fog_red
+        c[1] = fog_green
+        c[2] = fog_blue
+        c[3] = 1.0
+
+    for i in range(3):
+        c[i] = common.CLAMP(0, c[i], 1)
+
+    for i in range(3):
+        c[i] = int(c[i] * 255) / 255
+
+    return c
+
+def Fog_GetDensity():
+    if fade_done > cl_main.cl.time:
+        f = ( fade_done - cl_main.cl.time ) / fade_time
+        return f * old_density + ( 1.0 - f ) * fog_density
+    else:
+        return fog_density
+
+def Fog_SetupFrame():
+    gl.glFogfv(gl.GL_FOG_COLOR, Fog_GetColor())
+    gl.glFogf(gl.GL_FOG_DENSITY, Fog_GetDensity() / 64.0)
+
+def Fog_EnableGFog():
+    if Fog_GetDensity() > 0:
+        gl.glEnable(gl.GL_FOG)
+
+def Fog_DisbleGFog():
+    if Fog_GetDensity() > 0:
+        gl.glDisable(gl.GL_FOG)
+
+def Fog_StartAdditive():
+    if Fog_GetDensity() > 0:
+        gl.glFogfv(gl.GL_FOG_COLOR, [0, 0, 0])
+
+def Fog_StopAdditive():
+    if Fog_GetDensity() > 0:
+        gl.glFogfv(gl.GL_FOG_COLOR, Fog_GetColor())
+
+def Fog_NewMap():
+    Fog_ParseWorldspawn()
+    #Fog_MarkModels() # is an empty function in original source as volumetric fog not implemented
+
 def Fog_SetupState():
     gl.glFogi(OpenGL.GL.GL_FOG_MODE, OpenGL.GL.GL_EXP2)
 
@@ -120,9 +241,3 @@ def Fog_Init():
     fog_blue    = DEFAULT_GRAY
 
     Fog_SetupState()
-
-def Fog_SetupFrame():
-    gl.glFogfv(gl.GL_FOG_COLOR, Fog_GetColor())
-    gl.glFogf(gl.GL_FOG_DENSITY, Fog_GetDensity())
-
-

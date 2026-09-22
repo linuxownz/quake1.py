@@ -13,6 +13,7 @@ import gl_model
 import gl_rmain
 import gl_rmisc
 import gl_screen
+import gl_sky
 import gl_texmgr
 import gl_vidsdl
 import glquake
@@ -27,6 +28,7 @@ import pr_exec
 import progs
 import protocol
 import quakedef
+import r_part
 import sbar
 import server
 import snd_dma
@@ -40,6 +42,7 @@ import zone
 class HostAbortServerException(Exception):
     pass
 
+host_hunklevel = 0
 host_initialized = False
 host_frametime = 0.0
 realtime = 0.0
@@ -78,7 +81,7 @@ def Max_Edicts_f(cvar:cvar.cvar_t):
 def Host_EndGame(fmt, *msg):
     message = fmt
     if msg:
-        message = fmt  % msg
+        message = fmt % msg
 
     console.Con_DPrintf("Host_EndGame: " + message)
 
@@ -273,7 +276,6 @@ def Host_ClientCommands(fmt, *args):
 
 
 def SV_DropClient(crash: bool):
-    global host_client
 
     if not crash:
         # 1. Send the disconnect notification to the leaving client
@@ -288,7 +290,7 @@ def SV_DropClient(crash: bool):
             pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.ClientDisconnect)
             pr_edict.pr_global_struct.self = saveSelf
 
-        sys_sdl_unix.Sys_Printf('Client %s removed\n' % host_client.name)
+        sys_sdl_unix.Sys_Printf(f'Client {host_client.name} removed\n')
 
     # 3. Cache the index before we wipe the data
     client_num = sv_main.svs.clients.index(host_client)
@@ -375,16 +377,13 @@ def Host_ShutdownServer(crash: bool):
     sv_main.svs.clients = [ server.client_t() for i in range(sv_main.svs.maxclients) ]
 
 def Host_ClearMemory():
-    global gl_warp
-    import gl_warp
 
     console.Con_DPrintf('Clearing Memory\n')
     #D_FlushCaches()
-    gl_warp.GL_WarpInit()
     gl_model.Mod_ClearAll()
-    Sky_ClearAll()
+    gl_sky.Sky_ClearAll()
 
-    # Hunk_FreeToLowMark(host_hunklevel)
+    zone.Hunk_FreeToLowMark(host_hunklevel)
 
     cl_main.cls.signon = 0
     sv_main.sv.edicts  = []
@@ -436,9 +435,12 @@ def Host_Init():
         gl_draw.Draw_Init()
         gl_screen.SCR_Init()
         gl_rmisc.R_Init()
-        #snd_dma.S_Init()
+        snd_dma.S_Init()
         sbar.Sbar_Init()
         cl_main.CL_Init()
+
+    zone.Hunk_AllocName(0, '-HOST_HUNKLEVEL-')
+    host_hunklevel = zone.Hunk_LowMark()
 
     global host_initialized
     host_initialized = True
@@ -446,7 +448,7 @@ def Host_Init():
 
     if cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
         _cmd.Cbuf_InsertText('exec quake.rc\n')
-        #_cmd.Cbuf_AddText('\n\nvid_lock\n')
+        _cmd.Cbuf_AddText('\n\nvid_unlock\n')
 
     if cl_main.cls.state == cl_main.cactive_t.ca_dedicated:
         _cmd.Cbuf_AddText ("exec autoexec.cfg\n")
@@ -456,33 +458,10 @@ def Host_Init():
             _cmd.Cbuf_AddText ("map start\n")
 
     _cmd.Cbuf_AddText("map start\n")
-    _cmd.cmd_source = _cmd.cmd_source_t.src_command
-    _cmd.Cbuf_Execute()
+    # _cmd.cmd_source = _cmd.cmd_source_t.src_command
+    # _cmd.Cbuf_Execute()
 
-    keys.key_dest = keys.keydest_t.key_console
-    ###raise NotImplementedError
-
-    ### --- MANUAL RENDERER TRAP ---
-
-
-    ##print("DEBUG: Manually loading world for renderer...")
-
-    ### 1. Load the BSP through the model manager
-    ### This WILL call Mod_LoadBrushModel if implemented in gl_model.py
-    ##world = gl_model.Mod_ForName("maps/start.bsp")
-
-    ##if world:
-    ##    # 2. Assign it directly to the client
-    ##    cl_main.cl.worldmodel = world
-
-    ##    # 3. Force the state to 'connected' so R_RenderView runs
-    ##    cl_main.cls.state = quakedef.cactive_t.ca_connected
-
-    ##    # 4. Set a starting position so we aren't at [0,0,0] (inside a wall)
-    ##    cl_main.cl.vieworg = [0, 0, 50]
-    ##    print("DEBUG: World assigned. Renderer should now fire.")
-    ##else:
-    ##    print("DEBUG: Failed to load maps/start.bsp. Check file path!")
+    # keys.key_dest = keys.keydest_t.key_console
 
 
 def Host_FilterTime(time):
@@ -525,6 +504,7 @@ def Host_GetConsoleCommands():
 
 
 def Host_ServerFrame():
+    active = 0
     pr_edict.pr_global_struct.frametime = host_frametime
 
     sv_main.SV_ClearDatagram()
@@ -534,15 +514,17 @@ def Host_ServerFrame():
     if not sv_main.sv.paused and ( sv_main.svs.maxclients > 1 or keys.key_dest == keys.keydest_t.key_game):
         sv_main.SV_Physics()
 
-    if cl_main.cls.signon == client.SIGNONS: # (4)
+    if cl_main.cls.signon == quakedef.SIGNONS: # (4)
         active = 0
         for i in range(sv_main.sv.num_edicts):
             ent: progs.edict_t = pr_edict.EDICT_NUM(i)
             if not ent.free:
                 active += 1
 
-        # if active > 600 and
-
+        if active > 600 and dev_peakstats.edicts <= 600:
+            console.Con_Warning(f'{active} edicts exceeds standard limit of 600 ( max = {sv_main.sv.max_edicts})')
+            dev_stats.edicts = active
+            dev_peakstats.edicts = max(active, dev_peakstats.edicts)
 
     sv_main.SV_SendClientMessages()
 
@@ -570,7 +552,7 @@ def _Host_Frame(time):
         in_sdl.IN_UpdateInputMode()
         sys_sdl_unix.Sys_SendKeyEvents()
 
-        in_sdl.IN_Commands()# not implemented.  joystick functionality
+        in_sdl.IN_Commands() # not implemented.  joystick functionality
 
         _cmd.Cbuf_Execute()
 
@@ -603,13 +585,13 @@ def _Host_Frame(time):
 
         gl_screen.SCR_UpdateScreen()
 
-        cl_main.CL_RunParticles() # Added prefix
+        r_part.CL_RunParticles() # Added prefix
 
         if int(host_speeds.value):
             time2 = sys_sdl_unix.Sys_DoubleTime()
             # Note: Logic for pass1/pass2/pass3 goes here if needed
 
-        if cl_main.cls.signon == 4: # SIGNONS
+        if cl_main.cls.signon == quakedef.SIGNONS:
             snd_dma.S_Update(gl_rmain.r_origin, gl_rmain.vpn, gl_rmain.vright, gl_rmain.vup)
             cl_main.CL_DecayLights()
         else:
@@ -714,3 +696,130 @@ def Host_WriteConfiguration():
     except Exception as e:
         console.Con_Printf(f"ERROR: Could not save config: {e}\n")
 
+
+
+
+# Module global state matching C globals in gl_mesh.c
+numorder: int = 0
+numcommands: int = 0
+used: list[int] = []
+commands: list[int] = []
+vertexorder: list[int] = []
+
+
+def BuildTris(
+    pheader: any,
+    triangles: list[any],
+    stverts: list[any],
+) -> None:
+    """Builds optimized GL triangle strips/fans for alias model rendering.
+
+    Args:
+        pheader: Model header object containing numtris, skinwidth, and skinheight.
+        triangles: List of mtriangle_t mesh triangles.
+        stverts: List of stvert_t texture coordinate entries.
+
+    C equivalent:
+    static void BuildTris (void) in gl_mesh.c
+    """
+    global numorder, numcommands, used, commands, vertexorder
+    global stripverts, striptris
+
+    MAX_COMMANDS = 16384  # Matches C command array sizing
+
+    numorder = 0
+    numcommands = 0
+    commands = [0] * MAX_COMMANDS
+    vertexorder = [0] * MAX_COMMANDS
+    used = [0] * pheader.numtris
+
+    bestverts = [0] * 128
+    besttris = [0] * 128
+
+    for i in range(pheader.numtris):
+        # Pick an unused triangle and attempt starting a strip or fan
+        if used[i]:
+            continue
+
+        bestlen = 0
+        besttype = 0
+
+        for type_idx in range(2):  # 0 = Fan, 1 = Strip
+            for startv in range(3):
+                if type_idx == 1:
+                    length = StripLength(i, startv, triangles, pheader, used)
+                else:
+                    length = FanLength(i, startv, triangles, pheader, used)
+
+                if length > bestlen:
+                    besttype = type_idx
+                    bestlen = length
+                    for j in range(bestlen + 2):
+                        bestverts[j] = stripverts[j]
+                    for j in range(bestlen):
+                        besttris[j] = striptris[j]
+
+        # Mark used triangles for the winning strip/fan
+        for j in range(bestlen):
+            used[besttris[j]] = 1
+
+        # Command code: positive count = TRIANGLE_STRIP, negative = TRIANGLE_FAN
+        if besttype == 1:
+            commands[numcommands] = bestlen + 2
+        else:
+            commands[numcommands] = -(bestlen + 2)
+        numcommands += 1
+
+        for j in range(bestlen + 2):
+            # Emit vertex index into the reorder buffer
+            k = bestverts[j]
+            vertexorder[numorder] = k
+            numorder += 1
+
+            # Extract texture coordinates
+            s = float(stverts[k].s)
+            t = float(stverts[k].t)
+
+            # Adjust s-coordinate if triangle is on back face skin seam
+            if not triangles[besttris[0]].facesfront and stverts[k].onseam:
+                s += pheader.skinwidth / 2.0
+
+            # Normalize UV coordinates to [0.0, 1.0] range
+            s = (s + 0.5) / float(pheader.skinwidth)
+            t = (t + 0.5) / float(pheader.skinheight)
+
+            # Reinterpret float bits as int (C memcpy (&tmp, &s, 4))
+            s_int = struct.unpack("i", struct.pack("f", s))[0]
+            t_int = struct.unpack("i", struct.pack("f", t))[0]
+
+            commands[numcommands] = s_int
+            numcommands += 1
+            commands[numcommands] = t_int
+            numcommands += 1
+
+    # End of command stream marker
+    commands[numcommands] = 0
+    numcommands += 1
+
+isdown: bool = False
+def Host_Shutdown():
+    if isdown:
+        print('recursive shutdown\n')
+        return
+    isdown = True
+
+    gl_screen.scr_disabled_for_loading = True
+
+    Host_WriteConfiguration()
+
+    net_main.NET_Shutdown()
+
+    if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
+        if console.con_initialized:
+            keys.History_Shutdown()
+
+        snd_dma.S_Shutdown()
+        in_sdl.IN_Shutdown()
+        gl_vidsdl.VID_Shutdown()
+
+    console.LOG_Close()

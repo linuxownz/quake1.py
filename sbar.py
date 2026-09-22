@@ -12,7 +12,7 @@ import gl_vidsdl
 import host
 import protocol
 import quakedef
-import screen
+#import screen
 import wad
 
 sb_updates : int = 0
@@ -50,7 +50,6 @@ rsb_ammo : list[wad.qpic_t] = [None for j in range(3)]
 rsb_teambord : wad.qpic_t = None
 
 hsb_weapons : list[list[wad.qpic_t]] = [[None for j in range(7)] for i in range(5)]
-hipweapons = [quakedef.HIT_LASER_CANNON, quakedef.HIT_MJOLNIR_BIT, 4, quakedef.HIT_PROXIMITY_GUN_BIT]
 hsb_items : list[wad.qpic_t] = [None for i in range(2)]
 
 def Sbar_ShowScores():
@@ -424,6 +423,9 @@ def Sbar_LoadPics():
         rsb_ammo[2] = gl_draw.Draw_PicFromWad ("r_ammoplasma")
 
 def Sbar_Init():
+    global hipweapons
+
+    hipweapons = [quakedef.HIT_LASER_CANNON, quakedef.HIT_MJOLNIR_BIT, 4, quakedef.HIT_PROXIMITY_GUN_BIT]
     _cmd.Cmd_AddCommand('+showscores', Sbar_ShowScores)
     _cmd.Cmd_AddCommand('-showscores', Sbar_DontShowScores)
 

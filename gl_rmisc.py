@@ -6,16 +6,22 @@ import OpenGL
 import OpenGL.GL
 
 import _cmd
+import cl_main
+import common
 import console
 import cvar
+import gl_fog
 import gl_model
 import gl_rmain
 import gl_screen
+import gl_sky
 import gl_texmgr
 import gl_vidsdl
+import gl_warp
 import glquake
 import host
 import quakedef
+import r_alias
 import r_brush
 import r_part
 import sys_sdl_unix
@@ -94,12 +100,47 @@ def GL_CreateProgram(vertSource, fragSource, numbindings, bindings: list[glquake
 
         return program
 
+
+def R_DeleteShaders():
+    if not gl_vidsdl.gl_glsl_able:
+        return
+
+    for i in range(gl_num_programs):
+        OpenGL.GL.glDeleteProgram(gl_programs[i])
+        gl_programs[i] = 0
+
+    gl_num_programs = 0
+
+
+def GL_BindBuffer(target: int, buffer: int):
+    global current_array_buffer, current_element_array_buffer
+
+    if not gl_vidsdl.gl_vbo_able:
+        return
+
+    match target:
+        case OpenGL.GL.GL_ARRAY_BUFFER:
+            if current_array_buffer != buffer:
+                current_array_buffer = buffer
+                OpenGL.GL.glBindBuffer(target, buffer)
+
+        case OpenGL.GL.GL_ELEMENT_ARRAY_BUFFER:
+            if current_element_array_buffer != buffer:
+                current_element_array_buffer = buffer
+                OpenGL.GL.glBindBuffer(target, buffer)
+
+        case _:
+            host.Host_Error(f"GL_BindBuffer: unsupported target {int(target)}")
+
+
+
+
 def GL_GetUniformLocation(program, name) -> int: # returns location
     return OpenGL.GL.glGetUniformLocation(program, name)
 
 
 def R_TimeRefresh_f():
-    if client.cls.state != client.cactive_t.ca_connected:
+    if cl_main.cls.state != quakedef.cactive_t.ca_connected:
         console.Con_Printf('not connected to a server')
         return
 
@@ -109,7 +150,7 @@ def R_TimeRefresh_f():
         glquake.GL_BeginRendering(gl_screen.glx, gl_screen.gly, gl_screen.glwidth, gl_screen.glheight)
         gl_rmain.r_refdef.viewangles[1] = i/128.0*360.0
         gl_rmain.R_RenderView()
-        glquake.GL_EndRendering
+        glquake.GL_EndRendering()
 
     OpenGL.GL.glFinish()
     stop = sys_sdl_unix.Sys_DoubleTime()
@@ -154,6 +195,14 @@ def R_SetTelealpha_f(var:cvar.cvar_t):
 def R_SetSlimealpha_f(var:cvar.cvar_t):
     gl_rmain.map_slimealpha = float(var.value)
 
+def GL_WaterAlphaForSurface(fa: quakedef.msurface_t) -> float:
+    if fa.flags & quakedef.SURF_DRAWLAVA:
+        return gl_rmain.map_lavaalpha if gl_rmain.map_lavaalpha else gl_rmain.map_wateralpha
+    if fa.flags & quakedef.SURF_DRAWTELE:
+        return gl_rmain.map_telealpha if gl_rmain.map_telealpha else gl_rmain.map_wateralpha
+    if fa.flags & quakedef.SURF_DRAWSLIME:
+        return gl_rmain.map_slimealpha if gl_rmain.map_slimealpha else gl_rmain.map_wateralpha
+    return gl_rmain.map_wateralpha
 
 def R_Init():
     _cmd.Cmd_AddCommand('timerefresh', R_TimeRefresh_f)
@@ -170,6 +219,114 @@ def R_Init():
 
     from gl_fog import Fog_Init
     Fog_Init () #johnfitz
+
+def R_TranslatePlayerSkin(playernum: int):
+    top = ( cl_main.cl.scores[playernum].colors & 0xF0 ) >> 4
+    bottom = ( cl_main.cl.scores[playernum].colors) & 15
+
+    if not cvar.Cvar_GetCvar('gl_nocolors').value:  # noqa: SIM102
+        if r_alias.playertextures[playernum]:
+            gl_texmgr.TexMgr_ReLoadImage(r_alias.playertextures[playernum], top, bottom)
+
+def R_TranslateNewPlayerSkin(playernum: int):
+    gl_rmain.currententity = cl_main.cl_entities[1+playernum]
+
+    if not gl_rmain.currententity.model or gl_rmain.currententity.model.type != quakedef.modtype_t.mod_alias:
+        return
+
+    paliashdr: quakedef.aliashdr_t = gl_model.Mod_Extradata(gl_rmain.currententity.model)
+    skinnum = gl_rmain.currententity.skinnum
+
+    if skinnum < 0 or skinnum >= paliashdr.numskins:
+        console.Con_DPrintf(f'{playernum}: Invalid player skin #{skinnum}')
+        skinnum = 0
+
+    offset = paliashdr.texels[skinnum]
+    pixels = paliashdr.data[offset:]
+
+    name = f'player_{playernum}'
+
+    r_alias.playertextures[playernum] = gl_texmgr.TexMgr_LoadImage (
+        gl_rmain.currententity.model, name, paliashdr.skinwidth, paliashdr.skinheight,
+        gl_texmgr.SRC_INDEXED, pixels, paliashdr.gltextures[skinnum][0].source_file,
+        paliashdr.gltextures[skinnum][0].source_offset,
+        gl_texmgr.TEXPREF_PAD | gl_texmgr.TEXPREF_OVERWRITE
+    )
+
+    R_TranslatePlayerSkin(playernum)
+
+def R_NewGame():
+    for i in range(quakedef.MAX_SCOREBOARD):
+        r_alias.playertextures[i] = None
+
+
+def R_ParseWorldspawn():
+    gl_rmain.map_wateralpha = cvar.Cvar_GetCvar('r_wateralpha').value
+    gl_rmain.map_lavaalpha  = cvar.Cvar_GetCvar('r_lavaalpha').value
+    gl_rmain.map_telealpha  = cvar.Cvar_GetCvar('r_telealpha').value
+    gl_rmain.map_slimealpha  = cvar.Cvar_GetCvar('r_slimealpha').value
+
+    data = common.COM_Parse(cl_main.cl.worldmodel.entities)
+    if not data:
+        return
+    if common.com_token[0] != '{':
+        return
+
+    while True:
+        data = common.COM_Parse(data)
+        if not data:
+            return
+        if common.com_token[0] == '}':
+            return
+        if common.com_token[o] == '_':
+            key = common.com_token[1:]
+        else:
+            key = common.com_token[:]
+
+        key = key.strip()
+
+        data = common.COM_ParseEx(data)
+        if not data:
+            return
+
+        value = common.com_token[:]
+
+        if key == 'wateralpha':
+            gl_rmain.map_wateralpha = float(value)
+        if key == 'lavaalpha':
+            gl_rmain.map_lavaalpha = float(value)
+        if key == 'telealpha':
+            gl_rmain.map_telealpha = float(value)
+        if key == 'slimealpha':
+            gl_rmain.map_slimealpha = float(value)
+
+def R_NewMap():
+    for i in range(256):
+        gl_rmain.d_lightstylevalue[i] = 264
+
+    for i in range(cl_main.cl.worldmodel.numleafs):
+        cl_main.cl.worldmodel.leafs[i].efrags = None
+
+    gl_rmain.r_viewleaf = None
+    r_part.R_ClearParticles()
+
+    r_brush.GL_BuildLightmaps()
+    r_brush.GL_BuildBModelVertexBuffer()
+
+    gl_rmain.r_framecount = 0
+    gl_rmain.r_visframecount = 0
+
+    gl_sky.Sky_NewMap()
+    gl_fog.Fog_NewMap()
+
+    R_ParseWorldspawn()
+
+    gl_warp.load_subdivide_size = cvar.Cvar_GetCvar('gl_subdivide_size').value
+
+
+
+def D_FlushCaches():
+    pass
 
 
 def GL_ClearBufferBindings():

@@ -33,7 +33,6 @@ class packetBuffer:
 
 myDriverLevel: int = 0
 
-pb = packetBuffer()
 
 def StrAddr(addr: tuple) -> str:
     """
@@ -387,8 +386,10 @@ def NET_Stats_f():
 
 
 def Datagram_Init():
-    global myDriverLevel
+    global pb, myDriverLevel
+
     myDriverLevel = net_main.net_driverlevel
+    pb = packetBuffer()
 
     _cmd.Cmd_AddCommand('net_stats', NET_Stats_f)
 

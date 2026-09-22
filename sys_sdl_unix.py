@@ -3,6 +3,7 @@
 import io
 import os
 import sys
+from pathlib import Path
 
 import sdl2
 
@@ -38,8 +39,9 @@ def Sys_GetUserDir():
     print(f"users' userdir is {__userdir}")
     host.parms.basedir = __userdir
 
-def Sys_mkdir():
-    print("Sys_mkdir pass")
+def Sys_mkdir(pathname):
+    if not Path(pathname).exists():
+        os.mkdirs(pathname)
 
 def Sys_Init():
     global stdinIsATTY
@@ -51,7 +53,7 @@ def Sys_Init():
     print(f"isDedicated:{isDedicated}")
 
     term = os.getenv('TERM')
-    
+
     stdinIsATTY = sys.stdin.isatty() and ( term != 'raw' or term != 'dumb' )
 
     if not stdinIsATTY:
@@ -61,11 +63,11 @@ def Sys_Init():
 
     Sys_GetBasedir()
     Sys_GetUserDir()
-    Sys_mkdir()
+    Sys_mkdir(__userdir)
 
 def Sys_IsDedicated():
     global isDedicated
-    return isDedicated    
+    return isDedicated
 
 def Sys_DoubleTime():
     return sdl2.SDL_GetTicks() / 1000.0
@@ -105,7 +107,7 @@ def Sys_FileOpenRead(path) -> (int, int): # return handle, file length
 
     return (i, Sys_filelength(file))
 
-def Sys_FileOpenWrite(path) -> int: # return file handle index into sys_handles
+def Sys_FileOpenWrite(path) -> io.FileIO: # return file handle index into sys_handles
     i = findhandle()
     try:
         file = open ( path, 'wb', buffering = False)

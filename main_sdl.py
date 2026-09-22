@@ -1,15 +1,13 @@
 #!/usr/bin/python
 # main_sdl.py for main_sdl.c
 
-import sys
 import atexit
+import sys
 
 import sdl2
 import sdl2.ext
 
 import cl_main
-
-#from common import COM_InitArgv
 import common
 import console
 import gl_vidsdl
@@ -29,8 +27,7 @@ def Sys_InitSDL():
     print(f"SDL Version: {version.major}.{version.minor}.{version.patch}")
 
     if sdl2.SDL_Init(0) < 0:
-        #Sys_Error("Couldn't init SDL: %s" % SDL_GetError());
-        print("Couldn't init SDL: %s" % sdl2.SDL_GetError());
+        print(f"Couldn't init SDL: {sdl2.SDL_GetError()}");
         sys.exit(1)
 
     atexit.register( Sys_AtExit )
@@ -41,7 +38,7 @@ def main():
     host.membase = bytearray(host.memsize)
 
     if host.membase is None:
-        Sys_Error("failed to alloc %d bytes of memory" % host.memsize)
+        unix.Sys_Error("failed to alloc %d bytes of memory" % host.memsize)
 
     common.COM_InitArgv()
     Sys_InitSDL()

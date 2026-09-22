@@ -2,12 +2,11 @@
 
 import OpenGL.GL as gl
 
+import quakedef
 import cl_main
 import gl_model
 import glquake
-import quakedef
 
-r_refdef = quakedef.refdef_t()
 r_visframecount = 0
 r_worldmodel = None # Set this when the map finishes loading
 
@@ -18,10 +17,14 @@ MAX_SANITY_LIGHTMAPS = ( 1 << 20 )
 lightmaps : glquake.lightmap_s = None
 lightmap_count = 0
 
-allocated = [0 for i in range(quakedef.LMBLOCK_WIDTH)]
+allocated: list[int] = []
 last_lightmap_allocated = 0
+blocklights: list[int] = []
 
-blocklights = [ 0 for _ in range(quakedef.LMBLOCK_WIDTH * quakedef.LMBLOCK_HEIGHT * 3)]
+def R_InitBrush():
+    global allocated, blocklights
+    allocated = [0 for i in range(quakedef.LMBLOCK_WIDTH)]
+    blocklights = [ 0 for _ in range(quakedef.LMBLOCK_WIDTH * quakedef.LMBLOCK_HEIGHT * 3)]
 
 def R_BuildLightmap(model, face):
     """Converts raw BSP light data into an OpenGL texture for the face."""

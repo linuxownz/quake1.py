@@ -1,15 +1,15 @@
 #snd_dma.py
 
-
 import _cmd
-import quakedef
 import common
 import console
 import cvar
 import q_sound
+import quakedef
 import snd_mix
 import snd_sdl
 
+ambient_sfx : list[q_sound.sfx_t] = []
 snd_channels : list[q_sound.channel_t] = [ q_sound.channel_t() for _ in range (q_sound.MAX_CHANNELS)]
 total_channels = 0
 
@@ -37,7 +37,6 @@ MAX_SFX = 1024
 known_sfx : list[q_sound.sfx_t] = []
 num_sfx = 0
 
-ambient_sfx : list[q_sound.sfx_t] = [q_sound.sfx_t() for _ in range(quakedef.NUM_AMBIENTS)]
 
 sound_started = False
 
@@ -191,8 +190,11 @@ def S_Init():
     global known_sfx
     global num_sfx
     global snd_initialized
+    global ambient_sfx
 
     import cvar
+
+    ambient_sfx = [q_sound.sfx_t() for _ in range(quakedef.NUM_AMBIENTS)]
 
     if snd_initialized:
         console.Con_Printf('sound already initialized')
@@ -263,7 +265,6 @@ def S_Init():
     if sound_started == 0:
         return
 
-    global ambient_sfx
     ambient_sfx[bspfile.AMBIENT_WATER] = S_PrecacheSound('ambience/water1.wav')
     ambient_sfx[bspfile.AMBIENT_SKY]   = S_PrecacheSound('ambience/wind2.wav')
 

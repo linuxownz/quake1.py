@@ -1,4 +1,4 @@
-#r_alias.py 
+#r_alias.py
 
 import gl_rmisc
 import gl_texmgr
@@ -6,7 +6,9 @@ import gl_vidsdl
 import glquake
 import quakedef
 
-playertextures : list[gl_texmgr.gltexture_t] = [ None for i in range(quakedef.MAX_SCOREBOARD)]
+MAX_SCOREBOARD = 16
+
+playertextures : list[gl_texmgr.gltexture_t] = [ None for i in range(MAX_SCOREBOARD)]
 
 r_avertexnormals = [
 	[ -0.525731,  0.000000,  0.850651 ],
@@ -764,7 +766,7 @@ useAlphaTestLoc     = 0
 
 pose1VertexAttrIndex = 0
 pose1NormalAttrIndex = 1
-pose2VertexAttrIndex = 2 
+pose2VertexAttrIndex = 2
 pose2NormalAttrIndex = 3
 texCoordsAttrIndex   = 4
 
@@ -781,15 +783,15 @@ def GLAlias_CreateShaders():
     uniform float Blend;
     uniform vec3 ShadeVector;
     uniform vec4 LightColor;
-    attribute vec4 TexCoords; // only xy are used 
+    attribute vec4 TexCoords; // only xy are used
     attribute vec4 Pose1Vert;
     attribute vec3 Pose1Normal;
     attribute vec4 Pose2Vert;
     attribute vec3 Pose2Normal;
-    
+
     varying float FogFragCoord;
-    
-    float r_avertexnormal_dot(vec3 vertexnormal) // from MH 
+
+    float r_avertexnormal_dot(vec3 vertexnormal) // from MH
     {
             float dot = dot(vertexnormal, ShadeVector);
             // wtf - this reproduces anorm_dots within as reasonable a degree of tolerance as the >= 0 case
@@ -815,9 +817,9 @@ def GLAlias_CreateShaders():
     uniform bool UseFullbrightTex;
     uniform bool UseOverbright;
     uniform bool UseAlphaTest;
-    
+
     varying float FogFragCoord;
-    
+
     void main()
     {
        vec4 result = texture2D(Tex, gl_TexCoord[0].xy);
@@ -846,7 +848,7 @@ def GLAlias_CreateShaders():
         global blendLoc, shadervectorLoc, lightColorLoc
         global texLoc, fullbrightTexLoc, useFullbrightTexLoc
         global useOverbrightLoc, useAlphaTestLoc
-        
+
         blendLoc            = gl_rmisc.GL_GetUniformLocation(r_alias_program, 'Blend')
         shadervectorLoc     = gl_rmisc.GL_GetUniformLocation(r_alias_program, 'ShadeVector')
         lightColorLoc       = gl_rmisc.GL_GetUniformLocation(r_alias_program, 'LightColor')

@@ -1,11 +1,13 @@
-#sv_user.py 
+#sv_user.py
 
+import progs
+import quakedef
 
-sv_player : edict_t = None
+sv_player : progs.edict_t = None
 
-forward : vec3_t = [0., 0., 0.]
-right   : vec3_t = [0., 0., 0.]
-up      : vec3_t = [0., 0., 0.]
+forward : quakedef.vec3_t = [0., 0., 0.]
+right   : quakedef.vec3_t = [0., 0., 0.]
+up      : quakedef.vec3_t = [0., 0., 0.]
 
 angles = 0.0
 origin = 0.0

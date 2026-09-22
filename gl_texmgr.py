@@ -2,6 +2,7 @@
 
 import array
 import ctypes
+import io
 from enum import Enum
 
 import numpy as np
@@ -19,8 +20,14 @@ import gl_texmgr
 import gl_vidsdl
 import gl_warp
 import glquake
+import host
+import image
+import quakedef
 import r_brush
+import render
+import sbar
 import sys_sdl_unix
+import zone
 
 TEXPREF_NONE       = 0x0000
 TEXPREF_MIPMAP     = 0x0001  # generate mipmaps TEXPREF_NEAREST and TEXPREF_LINEAR aren't supposed to be ORed with TEX_MIPMAP
@@ -78,6 +85,8 @@ free_gltextures   : gltexture_t = None
 
 notexture   : gltexture_t = None
 nulltexture : gltexture_t = None
+
+in_reload_images = False
 
 d_8to24table                = array.array('B', [0] * 1024)
 d_8to24table_fbright        = array.array('B', [0] * 1024)
@@ -202,7 +211,7 @@ def TexMgr_NewTexture():
     global free_gltextures, active_gltextures
 
     if numgltextures == MAX_GLTEXTURES:
-        Sys_Error('numgltextures == MAX_GLTEXTURES')
+        sys_sdl_unix.Sys_Error('numgltextures == MAX_GLTEXTURES')
 
     glt = free_gltextures
     free_gltextures = glt.next
@@ -215,6 +224,73 @@ def TexMgr_NewTexture():
     glt.texnum = texnum.value
 
     return glt
+
+
+def TexMgr_FreeTexture(kill: gltexture_t):
+    global active_gltextures, free_gltextures, numgltextures
+
+    if in_reload_images:
+        return
+
+    if kill is None:
+        console.Con_Printf('TexMgr_FreeTexture: Null texture')
+        return
+
+    if active_gltextures == kill:
+        active_gltextures = kill.next
+        kill.next = free_gltextures
+        free_gltextures = kill
+
+        GL_DeleteTexture(kill)
+        numgltextures -= 1
+        return
+
+    glt: gltexture_t = active_gltextures
+
+    while glt:
+        if glt.next == kill:
+            glt.next = kill.next
+            kill.next = free_gltextures
+            free_gltextures = kill
+
+            GL_DeleteTexture(kill)
+            numgltextures -= 1
+            return
+        glt = glt.next
+
+    console.Con_Printf('TexMgr_FreeTexture: not found')
+
+
+
+def TexMgr_FreeTextures(flags: int, mask: int):
+    glt: gltexture_t = active_gltextures
+
+    while glt:
+        next_glt: gltexture_t = glt.next
+        if ( glt.flags & mask ) == ( flags & mask ):
+            TexMgr_FreeTexture(glt)
+        glt = next_glt
+
+
+def TexMgr_FreeTexturesForOwner(owner: quakedef.qmodel_t):
+    glt: gltexture_t = active_gltextures
+
+    while glt:
+        next_glt: gltexture_t = glt.next
+        if glt and glt.owner == owner:
+            TexMgr_FreeTexture(glt)
+        glt = next_glt
+
+def TexMgr_DeleteTextureObjects():
+    glt: gltexture_t = active_gltextures
+
+    while glt:
+        GL_DeleteTexture(glt)
+        glt = glt.next
+
+
+
+
 
 def TexMgr_8to32(_in, pixels, usepal):
     # _in: raw 8-bit bytes from the WAD
@@ -231,7 +307,7 @@ def TexMgr_8to32(_in, pixels, usepal):
     return out
 
 def TexMgr_Pad(s):
-    i = i
+    i = 1
     while i < s:
         i <<= 1
     return i
@@ -501,10 +577,6 @@ def TexMgr_LoadImage8(glt: gltexture_t, data: bytearray, usepal):
     TexMgr_LoadImage32(glt, data)
 
 
-
-
-
-
 def TexMgr_LoadImage(owner:gl_model.qmodel_t, name, width, height, format : gl_texmgr.srcformat, data : bytes, source_file, source_offset : int, flags):
 
     from sys_sdl_unix import isDedicated
@@ -619,8 +691,7 @@ def TexMgr_TextureMode_f(var):
                 glt = glt.next
 
             # Notify the UI (StatusBar) that graphics have changed
-            if 'Sbar_Changed' in globals():
-                Sbar_Changed()
+            sbar.Sbar_Changed()
             return
 
     # 3. Numeric Check (Handling "gl_texturemode 1")
@@ -700,6 +771,21 @@ def TexMgr_Imagelist_f():
 def TexMgr_Imagedump_f():
     raise NotImplementedError
 
+def TexMgr_FrameUsage() -> float:
+    glt: gltexture_t = active_gltextures
+    texels = 0.0
+
+    while glt:
+        if glt.visframe == gl_rmain.r_framecount:
+            if glt.flags & TEXPREF_MIPMAP:
+                texels += glt.width * glt.height * 4.0/3.0
+            else:
+                texels += glt.width * glt.height
+        glt = glt.next
+
+    mb = texels * cvar.Cvar_VariableValue('vid_bpp') / 8.0 / 0x100000
+    return mb
+
 def TexMgr_RecalcWarpImageSize():
     gl_warp.gl_warpimagesize = TexMgr_SafeTextureSize(512)
 
@@ -763,6 +849,7 @@ def TexMgr_Init():
     val = OpenGL.GL.glGetIntegerv(OpenGL.GL.GL_MAX_TEXTURE_SIZE)
     gl_hardware_maxsize = int(val)
 
+    global nulltexture, notexture
     notexture = TexMgr_LoadImage(None, 'notexture', 2, 2, srcformat.SRC_RGBA, notexture_data, '', notexture_data,\
         TEXPREF_NEAREST | TEXPREF_PERSIST | TEXPREF_NOPICMIP )
     nulltexture = TexMgr_LoadImage(None, 'nulltexture', 2, 2, srcformat.SRC_RGBA, nulltexture_data, '', nulltexture_data,\
@@ -778,3 +865,525 @@ def TexMgr_Init():
 
 
 
+def TexMgr_NewGame():
+    TexMgr_FreeTextures(0, TEXPREF_PERSIST)
+    TexMgr_LoadPalette()
+
+
+
+def TexMgr_ResampleTexture(
+    in_buf: bytes | bytearray, inwidth: int, inheight: int, alpha: bool
+) -> bytes:
+    """Resamples a 32-bit RGBA texture buffer to power-of-two dimensions using 16.16
+
+    fixed-point bilinear interpolation.
+
+    C equivalent:
+    TexMgr_ResampleTexture in gl_texmgr.c
+    """
+    if inwidth == gl_texmgr.TexMgr_Pad(inwidth) and inheight == gl_texmgr.TexMgr_Pad( inheight):
+        return bytes(in_buf)
+
+    outwidth = gl_texmgr.TexMgr_Pad(inwidth)
+    outheight = gl_texmgr.TexMgr_Pad(inheight)
+
+    # C equivalent: out = (unsigned *) Hunk_Alloc(outwidth*outheight*4);
+    # Note: FitzQuake allocates byte-size outwidth*outheight*4 (or outwidth*outheight 32-bit pixels)
+    out = bytearray(outwidth * outheight * 4)
+
+    # 16.16 fixed-point step increments (using integer division //)
+    xfrac = (
+        ((inwidth - 1) << 16) // (outwidth - 1) if outwidth > 1 else 0
+    ) & 0xFFFFFFFF
+    yfrac = (
+        ((inheight - 1) << 16) // (outheight - 1) if outheight > 1 else 0
+    ) & 0xFFFFFFFF
+
+    outjump = 0
+    y = 0
+
+    for i in range(outheight):
+        mody = (y >> 8) & 0xFF
+        imody = (256 - mody) & 0xFFFFFFFF
+        injump = ((y >> 16) * inwidth) & 0xFFFFFFFF
+        x = 0
+
+        for j in range(outwidth):
+            modx = (x >> 8) & 0xFF
+            imodx = (256 - modx) & 0xFFFFFFFF
+
+            # Pixel offset in the source buffer: (x>>16) + injump
+            # Converted to byte offset by multiplying by 4 (since each pixel is 4 bytes)
+            nwpx_idx = ((x >> 16) + injump) * 4
+
+            # Pointer offsets matching C: nepx = nwpx + 4, swpx = nwpx + inwidth*4, sepx = swpx + 4
+            nepx_idx = nwpx_idx + 4
+            swpx_idx = nwpx_idx + (inwidth * 4)
+            sepx_idx = swpx_idx + 4
+
+            # Destination byte offset: (outjump + j) * 4
+            dest_idx = (outjump + j) * 4
+
+            # Channel 0 (Red)
+            out[dest_idx] = (
+                in_buf[nwpx_idx] * imodx * imody
+                + in_buf[nepx_idx] * modx * imody
+                + in_buf[swpx_idx] * imodx * mody
+                + in_buf[sepx_idx] * modx * mody
+            ) >> 16
+
+            # Channel 1 (Green)
+            out[dest_idx + 1] = (
+                in_buf[nwpx_idx + 1] * imodx * imody
+                + in_buf[nepx_idx + 1] * modx * imody
+                + in_buf[swpx_idx + 1] * imodx * mody
+                + in_buf[sepx_idx + 1] * modx * mody
+            ) >> 16
+
+            # Channel 2 (Blue)
+            out[dest_idx + 2] = (
+                in_buf[nwpx_idx + 2] * imodx * imody
+                + in_buf[nepx_idx + 2] * modx * imody
+                + in_buf[swpx_idx + 2] * imodx * mody
+                + in_buf[sepx_idx + 2] * modx * mody
+            ) >> 16
+
+            # Channel 3 (Alpha)
+            if alpha:
+                out[dest_idx + 3] = (
+                    in_buf[nwpx_idx + 3] * imodx * imody
+                    + in_buf[nepx_idx + 3] * modx * imody
+                    + in_buf[swpx_idx + 3] * imodx * mody
+                    + in_buf[sepx_idx + 3] * modx * mody
+                ) >> 16
+            else:
+                out[dest_idx + 3] = 255
+
+            x = (x + xfrac) & 0xFFFFFFFF
+
+        outjump = (outjump + outwidth) & 0xFFFFFFFF
+        y = (y + yfrac) & 0xFFFFFFFF
+
+    return bytes(out)
+
+
+def TexMgr_PadEdgeFixW(data: bytearray, width: int, height: int) -> None:
+    """Clones horizontal edge texels across padded texture boundaries to fix seamless texture
+
+    wrapping, leaving the alpha channel untouched (0x00). Modifies bytearray in place.
+
+    C equivalent:
+    static void TexMgr_PadEdgeFixW (byte *data, int width, int height) in gl_texmgr.c
+    """
+    padw = gl_texmgr.TexMgr_PadConditional(width)
+    padh = gl_texmgr.TexMgr_PadConditional(height)
+
+    # Copy last full column to first empty column, leaving alpha byte at zero
+    src_idx = (width - 1) * 4
+    for _ in range(padh):
+        data[src_idx + 4] = data[src_idx]      # Red
+        data[src_idx + 5] = data[src_idx + 1]  # Green
+        data[src_idx + 6] = data[src_idx + 2]  # Blue
+        # src_idx + 7 (Alpha) remains untouched
+        src_idx += padw * 4
+
+    # Copy first full column to last empty column, leaving alpha byte at zero
+    src_idx = 0
+    dst_idx = (padw - 1) * 4
+    for _ in range(padh):
+        data[dst_idx]     = data[src_idx]      # Red
+        data[dst_idx + 1] = data[src_idx + 1]  # Green
+        data[dst_idx + 2] = data[src_idx + 2]  # Blue
+        # dst_idx + 3 (Alpha) remains untouched
+        src_idx += padw * 4
+        dst_idx += padw * 4
+
+def TexMgr_PadEdgeFixH(data: bytearray, width: int, height: int) -> None:
+    """Clones vertical edge texels across padded texture boundaries to fix seamless texture
+
+    wrapping, leaving the alpha channel untouched (0x00). Modifies bytearray in place.
+
+    C equivalent:
+    static void TexMgr_PadEdgeFixH (byte *data, int width, int height) in gl_texmgr.c
+    """
+    padw = gl_texmgr.TexMgr_PadConditional(width)
+    padh = gl_texmgr.TexMgr_PadConditional(height)
+
+    # Copy last full row to first empty row, leaving alpha byte at zero
+    dst_idx = height * padw * 4
+    src_idx = dst_idx - (padw * 4)
+    for _ in range(padw):
+        data[dst_idx]     = data[src_idx]      # Red
+        data[dst_idx + 1] = data[src_idx + 1]  # Green
+        data[dst_idx + 2] = data[src_idx + 2]  # Blue
+        # dst_idx + 3 (Alpha) remains untouched
+        src_idx += 4
+        dst_idx += 4
+
+    # Copy first full row to last empty row, leaving alpha byte at zero
+    dst_idx = (padh - 1) * padw * 4
+    src_idx = 0
+    for _ in range(padw):
+        data[dst_idx]     = data[src_idx]      # Red
+        data[dst_idx + 1] = data[src_idx + 1]  # Green
+        data[dst_idx + 2] = data[src_idx + 2]  # Blue
+        # dst_idx + 3 (Alpha) remains untouched
+        src_idx += 4
+        dst_idx += 4
+
+
+
+def TexMgr_PadImageW(
+    in_buf: bytes | bytearray, width: int, height: int, padbyte: int
+) -> bytes:
+    """Pads an 8-bit indexed image buffer horizontally to power-of-two width using a fill byte.
+
+    C equivalent:
+    static byte *TexMgr_PadImageW (byte *in, int width, int height, byte padbyte) in gl_texmgr.c
+    """
+    outwidth = gl_texmgr.TexMgr_Pad(width)
+
+    if width == outwidth:
+        return bytes(in_buf)
+
+    # C equivalent: out = data = (byte *) Hunk_Alloc(outwidth*height);
+    out = bytearray(outwidth * height)
+
+    in_idx = 0
+    out_idx = 0
+
+    for i in range(height):
+        # Copy original row bytes (*out++ = *in++)
+        for j in range(width):
+            out[out_idx] = in_buf[in_idx]
+            out_idx += 1
+            in_idx += 1
+
+        # Pad remaining row pixels (*out++ = padbyte)
+        for j in range(width, outwidth):
+            out[out_idx] = padbyte
+            out_idx += 1
+
+    return bytes(out)
+
+def TexMgr_PadImageH(
+    in_buf: bytes | bytearray, width: int, height: int, padbyte: int
+) -> bytes:
+    """Pads an 8-bit indexed image buffer vertically to power-of-two height using a fill byte.
+
+    C equivalent:
+    static byte *TexMgr_PadImageH (byte *in, int width, int height, byte padbyte) in gl_texmgr.c
+    """
+    outheight = gl_texmgr.TexMgr_Pad(height)
+
+    if height == outheight:
+        return bytes(in_buf)
+
+    srcpix = width * height
+    dstpix = width * outheight
+
+    # C equivalent: out = data = (byte *) Hunk_Alloc(dstpix);
+    out = bytearray(dstpix)
+
+    # Copy original image texels (*out++ = *in++)
+    out[:srcpix] = in_buf[:srcpix]
+
+    # Pad remaining vertical rows (*out++ = padbyte)
+    out[srcpix:dstpix] = bytes([padbyte]) * (dstpix - srcpix)
+
+    return bytes(out)
+
+
+def TexMgr_LoadImage8(
+    glt: gl_texmgr.gltexture_t,
+    data: bytes | bytearray,
+    usepal: list[int] | None = None,
+) -> None:
+    """Processes, pads, palette-translates (8-to-32-bit), edge-fixes, and uploads an
+
+    8-bit palettized texture to OpenGL.
+
+    C equivalent:
+    static void TexMgr_LoadImage8 (gltexture_t *glt, byte *data, unsigned int *usepal) in gl_texmgr.c
+    """
+    padw: bool = False
+    padh: bool = False
+    padbyte: int = 0
+
+    # Ensure data is mutable in case of local byte modifications or hacks
+    data_buf = bytearray(data)
+
+    # HACK HACK HACK -- taken from tomazquake
+    # b_shell1.bsp "shot1sid" texture corruption fix
+    if (
+        "shot1sid" in glt.name
+        and glt.width == 32
+        and glt.height == 32
+        and common.CRC_Block(data_buf, 1024) == 65393
+    ):
+        # Copy 32 pixels (32 bytes) from bottom row (row 31) to top row
+        data_buf[:32] = data_buf[32 * 31 : 32 * 31 + 32]
+
+    # Detect false alpha cases (strip TEXPREF_ALPHA flag if index 255 is never present)
+    if (glt.flags & gl_texmgr.TEXPREF_ALPHA) and not (
+        glt.flags & gl_texmgr.TEXPREF_CONCHARS
+    ):
+        total_pixels = glt.width * glt.height
+        has_alpha_index = False
+        for i in range(total_pixels):
+            if data_buf[i] == 255:  # Transparent palette index
+                has_alpha_index = True
+                break
+        if not has_alpha_index:
+            glt.flags &= ~gl_texmgr.TEXPREF_ALPHA
+
+    # Choose palette and padbyte if not explicitly provided
+    if usepal is None:
+        if glt.flags & gl_texmgr.TEXPREF_FULLBRIGHT:
+            if glt.flags & gl_texmgr.TEXPREF_ALPHA:
+                usepal = gl_texmgr.d_8to24table_fbright_fence
+            else:
+                usepal = gl_texmgr.d_8to24table_fbright
+            padbyte = 0
+        elif (
+            glt.flags & gl_texmgr.TEXPREF_NOBRIGHT
+        ) and cvar.Cvar_GetCvar("gl_fullbrights").value:
+            if glt.flags & gl_texmgr.TEXPREF_ALPHA:
+                usepal = gl_texmgr.d_8to24table_nobright_fence
+            else:
+                usepal = gl_texmgr.d_8to24table_nobright
+            padbyte = 0
+        elif glt.flags & gl_texmgr.TEXPREF_CONCHARS:
+            usepal = gl_texmgr.d_8to24table_conchars
+            padbyte = 0
+        else:
+            usepal = gl_texmgr.d_8to24table
+            padbyte = 255
+
+    # Pad each dimension, but only if it's not going to be downsampled later
+    if glt.flags & gl_texmgr.TEXPREF_PAD:
+        if glt.width < gl_texmgr.TexMgr_SafeTextureSize(glt.width):
+            data_buf = bytearray(
+                gl_texmgr.TexMgr_PadImageW(
+                    data_buf, glt.width, glt.height, padbyte
+                )
+            )
+            glt.width = gl_texmgr.TexMgr_Pad(glt.width)
+            padw = True
+
+        if glt.height < gl_texmgr.TexMgr_SafeTextureSize(glt.height):
+            data_buf = bytearray(
+                gl_texmgr.TexMgr_PadImageH(
+                    data_buf, glt.width, glt.height, padbyte
+                )
+            )
+            glt.height = gl_texmgr.TexMgr_Pad(glt.height)
+            padh = True
+
+    # Convert 8-bit indexed palette buffer to 32-bit RGBA buffer
+    data_32 = gl_texmgr.TexMgr_8to32(
+        data_buf, glt.width * glt.height, usepal
+    )
+
+    # Fix edge artifacts for transparent or padded textures
+    if glt.flags & gl_texmgr.TEXPREF_ALPHA:
+        gl_texmgr.TexMgr_AlphaEdgeFix(data_32, glt.width, glt.height)
+    else:
+        if padw:
+            gl_texmgr.TexMgr_PadEdgeFixW(
+                data_32, glt.source_width, glt.source_height
+            )
+        if padh:
+            gl_texmgr.TexMgr_PadEdgeFixH(
+                data_32, glt.source_width, glt.source_height
+            )
+
+    # Upload converted 32-bit RGBA image
+    gl_texmgr.TexMgr_LoadImage32(glt, data_32)
+
+
+
+
+def TexMgr_LoadLightmap(glt: gltexture_t, data: bytes):
+    wide10bits: bool = bool(cvar.Cvar_GetCvar('r_lightmapwide').value)
+    _type = OpenGL.GL.GL_UNSIGNED_INT_10_10_10_2 if wide10bits else OpenGL.GL.GL_UNSIGNED_BYTE
+    internalfmt = OpenGL.GL.GL_RGB10_A2 if wide10bits else r_brush.lightmap_bytes
+
+    GL_Bind(glt)
+    OpenGL.GL.glTexImage2D(OpenGL.GL.GL_TEXTURE_2D, 0, internalfmt, glt.width, glt.height, 0, r_brush.gl_lightmap_format, _type, data)
+
+    TexMgr_SetFilterModes(glt)
+
+
+
+def TexMgr_ReloadImage(
+    glt: gl_texmgr.gltexture_t, shirt: int = -1, pants: int = -1
+) -> None:
+    """Reloads texture data from disk or memory sources and updates OpenGL texture state.
+
+    Supports player skin colormapping (shirt/pants translation) for indexed textures.
+
+    C equivalent:
+    void TexMgr_ReloadImage (gltexture_t *glt, int shirt, int pants) in gl_texmgr.c
+    """
+    data: bytearray | bytes | None = None
+
+    # Load texture source buffer
+    if glt.source_file and glt.source_offset:
+        f: io.FileIO | None = None
+        f, _, _, _ = common.COM_FOpenFile(glt.source_file)
+
+        if f:
+            f.seek(glt.source_offset, 1)  # SEEK_CUR
+            size = glt.source_width * glt.source_height
+
+            if glt.source_format == gl_texmgr.srcformat.SRC_RGBA:
+                size *= 4
+            elif glt.source_format == gl_texmgr.srcformat.SRC_LIGHTMAP:
+                size *= r_brush.lightmap_bytes
+
+            data = bytearray(f.read(size))
+            f.close()
+
+            if len(data) != size:
+                host.Host_Error(f"read error for {glt.name}")
+
+    elif glt.source_file and not glt.source_offset:
+        (
+            data,
+            glt.source_width,
+            glt.source_height,
+        ) = image.Image_LoadImage(glt.source_file)
+
+    elif not glt.source_file and glt.source_offset:
+        # Source offset pointing directly to raw memory address
+        data = glt.source_offset
+
+    if not data:
+        console.Con_Printf(
+            f"TexMgr_ReloadImage: invalid source for {glt.name}\n"
+        )
+        return
+
+    # Reset operating dimensions back to initial unpadded source dimensions
+    glt.width = glt.source_width
+    glt.height = glt.source_height
+
+    # Validate colormap requests
+    if shirt > -1 and pants > -1:
+        if glt.source_format == gl_texmgr.srcformat.SRC_INDEXED:
+            glt.shirt = shirt
+            glt.pants = pants
+        else:
+            console.Con_Printf(
+                f"TexMgr_ReloadImage: cant colormap a non SRC_INDEXED texture {glt.name}\n"
+            )
+
+    # Process shirt and pants player skin color translation table
+    if glt.shirt > -1 and glt.pants > -1:
+        translation = list(range(256))
+
+        # Top range (shirt) translation
+        shirt_val = glt.shirt * 16
+        if shirt_val < 128:
+            for i in range(16):
+                translation[render.TOP_RANGE + i] = shirt_val + i
+        else:
+            for i in range(16):
+                translation[render.TOP_RANGE + i] = shirt_val + 15 - i
+
+        # Bottom range (pants) translation
+        pants_val = glt.pants * 16
+        if pants_val < 128:
+            for i in range(16):
+                translation[render.BOTTOM_RANGE + i] = pants_val + i
+        else:
+            for i in range(16):
+                translation[render.BOTTOM_RANGE + i] = pants_val + 15 - i
+
+        # Translate original indexed buffer into new colormapped destination buffer
+        size = glt.width * glt.height
+        dst = bytearray(size)
+        for i in range(size):
+            dst[i] = translation[data[i]]
+
+        # Rebind translated buffer to data for uploading
+        data = dst
+
+    # Forward to target format upload loader
+    match glt.source_format:
+        case gl_texmgr.srcformat.SRC_INDEXED:
+            gl_texmgr.TexMgr_LoadImage8(glt, data, None)
+        case gl_texmgr.srcformat.SRC_LIGHTMAP:
+            gl_texmgr.TexMgr_LoadLightmap(glt, data)
+        case gl_texmgr.srcformat.SRC_RGBA:
+            gl_texmgr.TexMgr_LoadImage32(glt, data)
+        case gl_texmgr.srcformat.SRC_INDEXED_PALETTE:
+            raise NotImplementedError("SRC_INDEXED_PALETTE reloading is not implemented.")
+
+
+
+def TexMgr_ReloadImages() -> None:
+    global in_reload_images
+    in_reload_images = True
+
+    glt: gl_texmgr.gltexture_t | None = gl_texmgr.active_gltextures
+    while glt is not None:
+        # Explicit 2-argument form passing output buffer
+        tex_id = (OpenGL.GL.GLuint * 1)()
+        OpenGL.GL.glGenTextures(1, tex_id)
+        glt.texnum = tex_id[0]
+
+        gl_texmgr.TexMgr_ReloadImage(glt, -1, -1)
+
+        glt = glt.next
+
+    in_reload_images = False
+
+
+def GL_SelectTexture(target):
+    global currenttarget
+    if target == currenttarget:
+        return
+
+    OpenGL.GL.glActiveTexture(target)
+    currenttarget = target
+
+def GL_DisableMultitexture():
+    global mtexenabled
+    if mtexenabled:
+        OpenGL.GL.glDisable(OpenGL.GL.GL_TEXTURE_2D)
+        GL_SelectTexture(OpenGL.GL.GL_TEXTURE0)
+        mtexenabled = False
+
+def GL_EnableMultitexture():
+    global mtexenabled
+    if gl_vidsdl.gl_mtexable:
+        GL_SelectTexture(OpenGL.GL.GL_TEXTURE1)
+        OpenGL.GL.glEnable(OpenGL.GL.GL_TEXTURE_2D)
+        mtexenabled = True
+
+def GL_DeleteTexture(texture: gltexture_t):
+    if not texture or not texture.texnum:
+        return
+
+    # Delete hardware OpenGL texture handle passing count and sequence/pointer
+    OpenGL.GL.glDeleteTextures(1, [texture.texnum])
+
+    # Invalidate bound texture cache state across active texture units
+    if texture.texnum == currenttexture[0]:
+        currenttexture[0] = glquake.GL_UNUSED_TEXTURE
+
+    if texture.texnum == currenttexture[1]:
+        currenttexture[1] = glquake.GL_UNUSED_TEXTURE
+
+    if texture.texnum == currenttexture[2]:
+        currenttexture[2] = glquake.GL_UNUSED_TEXTURE
+
+    # Reset texture handle on the engine texture object
+    texture.texnum = 0
+
+
+def GL_ClearBindings():
+    for i in range(3):
+        currenttexture[i] = glquake.GL_UNUSED_TEXTURE

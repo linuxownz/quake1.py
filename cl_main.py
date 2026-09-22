@@ -2,18 +2,29 @@
 
 import math
 from enum import Enum
+from random import randint
 
 import _cmd
+import chase
 import cl_demo
 import cl_input
 import cl_main
+import cl_parse
+import cl_tent  # temporary entities
 import common
 import console
+import gl_model
+import gl_rmain
 import gl_screen
 import host
+import in_sdl
 import keys
+import mathlib
 import net_main
+import protocol
 import quakedef
+import r_part
+import render
 import snd_dma
 import sv_main
 
@@ -30,12 +41,33 @@ cl_static_entities: list[quakedef.entity_t] = [None for _ in range(quakedef.MAX_
 cl_lightstyle : list[quakedef.lightstyle_t] = [None for _ in range(quakedef.MAX_LIGHTSTYLES)]
 cl_dlights    : list[quakedef.dlight_t]     = [None for _ in range(quakedef.MAX_DLIGHTS)]
 
-cl_entities: quakedef.entity_t = None
-
+cl_entities: list[render.entity_t] = []
 cl_max_edicts = 0
-cl_numvisedicts = 0
 
+cl_numvisedicts = 0
 cl_visedicts: list[quakedef.entity_t] = [None] * quakedef.MAX_VISEDICTS
+
+
+def CL_ClearState():
+    global cl, cl_dlights, cl_lightstyle
+    global cl_max_edicts, cl_entities
+
+    if not sv_main.sv.active:
+        host.Host_ClearMemory()
+
+    cl = quakedef.client_state_t()
+
+    cls.message = bytearray()
+
+    cl_dlights    = [quakedef.dlight_t() for _ in range(quakedef.MAX_STATIC_ENTITIES)]
+    cl_lightstyle = [quakedef.lightstyle_t() for _ in range(quakedef.MAX_LIGHTSTYLES)]
+    cl_tent.cl_temp_entities = [quakedef.entity_t() for _ in range(quakedef.MAX_TEMP_ENTITIES)]
+    cl_tent.cl_beams         = [quakedef.beam_t() for _ in range(quakedef.MAX_BEAMS)]
+
+    max_edicts = cvar.Cvar_GetCvar('max_edicts').value
+
+    cl_max_edicts = common.CLAMP(quakedef.MIN_EDICTS, max_edicts, quakedef.MAX_EDICTS)
+    cl_entities = [quakedef.entity_t() for _ in range(cl_max_edicts)]
 
 
 def CL_Init():
@@ -147,6 +179,52 @@ def CL_Disconnect():
 
     #cl_demo.CL_ClearSignons()
 
+
+def CL_EstablishConnection(_host: str):
+    if cls.state == quakedef.cactive_t.ca_dedicated:
+        return
+
+    if cls.demoplayback:
+        return
+
+    CL_Disconnect()
+
+    cls.netcon = net_main.NET_Connect(_host)
+
+    if not cls.netcon:
+        host.Host_Error('CL_Connect: connect failed')
+
+    console.Con_DPrintf(f'CL_EstablishConnection: connect to {_host}')
+
+    cls.demonum = -1
+    cls.state =  quakedef.cactive_t.ca_connected
+    cl_demo.CL_ClearSignons()
+    common.MSG_WriteByte(cls.message, protocol.clc_nop)
+
+def CL_SignonReply():
+    console.Con_DPrintf('CL_SignonReply: {cls.signon}')
+
+    match cls.signon:
+        case 1:
+            common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
+            common.MSG_WriteString(cls.message, 'prespawn')
+        case 2:
+            cl_name  = cvar.Cvar_GetCvar('_cl_name').string
+            cl_color = cvar.Cvar_GetCvar('_cl_color').value
+            common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
+            common.MSG_WriteString(cls.messasge, f'name "{cl_name}"\n')
+
+            common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
+            common.MSG_WriteString(cls.message, f'color {cl_color>>4} {cl_color & 15}\n')
+
+            common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
+            common.MSG_WriteString(cls.message, f'spawn {cls.spawnparms}')
+        case 3:
+            common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
+            common.MSG_WriteString(cls.message, 'begin')
+        case 4:
+            gl_screen.SCR_EndLoadingPlaque()
+
 def CL_NextDemo():
     if cls.demonum == -1:
         return
@@ -165,7 +243,377 @@ def CL_NextDemo():
     _cmd.Cbuf_InsertText(demoname)
     cls.demonum += 1
 
+def CL_PrintEntities_f():
+    if cls.state != quakedef.cactive_t.ca_connected:
+        return
+
+    for i, ent in enumerate(cl_entities):
+        console.Con_Printf(f'{i:%3}')
+        if not ent.model:
+            console.Con_Printf('EMPTY')
+            continue
+
+        # Format model name (safely handling None), frame, origin vector, and angles vector
+        model_name = ent.model.name if ent.model else "NONE"
+
+        Con_Printf(
+            f"{model_name}:{ent.frame:2d}  ("
+            f"{ent.origin[0]:5.1f},{ent.origin[1]:5.1f},{ent.origin[2]:5.1f}) ["
+            f"{ent.angles[0]:5.1f} {ent.angles[1]:5.1f} {ent.angles[2]:5.1f}]\n"
+        )
+
+
+def CL_AllocDlight( key: int) -> quakedef.dlight_t:
+    dl = None
+    if key:
+        i = 0
+        for dl in cl_dlights:
+            if dl.key == key:
+                dl.key = key
+                dl.color[0] = dl.color[1] = dl.color[2] = 1
+                return dl
+            i += 1
+            if i >= quakedef.MAX_DLIGHTS:
+                break
+
+    i = 0
+    for dl in cl_dlights:
+        if dl.die < cl.time:
+            dl.key = key
+            dl.color[0] = dl.color[1] = dl.color[2] = 1
+            return dl
+        i += 1
+        if i >= quakedef.MAX_DLIGHTS:
+            break
+
+    dl = cl_dlights[0]
+    dl.key = key
+    dl.color[0] = dl.color[1] = dl.color[2] = 1
+    return dl
+
+
+def CL_DecayLights():
+    time = cl.time - cl.oldtime
+
+    i = -1
+    for dl in cl_dlights:
+        i += 1
+        if dl.die < cl.time or not dl.radius:
+            continue
+
+        dl.radius -= time * dl.decay
+        dl.radius = max(dl.radius, 0)
+
+        if i >= quakedef.MAX_DLIGHTS:
+            break
+
+
+def CL_LerpPoint() -> float:
+    f = cl.mtime[0] - cl.mtime[1]
+
+    if not f or cls.timedemo or sv_main.sv.active:
+        cl.time = cl.mtime[0]
+        return 1
+
+    if f > 0.1:
+        cl.mtime[1] = cl.mtime[0] - 0.1
+        f = 0.1
+
+    frac = ( cl.time - cl.mtime[1] ) / f
+
+    if frac < 0:
+        if frac < 0.01:
+            cl.time = cl.mtime[1]
+        frac = 0
+    elif frac > 1:
+        if frac > 1.01:
+            cl.time = cl.mtime[0]
+        frac = 1
+
+    if cvar.Cvar_GetCvar('cl_nolerp').value:
+        return 1
+
+    return frac
+
+
+def CL_RelinkEntities():
+    global cl_numvisedicts
+
+    oldorg = None
+    delta = [0, 0, 0]
+
+    frac = CL_LerpPoint()
+
+    cl_numvisedicts = 0
+
+    for i in range(3):
+        cl.velocity[i] = cl.mvelocity[1][i] + frac * ( cl.mvelocity[0][i] - cl.mvelocity[1][i])
+
+    if cls.demoplayback:
+        for j in range(3):
+            d = cl.mviewangles[0][j] - cl.mviewangles[1][j]
+            if d > 180:
+                d -=360
+            elif d < -180:
+                d += 360
+            cl.viewangles[j] = cl.mviewangles[1][j] + frac * d
+
+    bobjrotate = mathlib.anglemod( 100 * cl.time )
+
+    i = 0
+
+    for ent in cl_entities[1:]:
+        i += 1
+        if i >= cl.num_entities:
+            break
+
+        if not ent.model:
+            continue
+
+        if ent.msgtime != cl.mtime[0]:
+            ent.model = None
+            ent.lerpflags |= render.LERP_RESETMOVE | render.LERP_RESETANIM
+            continue
+
+
+        mathlib.VectorCopy(ent.origin, oldorg)
+
+        if ent.forcelink:
+            mathlib.VectorCopy(ent.msg_origins[0], ent.origin)
+            mathlib.VectorCopy(ent.msg_angles[0], ent.angles)
+        else:
+            f = frac
+            for j in range(3):
+                delta[j] = ent.msg_origins[0][j] - ent.msg_origins[1][j]
+                if delta[j] > 100 or delta[j] < -100:
+                    f = 1
+                    ent.lerpflags |= render.LERP_RESETMOVE
+
+            if cvar.Cvar_GetCvar('r_lerpmove').value and ( ent.lerpflags & render.LERP_MOVESTEP):
+                f = 1
+
+            for j in range(3):
+                ent.origin[j] = ent.msg_origins[1][j] + f * delta[j]
+
+                d = ent.msg_angles[0][j] - ent.msg_angles[1][j]
+                if d > 180:
+                    d -= 360
+                elif d < -180:
+                    d += 360
+
+                ent.angles[j] = ent.msg_angles[1][j]  + f * d
+
+        if ent.model.flags & quakedef.EF_ROTATE:
+            ent.angles[1] = bobjrotate
+
+        if ent.effects & quakedef.EF_BRIGHTFIELD:
+            r_part.R_EntityParticles(ent)
+
+        if ent.effects & quakedef.EF_MUZZLEFLASH:
+            fv = [0, 0, 0]
+            rv = [0, 0, 0]
+            uv = [0, 0, 0]
+
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy(ent.origin, dl.origin)
+            dl.origin[2] += 16
+            mathlib.AngleVectors(ent.angles, fv, rv, uv)
+
+            mathlib.VectorMA(dl.origin, 18, fv, dl.origin)
+            dl.radius = 200 + (randint(0, 2147483647) & 31)
+            dl.minlight = 32
+            dl.die = cl.time + 0.1
+
+            if cvar.Cvar_GetCvar('r_lerpmodels').value != 2:
+                if ent == cl_entities[cl.viewentity]:
+                    cl.viewent.lerpflags |= render.LERP_RESETANIM | render.LERP_RESETANIM2
+                else:
+                    ent.lerpflags |= render.LERP_RESETANIM | render.LERP_RESETANIM2
+
+        if ent.effects & quakedef.EF_BRIGHTLIGHT:
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy(ent.origin, dl.origin)
+            dl.origin[2] += 16
+            dl.radius = 400 + ( randint(0,2147483647) & 31)
+            dl.die = cl.time + 0.001
+
+        if ent.effects & quakedef.EF_DIMLIGHT:
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy(ent.origin, dl.origin)
+            dl.radius = 200 + ( randint(0,2147483647) & 31)
+            dl.die = cl.time + 0.001
+
+        if ent.effects & quakedef.EF_QEX_QUADLIGHT:
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy(ent.origin, dl.origin)
+            dl.radius = 200 + ( randint(0, 2147483647) & 31)
+            dl.die = cl.time + 0.001
+            dl.color[0] = 0.25
+            dl.color[1] = 0.25
+            dl.color[2] = 1.
+
+        if ent.effects & quakedef.EF_QEX_PENTALIGHT:
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy(ent.origin, dl.origin)
+            dl.radius = 200 + ( randint(0, 2147483647) & 31)
+            dl.die = cl.time + 0.001
+            dl.color[0] = 1.0
+            dl.color[1] = 0.25
+            dl.color[2] = 0.25
+
+        if ent.model.flags & quakedef.EF_GIB:
+            r_part.R_RocketTrail( oldorg, ent.origin, 2)
+        elif ent.model.flags & quakedef.EF_ZOMGIB:
+            r_part.R_RocketTrail( oldorg, ent.origin, 4)
+        elif ent.model.flags & quakedef.EF_TRACER:
+            r_part.R_RocketTrail( oldorg, ent.origin, 3)
+        elif ent.model.flags & quakedef.EF_TRACER2:
+            r_part.R_RocketTrail( oldorg, ent.origin, 5)
+        elif ent.model.flags & quakedef.EF_ROCKET:
+            r_part.R_RocketTrail( oldorg, ent.origin, 0)
+            dl = CL_AllocDlight(i)
+            mathlib.VectorCopy( ent.origin, dl.origin)
+            dl.radius = 200
+            dl.die = cl.time + 0.01
+        elif ent.model.flags & quakedef.EF_GRENADE:
+            r_part.R_RocketTrail( oldorg, ent.origin, 1)
+        elif ent.model.flags & quakedef.EF_TRACER3:
+            r_part.R_RocketTrail( oldorg, ent.origin, 6)
+
+        ent.forcelink = False
+
+        if i == cl.viewentity and not cvar.Cvar_GetCvar('chase_active').value:
+            continue
+
+        if cl_numvisedicts < quakedef.MAX_VISEDICTS:
+            cl_visedicts[cl_numvisedicts] = ent
+            cl_numvisedicts += 1
+
+def CL_ReadFromServer():
+    cl.oldtime = cl.time
+    cl.time += host.host_frametime
+
+    while True:
+        ret = cl_demo.CL_GetMessage()
+        if ret == -1:
+            host.Host_Error('CL_ReadFromServer: lost server connection')
+
+        if not ret:
+            break
+
+        cl.last_received_message = host.realtime
+        cl_parse.CL_ParseServerMessage()
+
+        if not ( ret and cls.state == quakedef.cactive_t.ca_connected ) :
+            break
+
+    if cvar.Cvar_GetCvar('cl_shownet').value:
+        console.Con_Printf('\n')
+
+    cl_main.CL_RelinkEntities()
+    cl_tent.CL_UpdateTEnts()
+
+    if cl_numvisedicts > 256 and host.dev_peakstats.visedicts <= 256:
+        Con_DWarning(f"{cl_numvisedicts:d} visedicts exceeds standard limit of 256 (max = {quakedef.MAX_VISEDICTS:d}).\n")
+
+    host.dev_stats.visedicts = cl_numvisedicts
+    dev_peakstats.visedicts = max(cl_numvisedicts, dev_peakstats.visedicts)
+
+    if num_temp_entities > 64 and host.dev_peakstats.tempents <= 64:
+        Con_DWarning(f"{cl_tent.num_temp_entities:d} tempentities exceeds standard limit of 64 (max = {quakedef.MAX_TEMP_ENTITIES:d}).\n")
+
+    host.dev_stats.tempents = cl_tent.num_temp_entities
+    host.dev_peakstats.tempents = max(cl_tent.num_temp_entities, host.dev_peakstats.tempents)
+
+    num_beams = sum(1 for b in cl_tent.cl_beams if b.model and b.endtime >= cl.time)
+
+    if num_beams > 24 and host.dev_peakstats.beams <= 24:
+        Con_DWarning(f"{num_beams:d} beams exceeded standard limit of 24 (max = {quakedef.MAX_BEAMS:d}).\n")
+
+    host.dev_stats.beams = num_beams
+    host.dev_peakstats.beams = max(num_beams, host.dev_peakstats.beams)
+
+    num_dlights = sum(1 for l in cl_dlights if l.die >= cl.time and l.radius)
+
+    if num_dlights > 32 and host.dev_peakstats.dlights <= 32:
+        Con_DWarning(f"{num_dlights:d} dlights exceeded standard limit of 32 (max = {quakedef.MAX_DLIGHTS:d}).\n")
+
+    dev_stats.dlights = num_dlights
+    dev_peakstats.dlights = max(num_dlights, host.dev_peakstats.dlights)
+
+    return 0
+
+
+def CL_SendCmd():
+
+    cmd: protocol.usercmd_t = None
+
+    if cl_main.cls.state != quakedef.cactive_t.ca_connected:
+        return
+
+    if cl_main.cls.signon == quakedef.SIGNONS:
+        cl_input.CL_BaseMove(cmd)
+
+        in_sdl.IN_Move(cmd)
+
+        cl_input.CL_SendMove(cmd)
+
+    if cl_main.cls.demoplayback:
+        common.SZ_Clear(cl_main.cls.message)
+        return
+
+    if not cl_main.cls.message.cursize:
+        return
+
+    if not net_main.NET_CanSendMessage(cl_main.cls.netcon):
+        console.Con_DPrintf('CL_SendCmd: cant send')
+        return
+
+    if net_main.NET_SendMessage(cl_main.cls.netcon, cl_main.cls.message) == -1:
+        host.Host_Error('CL_SendCmd: lost server connection')
+
+    common.SZ_Clear(cl_main.cls.message)
+
+
+def CL_Tracepos_f():
+    if cl_main.cls.state != quakedef.cactive_t.ca_connected:
+        return
+
+    v: list[float] = [0., 0., 0.]
+    w: list[float] = [0., 0., 0.]
+
+    mathlib.VectorMA(gl_rmain.r_refdef.vieworg, 8192, gl_rmain.vpn, v)
+    chase.TraceLine(gl_rmain.r_refdef.vieworg, v, w)
+
+    if mathlib.VectorLength(w) == 0:
+        console.Con_Printf('Tracepos: trace didnt hit anything')
+    else:
+        Con_Printf(f"Tracepos: ({int(w[0]):d} {int(w[1]):d} {int(w[2]):d})\n")
+
+
+def CL_Viewpos_f():
+    if cl_main.cls.state != quakedef.cactive_t.ca_connected:
+        return
+
+    view_ent = cl_main.cl_entities[cl_main.cl.viewentity]
+
+    Con_Printf(
+        f"Viewpos: ({int(view_ent.origin[0]):d} {int(view_ent.origin[1]):d} {int(view_ent.origin[2]):d}) "
+        f"{int(cl.viewangles[PITCH]):d} {int(cl.viewangles[YAW]):d} {int(cl.viewangles[ROLL]):d}\n"
+    )
+
+
+
+
+
+
+
+
 def CL_Move(time_step):
+    class DoNotUse(Exception):
+        pass
+    raise DoNotUse()
+
     if keys.key_dest != keys.keydest_t.key_game:
         return
 

@@ -2,6 +2,7 @@
 
 
 import ctypes
+import math
 
 import sdl2
 import sdl2.ext
@@ -10,8 +11,15 @@ import cl_input
 import cl_main
 import common
 import console
+import cvar
+import host
+import host_cmd
 import keys
+import protocol
+import quakedef
+import snd_dma
 import sys_sdl_unix
+import view
 
 windowhasfocus = True
 textmode = False
@@ -25,7 +33,26 @@ buttonremap = []
 total_dx = 0
 total_dy = 0
 
+class joyaxis_t:
+    def __init__(self):
+        self.x = 0
+        self.y = 0
+
+class joybuttonstate_t:
+    def __init__(self):
+        self.buttondown: list[bool] = [False for _ in range(sdl2.SDL_CONTROLLER_BUTTON_MAX)]
+
+class joyaxisstate_t:
+    def __init__(self):
+        self.axisvalue: list[float] = [0.0 for _ in range(sdl2.SDL_CONTROLLER_AXIS_MAX)]
+
+joy_buttonstate: joybuttonstate_t = joybuttonstate_t()
+joy_axisstate: joyaxisstate_t = joyaxisstate_t()
+joy_buttontimer: list[float] = [0.0 for _ in range(sdl2.SDL_CONTROLLER_BUTTON_MAX)]
+joy_emulatedkeytimer: list[float] = [0.0 for _ in range(6)]
+
 def IN_ClearStates():
+    # empty in original source
     pass
 
 def IN_FilterMouseEvents(event:sdl2.SDL_Event):
@@ -47,11 +74,11 @@ def IN_Init():
     global cl_sensitivity
 
     buttonremap = [
-        keys.K_MOUSE1,
-        keys.K_MOUSE3,
-        keys.K_MOUSE2,
-        keys.K_MOUSE4,
-        keys.K_MOUSE5
+        keys.Key.K_MOUSE1,
+        keys.Key.K_MOUSE3,
+        keys.Key.K_MOUSE2,
+        keys.Key.K_MOUSE4,
+        keys.Key.K_MOUSE5
     ]
 
     import cvar
@@ -145,9 +172,22 @@ def IN_StartupJoystick():
         else:
             console.Con_Warning(f'joystick missing controller mappings {joyname}')
 
+def IN_ShutdownJoystick():
+    sdl2.SDL_QuitSubSystem(sdl2.SDL_INIT_GAMECONTROLLER)
+
+
+
 def IN_MouseMotion(dx, dy):
     global total_dx, total_dy
+    if not windowhasfocus:
+        dx = dy = 0
+    total_dx += dx
+    total_dy += dy
 
+    return
+
+
+    # gemini code
     # 1. Check console state
     if keys.key_dest != keys.keydest_t.key_game:
         return
@@ -168,6 +208,80 @@ def IN_MouseMotion(dx, dy):
     elif cl_main.cl.viewangles[0] < -70:
         cl_main.cl.viewangles[0] = -70
 
+
+def IN_AxisMagnitude(axis: joyaxis_t) -> float:
+    magnitude: float = math.sqrt((axis.x * axis.x) + (axis.y * axis.y))
+    return magnitude
+
+def IN_ApplyEasing(axis: joyaxis_t, exponent: float) -> joyaxis_t:
+    result: joyaxis_t = joyaxis_t()
+    eased_magnitude: float = 0.0
+    magnitude: float = IN_AxisMagnitude(axis)
+
+    if magnitude == 0.0:
+        return result
+
+    eased_magnitude = math.pow(magnitude, exponent)
+
+    result.x = axis.x * ( eased_magnitude / magnitude)
+    result.y = axis.y * ( eased_magnitude / magnitude)
+    return result
+
+
+def IN_ApplyDeadzone(axis: joyaxis_t, deadzone: float, outer_threshold: float) -> joyaxis_t:
+    result: joyaxis_t = joyaxis_t()
+    magnitude: float = IN_AxisMagnitude(axis)
+
+    if magnitude > deadzone:
+        new_magnitude: float = min(1.0, (magnitude - deadzone) / (1.0 - deadzone - outer_threshold))
+        scale: float = new_magnitude / magnitude
+        result.x = axis.x * scale
+        result.y = axis.y * scale
+
+    return result
+
+
+
+def IN_KeyForControllerButton(button: sdl2.SDL_GameControllerButton) -> int:
+    match button:
+        case sdl2.SDL_CONTROLLER_BUTTON_A: return keys.K_ABUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_B: return keys.K_BBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_X: return keys.K_XBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_Y: return keys.K_YBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_BACK: return keys.K_TAB
+        case sdl2.SDL_CONTROLLER_BUTTON_START: return keys.K_ESCAPE
+        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSTICK: return keys.K_LTHUMB
+        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSTICK: return keys.K_RTHUMB
+        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return keys.K_LSHOULDER
+        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return keys.K_RSHOULDER
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_UP: return keys.K_UPARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_DOWN: return keys.K_DOWNARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_LEFT: return keys.K_LEFTARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return keys.K_RIGHTARROW
+        case _: return 0
+
+
+
+def IN_JoyKeyEvent(wasdown: bool, isdown: bool, key: int, timer: float) -> float:
+    currenttime = sys_sdl_unix.Sys_DoubleTime()
+    result = timer
+
+    if wasdown:
+        if isdown:
+            if currenttime >= timer:
+                result = currenttime + 0.1
+                keys.Key_Event(key, True)
+        else:
+            result = 0
+            keys.Key_Event(key, False)
+    else:
+        if isdown:
+            result = currenttime + 0.5
+            keys.Key_Event(key,  True)
+
+    return result
+
+
 def IN_SendKeyEvents():
     global joy_active_controller
     global joy_active_instanceid
@@ -183,10 +297,10 @@ def IN_SendKeyEvents():
             case sdl2.SDL_WINDOWEVENT:
                 if event.window.event == sdl2.SDL_WINDOWEVENT_FOCUS_GAINED:
                     windowhasfocus = True
-                    #S_UnblockSound()
+                    snd_dma.S_UnblockSound()
                 elif event.window.event == sdl2.SDL_WINDOWEVENT_FOCUS_LOST:
                     windowhasfocus = False
-                    #S_BlockSound()
+                    snd_dma.S_BlockSound()
 
             case sdl2.SDL_TEXTINPUT:
                 if keys.key_dest == keys.keydest_t.key_console:
@@ -201,63 +315,11 @@ def IN_SendKeyEvents():
                 down = (event.key.state == sdl2.SDL_PRESSED)
                 key = IN_SDL2_ScancodeToQuakeKey(event.key.keysym.scancode)
 
-                if isinstance(key, str):
-                    key = ord(key)
-
-                # 1. ALWAYS handle the console toggle first
-                # 96 is the ASCII for ` (backquote)
-                if key == 96:
-                    keys.Key_Event(key, down)
-                    continue
-
-                if keys.key_dest == keys.keydest_t.key_game:
-                    down = (event.key.state == sdl2.SDL_PRESSED)
-
-                    # --- STRAFING (A/D) ---
-                    if key == ord('w'):
-                        cl_input.in_forward.state = (cl_input.in_forward.state | 1 | 2) if down else (cl_input.in_forward.state & ~1)
-                    elif key == ord('s'):
-                        cl_input.in_back.state = (cl_input.in_back.state | 1 | 2) if down else (cl_input.in_back.state & ~1)
-                    elif key == ord('a'):
-                        cl_input.in_strafe_left.state = (cl_input.in_strafe_left.state | 1 | 2) if down else (cl_input.in_strafe_left.state & ~1)
-                    elif key == ord('d'):
-                        cl_input.in_strafe_right.state = (cl_input.in_strafe_right.state | 1 | 2) if down else (cl_input.in_strafe_right.state & ~1)
-
-                    # --- TURNING (Arrow Keys) ---
-                    if key == keys.K_LEFTARROW:
-                        cl_input.in_turn_left.state = (cl_input.in_turn_left.state | 1) if down else 0
-                    elif key == keys.K_RIGHTARROW:
-                        cl_input.in_turn_right.state = (cl_input.in_turn_right.state | 1) if down else 0
-                    elif key == keys.K_UPARROW:
-                        cl_input.in_pitch_up.state = (cl_input.in_pitch_up.state | 1) if down else 0
-                    elif key == keys.K_DOWNARROW:
-                        cl_input.in_pitch_down.state = (cl_input.in_pitch_down.state | 1) if down else 0
-
-                # 2. If console is open, handle navigation keys
-                if keys.key_dest == keys.keydest_t.key_console:
-
-                    if keys.keydown[keys.K_CTRL]:
-                        if key == ord('l'):
-                            console.Con_Clear_f()
-
-                    control_keys = (
-                        keys.K_ENTER, keys.K_ESCAPE, keys.K_BACKSPACE,
-                        keys.K_UPARROW, keys.K_DOWNARROW,
-                        keys.K_LEFTARROW, keys.K_RIGHTARROW,
-                        keys.K_TAB, keys.K_PGUP, keys.K_PGDN,
-                        keys.K_CTRL, keys.K_ALT
-                    )
-                    if key in control_keys:
-                        keys.Key_Event(key, down)
-                    continue
-
-                # 3. Standard gameplay path
-                if key:
-                    keys.Key_EventWithKeycode(key, down, event.key.keysym.sym)
+                keys.Key_EventWithKeycode(key, down, event.key.keysym.sym)
 
             case sdl2.SDL_MOUSEBUTTONDOWN | sdl2.SDL_MOUSEBUTTONUP:
                 if event.button.button < 1 or event.button.button > len(buttonremap):
-                    console.Con_Printf('ignored event for mouse button %d' % event.button.button)
+                    console.Con_Printf('ignored event for mouse button %d' % event.button.button)  # noqa: UP031
                 else:
                     keys.Key_Event(buttonremap[event.button.button - 1], event.button.state == sdl2.SDL_PRESSED)
 
@@ -415,47 +477,87 @@ def IN_SDL2_ScancodeToQuakeKey(scancode):
 
         case _: return 0;
 
-def IN_Shutdown():
-    pass
-    #IN_Deactivate(True)
-    #IN_ShutdownJoystick()
 
-def IN_MouseMove():
+def IN_DebugTextEvent(event: sdl2.SDL_Event):
+    console.Con_Printf(f'SDL_TEXTINPUT: {event.text.text} {sys_sdl_unix.Sys_DoubleTime()}')
+
+
+def IN_DebugKeyEvent(event: sdl2.SDL_Event):
+    eventtype = 'SDL_KEYDOWN' if event.key.state == sdl2.SDL_PRESSED else 'SDL_KEYUP'
+    console.Con_Printf(f'{eventtype} {sdl2.SDL_GetScancodeName(event.key.keysym.scancode)} {sdl2.SDL_GetKeyName(event.key.keysym.sym)} {sys_sdl_unix.Sys_DoubleTime()}')
+
+
+
+def IN_Shutdown():
+    IN_Deactivate(True)
+    IN_ShutdownJoystick()
+
+def IN_MouseMove(cmd: protocol.usercmd_t):
     global total_dx, total_dy
 
-    # 1. Don't move the camera if the console is open or we have no focus
-    if keys.key_dest != keys.keydest_t.key_game or not windowhasfocus:
-        total_dx = 0
-        total_dy = 0
+    sensitivity = cvar.Cvar_GetCvar('sensitivity').value
+
+    dmx = total_dx * sensitivity
+    dmy = total_dy * sensitivity
+
+    total_dx = total_dy = 0
+
+    if cl_main.cl.paused or keys.key_dest != keys.keydest_t.key_game:
         return
 
-    # 2. Get the Cvar values
-    # We use the cached cl_sensitivity object we created in IN_Init
-    # We'll also define m_yaw and m_pitch (Quake defaults)
-    import cvar
+    lookstrafe = cvar.Cvar_GetCvar('lookstrafe').value
+    m_side = cvar.Cvar_GetCvar('m_side').value
+    m_yaw  = cvar.Cvar_GetCvar('m_yaw').value
+    m_pitch = cvar.Cvar_GetCvar('m_pitch').value
+    m_forward = cvar.Cvar_GetCvar('m_forward').value
+    cl_maxpitch = cvar.Cvar_GetCvar('cl_maxpitch')
+    cl_minpitch = cvar.Cvar_GetCvar('cl_minpitch')
 
-    cl_sensitivity = float(cvar.Cvar_GetCvar('sensitivity').value)
+    if ( cl_input.in_strafe.state & 1 ) or lookstrafe and ( cl_input.in_mlook.state & 1 ):
+        cmd.sidemove += m_side * dmx
+    else:
+        cl_main.cl.viewangles[quakedef.YAW] -= m_yaw * dmx
 
-    m_yaw = cvar.Cvar_VariableValue('m_yaw') if cvar.Cvar_FindVar('m_yaw') else 0.022
-    m_pitch = cvar.Cvar_VariableValue('m_pitch') if cvar.Cvar_FindVar('m_pitch') else 0.022
+    if cl_input.in_mlook.state & 1 and (dmx or dmy):
+        view.V_StopPitchDrift()
 
-    # 3. Apply the scaling: (Delta * Sensitivity * QuakeConstant)
-    # The cl_sensitivity.value is updated LIVE by your console logic
-    view_x = total_dx * cl_sensitivity * m_yaw
-    view_y = total_dy * cl_sensitivity * m_pitch
+    if ( cl_input.in_mlook.state & 1 ) and not ( cl_input.in_strafe.state & 1 ):
+        cl_main.cl.viewangles[quakedef.PITCH] += m_pitch * dmy
+        cl_main.cl.viewangles[quakedef.PITCH] = min(cl_main.cl.viewangles[quakedef.PITCH], cl_maxpitch)
+        cl_main.cl.viewangles[quakedef.PITCH] = max(cl_main.cl.viewangles[quakedef.PITCH], cl_minpitch)
 
-    # 4. Apply to the client's view angles
-    # Index 1 is Yaw (Left/Right), Index 0 is Pitch (Up/Down)
-    cl_main.cl.viewangles[1] -= view_x
-    cl_main.cl.viewangles[0] += view_y
+    else:
+        if ( cl_input.in_strafe.state & 1 ) and host_cmd.noclip_anglehack:
+            cmd.upmove -= m_forward * dmy
+        else:
+            cmd.forwardmove -= m_forward * dmy
 
-    # 5. Clamp the pitch so the player can't flip upside down
-    cl_main.cl.viewangles[0] = min(cl_main.cl.viewangles[0], 80)
-    cl_main.cl.viewangles[0] = max(cl_main.cl.viewangles[0], -70)
 
-    # 6. RESET the accumulation for the next frame
-    total_dx = 0
-    total_dy = 0
+def IN_Move(cmd: protocol.usercmd_t):
+    IN_JoyMove(cmd)
+    IN_MouseMove(cmd)
+
+
+def IN_UpdateInputMode():
+    global textmode
+
+    want_textmode = keys.Key_TextEntry()
+    if textmode != want_textmode:
+        textmode = want_textmode
+
+        in_debugkeys = cvar.Cvar_GetCvar('in_debugkeys').value
+
+        if textmode:
+            sdl2.SDL_StartTextInput()
+            if in_debugkeys:
+                console.Con_Printf(f'SDL_StartTextInput: time {sys_sdl_unix.Sys_DoubleTime()}')
+
+        else:
+            sdl2.SDL_StopTextInput()
+            if in_debugkeys:
+                console.Con_Printf(f'SDL_StopTextInput: time {sys_sdl_unix.Sys_DoubleTime()}')
+
+
 
 
 # Prototype: int (*SDL_EventFilter)(void* userdata, SDL_Event* event)
@@ -488,25 +590,110 @@ def IN_SDL2_FilterMouseEvents_Logic(userdata, event_ptr):
 # This MUST be a global variable to prevent Garbage Collection
 IN_SDL2_FilterMouseEvents_Callback = SDL_EVENTFILTER_PTR(IN_SDL2_FilterMouseEvents_Logic)
 
-def IN_UpdateInputMode():
-    import cvar
-    global textmode
-
-    want_textmode = keys.Key_TextEntry()
-
-    if textmode != want_textmode:
-        if textmode:
-            sdl2.SDL_StartTextInput()
-            if cvar.Cvar_GetCvar('in_debugkeys').value:
-                console.Con_Printf('SDL_StartTextInput time %g' % sys_sdl_unix.Sys_DoubleTime())
-        else:
-            sdl2.SDL_StopTextInput()
-            if cvar.Cvar_GetCvar('in_debugkeys').value:
-                console.Con_Printf('SDL_StopTextInput time %g' % sys_sdl_unix.Sys_DoubleTime())
-
 
 def IN_Commands():
-    return
-    # not implemented
+    global joy_axisstate
+    newaxisstate: joyaxisstate_t = joyaxisstate_t()
+    stickthreshold = 0.9
+    triggerthreshold = cvar.Cvar_GetCvar('joy_deadzone_trigger').value
+
+    if not cvar.Cvar_GetCvar('joy_enable').value:
+        return
+
+    if not joy_active_controller:
+        return
+
+    for i in range(sdl2.SDL_CONTROLLER_BUTTON_MAX):
+        newstate: bool = sdl2.SDL_GameControllerGetButton(joy_active_controller, i)
+        oldstate: bool = joy_buttonstate.buttondown[i]
+
+        joy_buttonstate.buttondown[i] = newstate
+        joy_buttontimer[i] = IN_JoyKeyEvent(oldstate, newstate, IN_KeyForControllerButton(i), joy_buttontimer[i])
+
+    for i in range(sdl2.SDL_CONTROLLER_AXIS_MAX):
+        newaxisstate.axisvalue[i] = sdl2.SDL_GameControllerGetAxis(joy_active_controller, i / 32768.0)
+
+    if keys.key_dest != keys.keydest_t.key_game:
+        joy_emulatedkeytimer[0] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, keys.K_LEFTARROW, joy_emulatedkeytimer[0])
+        joy_emulatedkeytimer[1] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold, keys.K_RIGHTARROW, joy_emulatedkeytimer[1])
+        joy_emulatedkeytimer[2] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, keys.K_UPARROW,   joy_emulatedkeytimer[2])
+        joy_emulatedkeytimer[3] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold, keys.K_DOWNARROW,  joy_emulatedkeytimer[3])
+
+    joy_emulatedkeytimer[4] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  keys.K_LTRIGGER, joy_emulatedkeytimer[4])
+    joy_emulatedkeytimer[5] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold,  keys.K_RTRIGGER, joy_emulatedkeytimer[5])
+
+    joy_axisstate = newaxisstate
+
+
+def IN_JoyMove(cmd: protocol.usercmd_t):
+    speed = 0.0
+    moveRaw: joyaxis_t = joyaxis_t()
+    moveDeadzone: joyaxis_t = joyaxis_t()
+    moveEased: joyaxis_t = joyaxis_t()
+    lookRaw: joyaxis_t = joyaxis_t()
+    lookDeadzone: joyaxis_t = joyaxis_t()
+    lookEased: joyaxis_t = joyaxis_t()
+
+    if not cvar.Cvar_GetCvar('joy_enable').value:
+        return
+
+    if not joy_active_controller:
+        return
+
+    if cl_main.cl.paused or keys.key_dest != keys.keydest_t.key_game:
+        return
+
+    moveRaw.x = joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX]
+    moveRaw.y = joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY]
+    lookRaw.x = joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_RIGHTX]
+    lookRaw.y = joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_RIGHTY]
+
+    if cvar.Cvar_GetCvar('joy_swapmovelook').value:
+        temp: joyaxis_t = moveRaw
+        moveRaw = lookRaw
+        lookRaw = temp
+
+    joy_exponent = cvar.Cvar_GetCvar('joy_exponent').value
+    joy_deadzone_move = cvar.Cvar_GetCvar('joy_deadzone_move').value
+    joy_deadzone_look = cvar.Cvar_GetCvar('joy_deadzone_look').value
+    joy_exponent_move = cvar.Cvar_GetCvar('joy_exponent_move').value
+    joy_outer_threshold_move = cvar.Cvar_GetCvar('joy_outer_threshold_move').value
+    joy_outer_threshold_look = cvar.Cvar_GetCvar('joy_outer_threshold_look').value
+
+
+    moveDeadzone = IN_ApplyDeadzone(moveRaw, joy_deadzone_move, joy_outer_threshold_move)
+    lookDeadzone = IN_ApplyDeadzone(lookRaw, joy_deadzone_look, joy_outer_threshold_look)
+
+    moveEased = IN_ApplyEasing(moveDeadzone, joy_exponent_move)
+    lookEased = IN_ApplyEasing(lookDeadzone, joy_exponent)
+
+    cl_alwaysrun = cvar.Cvar_GetCvar('cl_alwaysrun').value
+    cl_forwardspeed = cvar.Cvar_GetCvar('cl_forwardspeed').value
+    sv_maxspeed = cvar.Cvar_GetCvar('sv_maxspeed').value
+    cl_movespeedkey = cvar.Cvar_GetCvar('cl_movespeedkey').value
+
+    if ( cl_input.in_speed.state & 1 ) ^ ( cl_alwaysrun != 0.0 or cl_forwardspeed >= sv_maxspeed ):
+        speed = sv_maxspeed
+    elif cl_forwardspeed >= sv_maxspeed:
+        speed = min(sv_maxspeed, cl_forwardspeed/ cl_movespeedkey.value)
+    else:
+        speed = cl_forwardspeed
+
+    cmd.sidemove += speed * moveEased.x
+    cmd.forwardmove += speed * moveEased.y
+
+    joy_sensitivity_yaw = cvar.Cvar_GetCvar('joy_sensitivity_yaw').value
+    joy_sensitivity_pitch = cvar.Cvar_GetCvar('joy_sensitivity_pitch').value
+    joy_invert = cvar.Cvar_GetCvar('joy_invert').value
+
+    cl_main.cl.viewangles[quakedef.YAW] -= lookEased.x * joy_sensitivity_yaw * host.host_frametime
+    cl_main.cl.viewangles[quakedef.PITCH] -= lookEased.y * joy_sensitivity_pitch * host.host_frametime * -1.0 if joy_invert else 1.0
+
+    if lookEased.x != 0 or lookEased.y != 0:
+        view.V_StopPitchDrift()
+
+    cl_main.cl.viewangles[quakedef.PITCH] = min(cl_main.cl.viewangles[quakedef.PITCH], cl_main.cl_maxpitch.value)
+    cl_main.cl.viewangles[quakedef.PITCH] = max(cl_main.cl.viewangles[quakedef.PITCH], cl_main.cl_minpitch.value)
+
 
 

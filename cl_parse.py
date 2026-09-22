@@ -1,18 +1,34 @@
 #cl_parse.py
 
+import random
+
+#import gl_refrag
+
 import _cmd
+import cl_demo
 import cl_main
-import net_main
 import common
+import console
+import gl_model
+import gl_rmisc
+import gl_screen
+import gl_vidsdl
+import glquake
 import host
 import host_cmd
-import console
-import quakedef
-import gl_screen
-import gl_model
-import sys_sdl_unix
+import mathlib
+import net_defs
+import net_main
 import protocol
-import gl_vidsdl
+import q_sound
+import quakedef
+import render
+import sbar
+import snd_dma
+import sv_main
+import sys_sdl_unix
+import vid
+import view
 
 svc_strings = [
     "svc_bad",
@@ -87,7 +103,646 @@ svc_strings = [
 ]
 
 warn_about_nehahra_protocol = False
-v_punchangles = [0, 0, 0]
+v_punchangles: list[float] = [0, 0, 0]
+
+net_olddata: bytearray = bytearray(net_defs.NET_MAXMESSAGE)
+lastmsg: float = 0.0
+
+def CL_EntityNum(num: int) ->  render.entity_t:
+    if num < 0:
+        host.Host_Error(f'CL_EntityNum: {num} is an invalid number')
+
+    if num >= cl_main.cl.num_entities:  # noqa: SIM102
+        if num >= cl_main.cl_max_edicts:
+            host.Host_Error(f'CL_EntityNum: {num} is an invalid number')
+
+            while cl_main.cl.num_entities <= num:
+                cl_main.cl_entities[cl_main.cl.num_entities].colormap = gl_vidsdl._vid.colormap
+                cl_main.cl_entities[cl_main.cl.num_entities].lerpflags |= render.LERP_RESETMOVE | render.LERP_RESETANIM
+                cl_main.cl_entities[cl_main.cl.num_entities].baseline.scale = protocol.ENTSCALE_DEFAULT
+                cl_main.cl.num_entities += 1
+
+    return cl_main.cl_entities[num]
+
+
+
+def CL_ParseStartSoundPacket():
+    volume: int = 0
+    attenuation: float = 0.0
+    ent: int = 0
+    channel: int = 0
+    sound_num: int = 0
+    pos: list[float] = [0., 0., 0.]
+
+    field_mask = common.MSG_ReadByte()
+
+    if field_mask & protocol.SND_VOLUME:
+        volume = common.MSG_ReadByte()
+    else:
+        volume = protocol.DEFAULT_SOUND_PACKET_VOLUME
+
+    if field_mask & protocol.SND_ATTENUATION:
+        attenuation = common.MSG_ReadByte() / 64.0
+    else:
+        attenuation = protocol.DEFAULT_SOUND_PACKET_ATTENUATION
+
+    if field_mask & protocol.SND_LARGEENTITY:
+        ent = common.MSG_ReadShort()
+        channel = common.MSG_ReadByte()
+    else:
+        channel = common.MSG_ReadShort()
+        ent = channel >> 3
+        channel &= 7
+
+    if field_mask & protocol.SND_LARGESOUND:
+        sound_num = common.MSG_ReadShort()
+    else:
+        sound_num = common.MSG_ReadByte()
+
+    if sound_num >= quakedef.MAX_SOUNDS:
+        host.Host_Error(f'CL_ParseStartSoundPacket: {sound_num} > MAX_SOUNDS')
+
+    if ent > cl_main.cl_max_edicts:
+        host.Host_Error(f'CL_ParseStartSoundPacket: ent = {ent}')
+
+    for i in range(3):
+        pos[i] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+
+    snd_dma.S_StartSound( ent, channel, cl_main.cl.sound_precache[sound_num], pos, volume / 255, attenuation)
+
+
+def CL_ParseLocalSound():
+
+    field_mask: int = common.MSG_ReadByte()
+    sound_num: int = common.MSG_ReadShort() if ( field_mask & protocol.SND_LARGESOUND ) else common.MSG_ReadByte()
+
+    if sound_num >= quakedef.MAX_SOUNDS:
+        host.Host_Error(f'CL_ParseLocalSound: {sound_num} > MAX_SOUNDS')
+
+    snd_dma.S_LocalSound(cl_main.cl.sound_precache[sound_num].name)
+
+
+def CL_KeepAliveMessage():
+    global lastmsg
+
+    if sv_main.sv.active:
+        return
+
+    if cl_main.cls.demoplayback:
+        return
+
+    olddata:common.sizebuf_s = net_olddata
+    old: common.sizebuf_s = net_main.net_message
+    net_olddata[:net_main.net_message.cursize] = net_main.net_message.data[:net_main.net_message.cursize]
+
+    ret = cl_demo.CL_GetMessage()
+
+    while ret:
+        match ret:
+            case 0:
+                break
+            case 1:
+                host.Host_Error('CL_KeepAliveMessage: recieved a message')
+                break
+            case 2:
+                if common.MSG_ReadByte() != protocol.svc_nop:
+                    host.Host_Error('CL_KeepAliveMessage:L datagram wasnt a nop')
+                break
+
+        ret = cl_demo.CL_GetMessage()
+
+    net_main.net_message = old
+
+    net_main.net_message.data[:net_main.net_message.cursize] = olddata[:net_main.net_message.cursize]
+
+    time: float = sys_sdl_unix.Sys_DoubleTime()
+    if time - lastmsg < 5:
+        return
+
+    lastmsg = time
+
+    console.Con_Printf('--> client to server keepalive')
+
+    common.MSG_WriteByte(cl_main.cls.message, protocol.clc_nop)
+    net_main.NET_SendMessage(cl_main.cls.netcon, cl_main.cls.message)
+    common.SZ_Clear(cl_main.cls.message)
+
+def CL_ParseServerInfo():
+    console.Con_DPrintf('Serverinfo packet received')
+
+    if cl_main.cls.demoplayback:
+        gl_screen.SCR_BeginLoadingPlaque()
+
+    cl_main.CL_ClearState()
+
+    i = common.MSG_ReadLong()
+
+    if i != protocol.PROTOCOL_NETQUAKE and i != protocol.PROTOCOL_FITZQUAKE and i != protocol.PROTOCOL_RMQ:
+        console.Con_Printf('\n')
+        host.Host_Error(f'Server returned version {i}, not {protocol.PROTOCOL_FITZQUAKE} or {protocol.PROTOCOL_NETQUAKE} or {protocol.PROTOCOL_RMQ}')
+
+    cl_main.cl.protocol = i
+
+    if cl_main.cl.protocol == protocol.PROTOCOL_RMQ:
+        supportedflags = (protocol.PRFL_SHORTANGLE | protocol.PRFL_FLOATANGLE | protocol.PRFL_24BITCOORD | protocol.PRFL_FLOATCOORD | protocol.PRFL_EDICTSCALE | protocol.PRFL_INT32COORD)
+
+        cl_main.cl.protocolflags = common.MSG_ReadLong()
+
+        if 0 != ( cl_main.cl.protocolflags & ( ~supportedflags) ):
+            console.Con_Warning(f'PROTOCOL_RMQ protocolflags {cl_main.cl.protocolflags} contains unsupported flags')
+    else:
+        cl_main.cl.protocolflags = 0
+
+    cl_main.cl.maxclients = common.MSG_ReadByte()
+    if cl_main.cl.maxclients < 1 or cl_main.cl.maxclients > quakedef.MAX_SCOREBOARD:
+        host.Host_Error(f'Bad maxclients ({cl_main.cl.maxclients}) from server')
+
+    cl_main.cl.scores = [quakedef.scoreboard_t() for _ in range(cl_main.cl.maxclients)]
+
+    cl_main.cl.gametype = common.MSG_ReadByte()
+
+    cl_main.cl.levelname = common.MSG_ReadString()
+
+    console.Con_Printf(f'Using protocol {i}')
+
+    cl_main.cl.model_precache = [ quakedef.qmodel_t() for _ in range(quakedef.MAX_MODELS)]
+
+    model_precache: list[str] = ['' for _ in range(quakedef.MAX_MODELS)]
+    sound_precache: list[str] = ['' for _ in range(quakedef.MAX_SOUNDS)]
+
+    for nummodels in range(1, quakedef.MAX_MODELS):
+        string = common.MSG_ReadString()
+        if not string:
+            break
+
+        if nummodels >= quakedef.MAX_MODELS - 1:
+            host.Host_Error('server sent too many model precaches')
+
+        model_precache[nummodels] = string
+        gl_model.Mod_TouchModel(string)
+
+    if nummodels >=  256:
+        console.Con_DWarning(f'{nummodels} models exceeds standard limit of 256 (max = {quakedef.MAX_MODELS})')
+
+    cl_main.cl.sound_precache = [ q_sound.sfx_s() for _ in range(quakedef.MAX_SOUNDS)]
+
+    for numsounds in range ( 1, quakedef.MAX_SOUNDS):
+        string = common.MSG_ReadString()
+        if not string:
+            break
+
+        if numsounds >= quakedef.MAX_SOUNDS - 1:
+            host.Host_Error('Server sent too many sound precaches')
+
+        sound_precache[numsounds] = string
+        snd_dma.S_TouchSound(string)
+
+    if numsounds >= 256:
+        console.Con_DWarning(f'{numsounds} sounds exceeds standard limit of 256 (max = {quakedef.MAX_SOUNDS})')
+
+    cl_main.cl.mapname = common.COM_StripExtension(common.COM_SkipPath(model_precache[1]))
+
+    for i in range( 1, nummodels):
+        cl_main.cl.model_precache[i] = gl_model.Mod_ForName(model_precache[i])
+
+        if cl_main.cl.model_precache[i] is None:
+            host.Host_Error(f'Model {model_precache[i]} not found')
+
+        CL_KeepAliveMessage()
+
+    #snd_dma.S_BeginPrecaching()  # empty function
+
+    for i in range(1, numsounds):
+        cl_main.cl.sound_precache[i] = snd_dma.S_PrecacheSound(sound_precache[i])
+        CL_KeepAliveMessage()
+
+    #snd_dma.S_EndPrecaching() # empty function
+
+    cl_main.cl_entities[0].model = cl_main.cl.worldmodel = cl_main.cl.model_precache[1]
+
+    gl_rmisc.R_NewMap()
+
+    console.con_lastcenterstring = ''
+
+    host_cmd.noclip_anglehack = False
+
+    global warn_about_nehahra_protocol
+    warn_about_nehahra_protocol = True
+
+    host.dev_stats = glquake.devstats_t()
+    host.dev_peakstats = glquake.devstats_t()
+    host.dev_overflows = glquake.overflowtimes_t()
+
+def CL_ParseUpdate(bits: int):
+    i: int = 0
+    if cl_main.cls.signon == quakedef.SIGNONS - 1:
+        cl_main.cls.signon = quakedef.SIGNONS
+        cl_main.CL_SignonReply()
+
+    if bits & protocol.U_MOREBITS:
+        i = common.MSG_ReadByte()
+        bits |= ( i << 8 )
+
+    if cl_main.cl.protocol == protocol.PROTOCOL_FITZQUAKE or cl_main.cl.protocol == protocol.PROTOCOL_RMQ:
+        if bits & protocol.U_EXTEND1:
+            bits |= common.MSG_ReadByte() << 16
+        if bits & protocol.U_EXTEND2:
+            bits |= common.MSG_ReadByte() << 24
+
+    if bits & protocol.U_LONGENTITY:
+        num = common.MSG_ReadShort()
+    else:
+        num = common.MSG_ReadByte()
+
+    ent: render.entity_t = CL_EntityNum(num)
+
+    if ent.msgtime != cl_main.cl.mtime[1]:
+        forcelink = True
+    else:
+        forcelink = False
+
+    if ent.msgtime + 0.2 < cl_main.cl.mtime[0]:
+        ent.lerpflags |= render.LERP_RESETANIM
+
+    ent.msgtime = cl_main.cl.mtime[0]
+
+    if bits & protocol.U_MODEL:
+        modnum = common.MSG_ReadByte()
+        if modnum >= quakedef.MAX_MODELS:
+            host.Host_Error('CL_ParseUpdate: bad modnum')
+    else:
+        modnum = ent.baseline.modelindex
+
+    if bits & protocol.U_FRAME:
+        ent.frame = common.MSG_ReadByte()
+    else:
+        ent.frame = ent.baseline.frame
+
+    if bits & protocol.U_COLORMAP:
+        i = common.MSG_ReadByte()
+    else:
+        i = ent.baseline.colormap
+
+    if not i:
+        ent.colormap = gl_vidsdl._vid.colormap
+    else:
+        if i > cl_main.cl.maxclients:
+            sys_sdl_unix.Sys_Error( 'i >= cl.maxclients')
+        ent.colormap = cl_main.cl.scores[i-1].translations
+
+    if bits & protocol.U_SKIN:
+        skin = common.MSG_ReadByte()
+    else:
+        skin = ent.baseline.skin
+
+    if skin != ent.skinnum:
+        ent.skinnum = skin
+        if num > 0 and num <= cl_main.cl.maxclients:
+            gl_rmisc.R_TranslateNewPlayerSkin(num - 1)
+
+    if bits & protocol.U_EFFECTS:
+        ent.effects = common.MSG_ReadByte()
+    else:
+        ent.effects = ent.baseline.effects
+
+    mathlib.VectorCopy(ent.msg_origins[0], ent.msg_origins[1])
+    mathlib.VectorCopy(ent.msg_angles[0], ent.msg_angles[1])
+
+    if bits & protocol.U_ORIGIN1:
+        ent.msg_origins[0][0] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+    else:
+        ent.msg_origins[0][0] = ent.baseline.origin[0]
+
+    if bits & protocol.U_ANGLE1:
+        ent.msg_angles[0][0] = common.MSG_ReadAngle(cl_main.cl.protocolflags)
+    else:
+        ent.msg_angles[0][0] = ent.baseline.angles[0]
+
+
+    if bits & protocol.U_ORIGIN2:
+        ent.msg_origins[0][1] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+    else:
+        ent.msg_origins[0][1] = ent.baseline.origin[1]
+
+    if bits & protocol.U_ANGLE2:
+        ent.msg_angles[0][1] = common.MSG_ReadAngle(cl_main.cl.protocolflags)
+    else:
+        ent.msg_angles[0][1] = ent.baseline.angles[1]
+
+
+    if bits & protocol.U_ORIGIN3:
+        ent.msg_origins[0][2] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+    else:
+        ent.msg_origins[0][2] = ent.baseline.origin[2]
+
+    if bits & protocol.U_ANGLE3:
+        ent.msg_angles[0][2] = common.MSG_ReadAngle(cl_main.cl.protocolflags)
+    else:
+        ent.msg_angles[0][2] = ent.baseline.angles[2]
+
+    if bits & protocol.U_STEP:
+        ent.lerpflags |= render.LERP_MOVESTEP
+        ent.forcelink = True
+    else:
+        ent.lerpflags &= ~render.LERP_MOVESTEP
+
+    if cl_main.cl.protocol == protocol.PROTOCOL_FITZQUAKE or cl_main.cl.protocol == protocol.PROTOCOL_RMQ:
+        if bits & protocol.U_ALPHA:
+            ent.alpha = common.MSG_ReadByte()
+        else:
+            ent.alpha = ent.baseline.alpha
+
+        if bits & protocol.U_SCALE:
+            ent.scale = common.MSG_ReadByte()
+        else:
+            ent.scale = ent.baseline.scale
+
+        if bits & protocol.U_FRAME2:
+            ent.frame = ( ent.frame & 0x00ff ) | ( common.MSG_ReadByte() << 8)
+
+        if bits & protocol.U_MODEL2:
+            modnum = ( modnum & 0x00FF) | ( common.MSG_ReadByte() << 8)
+
+        if bits & protocol.U_LERPFINISH:
+            ent.lerpfinish = ent.msgtime + ( common.MSG_ReadByte() / 255)
+            ent.lerpflags |= render.LERP_FINISH
+        else:
+            ent.lerpflags &= ~render.LERP_FINISH
+    elif cl_main.cl.protocol == protocol.PROTOCOL_NETQUAKE:
+        if bits & protocol.U_TRANS:
+            global warn_about_nehahra_protocol
+            if warn_about_nehahra_protocol:
+                console.Con_Warning('nonstandard update bit, assuming Mehahra protocol')
+                warn_about_nehahra_protocol = False
+
+            a = common.MSG_ReadFloat()
+            b = common.MSG_ReadFloat()
+
+            if a == 2:
+                common.MSG_ReadFloat()
+
+            ent.alpha = protocol.ENTALPHA_DECODE(b)
+        else:
+            ent.alpha = ent.baseline.alpha
+        ent.scale = ent.baseline.scale
+
+    model: quakedef.qmodel_t = cl_main.cl.model_precache[modnum]
+
+    if model != ent.model:
+        ent.model = model
+
+        if model:
+            if model.synctype == quakedef.synctype_t.ST_RAND:
+                ent.syncbase = random()
+            else:
+                ent.syncbase = 0.0
+        else:
+            forcelink = True
+
+        if num > 0 and num < cl_main.cl.maxclients:
+            gl_rmisc.R_TranslateNewPlayerSkin(num - 1)
+
+        ent.lerpflags |= render.LERP_RESETANIM
+
+    if forcelink:
+        mathlib.VectorCopy( ent.msg_origins[0], ent.msg_origins[1] )
+        mathlib.VectorCopy( ent.msg_origins[0], ent.origin )
+        mathlib.VectorCopy( ent.msg_angles[0],  ent.msg_angles[1] )
+        mathlib.VectorCopy( ent.msg_angles[0], ent.angles )
+        ent.forcelink = True
+
+def CL_ParseBaseline(ent: render.entity_t, version: int):
+    bits = 0
+
+    if version == 2:
+        bits = common.MSG_ReadByte()
+
+    ent.baseline.modelindex = common.MSG_ReadShort() if bits & protocol.B_LARGEMODEL else common.MSG_ReadByte()
+    ent.baseline.frame = common.MSG_ReadShort() if bits & protocol.B_LARGEFRAME else common.MSG_ReadByte()
+
+    ent.baseline.colormap = common.MSG_ReadByte()
+    ent.baseline.skin = common.MSG_ReadByte()
+
+    for i in range(3):
+        ent.baseline.origin[i] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+        ent.baseline.angles[i] = common.MSG_ReadAngle(cl_main.cl.protocolflags)
+
+    ent.baseline.alpha = common.MSG_ReadByte() if bits & protocol.B_ALPHA else protocol.ENTALPHA_DEFAULT
+    ent.baseline.scale = common.MSG_ReadByte() if bits & protocol.B_SCALE else protocol.ENTSCALE_DEFAULT
+
+def CL_ParseClientdata():
+
+    bits = common.MSG_ReadShort()
+
+    if bits & protocol.SU_EXTEND1:
+        bits |= (common.MSG_ReadByte() << 16)
+    if bits & protocol.SU_EXTEND2:
+        bits |= (common.MSG_ReadByte() << 24)
+
+    if bits & protocol.SU_VIEWHEIGHT:
+        cl_main.cl.viewheight = common.MSG_ReadChar()
+    else:
+        cl_main.cl.viewheight = protocol.DEFAULT_VIEWHEIGHT
+
+    if bits & protocol.SU_IDEALPITCH:
+        cl_main.cl.idealpitch = common.MSG_ReadChar()
+    else:
+        cl_main.cl.idealpitch = 0
+
+    mathlib.VectorCopy(cl_main.cl.mvelocity[0], cl_main.cl.mvelocity[1])
+
+    for i in range(3):
+        if bits & ( protocol.SU_PUNCH1 << i ):
+            cl_main.cl.punchangle[i] = common.MSG_ReadChar()
+        else:
+            cl_main.cl.punchangle[i] = 0
+
+        if bits & ( protocol.SU_VELOCITY1 << i):
+            cl_main.cl.mvelocity[0][i] = common.MSG_ReadChar * 16
+        else:
+            cl_main.cl.mvelocity[0][i] = 0
+
+    if view.v_punchangles[0][0] != cl_main.cl.punchangle[0] or \
+        view.v_punchangles[0][1] != cl_main.cl.punchangle[1] or \
+        view.v_punchangles[0][2] != cl_main.cl.punchangle[2]:
+        mathlib.VectorCopy(view.v_punchangles[0], view.v_punchangles[1])
+        mathlib.VectorCopy(cl_main.cl.punchangle, view.v_punchangles[0])
+
+    i = common.MSG_ReadLong()
+
+    if cl_main.cl.items != i:
+        sbar.Sbar_Changed()
+
+        for j in range(32):
+            if ( i & ( i << j)) and not ( cl_main.cl.items & ( 1 << j)):
+                cl_main.cl.item_gettime[j] = cl_main.cl.time
+        cl_main.cl.items = i
+
+    cl_main.cl.onground = ( bits & protocol.SU_ONGROUND ) != 0
+    cl_main.cl.inwater  = ( bits & protocol.SU_INWATER  ) != 0
+
+    if bits & protocol.SU_WEAPONFRAME:
+        cl_main.cl.stats[quakedef.STAT_WEAPONFRAME] = common.MSG_ReadByte()
+    else:
+        cl_main.cl.stats[quakedef.STAT_WEAPONFRAME] = 0
+
+    if bits & protocol.SU_ARMOR:
+        i = common.MSG_ReadByte()
+    else:
+        i = 0
+
+    if cl_main.cl.stats[quakedef.STAT_ARMOR] != i:
+        cl_main.cl.stats[quakedef.STAT_ARMOR] = i
+        sbar.Sbar_Changed()
+
+    if bits & protocol.SU_WEAPON:
+        i = common.MSG_ReadByte()
+    else:
+        i = 0
+
+    if cl_main.cl.stats[quakedef.STAT_WEAPON] != i:
+        cl_main.cl.stats[quakedef.STAT_WEAPON] = i
+        sbar.Sbar_Changed()
+
+    i = common.MSG_ReadShort()
+    if cl_main.cl.stats[quakedef.STAT_HEALTH] != i:
+        cl_main.cl.stats[quakedef.STAT_HEALTH] = i
+        sbar.Sbar_Changed()
+
+    i = common.MSG_ReadByte()
+    if cl_main.cl.stats[quakedef.STAT_AMMO] != i:
+        cl_main.cl.stats[quakedef.STAT_AMMO] = i
+        sbar.Sbar_Changed()
+
+    for i in range(4):
+        j = common.MSG_ReadByte()
+        if cl_main.cl.stats[quakedef.STAT_SHELLS + i] != j:
+            cl_main.cl.stats[quakedef.STAT_SHELLS + i] = j
+            sbar.Sbar_Changed()
+
+    i = common.MSG_ReadByte()
+
+    if common.standard_quake:
+        if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] != i:
+            cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] = i
+            sbar.Sbar_Changed()
+    else:
+        if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] != ( 1 << i ):
+            cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] = ( 1 << i )
+            sbar.Sbar_Changed()
+
+    if bits & protocol.SU_WEAPON2:
+        cl_main.cl.stats[quakedef.STAT_WEAPON] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_ARMOR2:
+        cl_main.cl.stats[quakedef.STAT_ARMOR] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_AMMO2:
+        cl_main.cl.stats[quakedef.STAT_AMMO] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_SHELLS2:
+        cl_main.cl.stats[quakedef.STAT_SHELLS] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_NAILS2:
+        cl_main.cl.stats[quakedef.STAT_NAILS] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_ROCKETS2:
+        cl_main.cl.stats[quakedef.STAT_ROCKETS] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_CELLS2:
+        cl_main.cl.stats[quakedef.STAT_CELLS] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_WEAPONFRAME2:
+        cl_main.cl.stats[quakedef.STAT_WEAPONFRAME] |= ( common.MSG_ReadByte() << 8)
+    if bits & protocol.SU_WEAPONALPHA:
+        cl_main.cl.viewent.alpha = common.MSG_ReadByte()
+    else:
+        cl_main.cl.viewent.alpha = protocol.ENTALPHA_DEFAULT
+
+
+    if cl_main.cl.viewent.model != cl_main.cl.model_precache[cl_main.cl.stats[quakedef.STAT_WEAPON]]:
+        cl_main.cl.viewent.lerpflags |= render.LERP_RESETANIM
+
+
+def CL_NewTranslation( slot: int):
+    if slot > cl_main.cl.maxclients:
+        sys_sdl_unix.Sys_Error('CL_NewTranslation: slot > cl.maxclients')
+
+    dest:   bytearray = bytearray()
+    source: bytearray = bytearray()
+
+    dest = cl_main.cl.scores[slot].translations
+    source = gl_vidsdl._vid.colormap
+
+    translation_size = len(cl_main.cl.scores[slot].translations)
+    cl_main.cl.scores[slot].translations[:translation_size] = gl_vidsdl._vid.colormap[:translation_size]
+
+    top = cl_main.cl.scores[slot].colors & 0xf0
+    bottom = ( cl_main.cl.scores[slot].colors & 15 ) << 4
+
+    gl_rmisc.R_TranslatePlayerSkin(slot)
+
+    dest_offset = 0
+    source_offset = 0
+
+    for i in range(vid.VID_GRADES):
+        # Copy 256 bytes from source to dest at current offsets
+        dest[dest_offset : dest_offset + 256] = source[source_offset : source_offset + 256]
+
+        # Increment offsets by 256
+        dest_offset += 256
+        source_offset += 256
+
+        # TOP / SHIRT RANGE
+        if top < 128:
+            dest[render.TOP_RANGE : render.TOP_RANGE + 16] = source[top : top + 16]
+        else:
+            # Slice the 16 bytes and step backwards (-1) to reverse them
+            dest[render.TOP_RANGE : render.TOP_RANGE + 16] = source[top : top + 16][::-1]
+
+        # BOTTOM / PANTS RANGE
+        if bottom < 128:
+            dest[render.BOTTOM_RANGE : render.BOTTOM_RANGE + 16] = source[bottom : bottom + 16]
+        else:
+            # Slice the 16 bytes and step backwards (-1) to reverse them
+            dest[render.BOTTOM_RANGE : render.BOTTOM_RANGE + 16] = source[bottom : bottom + 16][::-1]
+
+
+def CL_ParseStatic(version: int):
+
+    i = cl_main.cl.num_statics
+
+    if i >= quakedef.MAX_STATIC_ENTITIES:
+        host.Host_Error('Too many static entities')
+
+    ent: render.entity_t = cl_main.cl_static_entities[i]
+
+    cl_main.cl.num_statics += 1
+    CL_ParseBaseline(ent, version)
+
+    ent.model = cl_main.cl.model_precache[ent.baseline.modelindex]
+    ent.lerpflags |= render.LERP_RESETANIM
+    ent.frame = ent.baseline.frame
+
+    ent.colormap = gl_vidsdl._vid.colormap
+    ent.skinnum = ent.baseline.skin
+    ent.effects = ent.baseline.effects
+    ent.alpha = ent.baseline.alpha
+    ent.scale = ent.baseline.scale
+    mathlib.VectorCopy(ent.baseline.origin, ent.origin)
+    mathlib.VectorCopy(ent.baseline.angles, ent.angles)
+
+    gl_refrag.R_AddEfrags(ent)
+
+
+def CL_ParseStaticSound(version: int):
+    org: list[float] = [0, 0, 0]
+
+    for i in range(3):
+        org[i] = common.MSG_ReadCoord(cl_main.cl.protocolflags)
+
+    if version == 2:
+        sound_num = common.MSG_ReadShort()
+    else:
+        sound_num = common.MSG_ReadByte()
+
+    vol = common.MSG_ReadByte()
+    atten = common.MSG_ReadByte()
+
+    snd_dma.S_StaticSound(cl_main.cl.sound_precache[sound_num], org, vol, atten)
 
 def SHOWNET(x):
     cl_shownet = int(cvar.Cvar_GetCvar('cl_shownet').value)
@@ -111,7 +766,7 @@ def CL_ParseServerMessage():
         if common.msg_badread:
             host.Host_Error('CL_ParseServerMessage: bad server message')
 
-        cmd = MSG_ReadByte()
+        cmd = common.MSG_ReadByte()
 
         if cmd == -1:
             SHOWNET('END OF MESSAGE')
@@ -147,7 +802,7 @@ def CL_ParseServerMessage():
                 host.Host_EndGame('Server disconnected\n')
 
             case protocol.svc_print:
-                console.Con_Printf('%s' % common.MSG_ReadString())
+                console.Con_Printf(f'{common.MSG_ReadString()}')
 
             case protocol.svc_centerprint:
                 s = common.MSG_ReadString()
@@ -184,7 +839,7 @@ def CL_ParseServerMessage():
                     cl_main.cl_lightstyle[i].peak = 'a'
 
                     for j in range(cl_main.cl_lightstyle[i].length):
-                        total += cl_main.cl_lightstyle[i].map[j] = ord('a')
+                        total += cl_main.cl_lightstyle[i].map[j] - ord('a')
                         cl_main.cl_lightstyle[i].peak = max(cl_main.cl_lightstyle[i].peak, cl_main.cl_lightstyle[i].map[j])
 
                     cl_main.cl_lightstyle[i].average = total / cl_main.cl_lightstyle[i].length + ord('a')
@@ -195,50 +850,50 @@ def CL_ParseServerMessage():
                 CL_ParseStartSoundPacket()
 
             case protocol.svc_stopsound:
-                i = MSG_ReadShort()
-                S_StopSound(i >> 3, i & 7)
+                i = common.MSG_ReadShort()
+                snd_dma.S_StopSound(i >> 3, i & 7)
 
             case protocol.svc_updatename:
-                Sbar_Changed()
-                i = MSG_ReadByte()
+                sbar.Sbar_Changed()
+                i = common.MSG_ReadByte()
                 if i >= cl_main.cl.maxclients:
                     host.Host_Error('CL_ParseServerMessage: svc_updatename > MAX_SCOREBOARD')
-                cl_main.cl.scores[i].name = MSG_ReadString()
+                cl_main.cl.scores[i].name = common.MSG_ReadString()
 
             case protocol.svc_updatefrags:
-                Sbar_Changed()
-                i = MSG_ReadByte()
+                sbar.Sbar_Changed()
+                i = common.MSG_ReadByte()
                 if i >= cl_main.cl.maxclients:
                     host.Host_Error('CL_ParseServerMessage: svc_updatefrags > MAX_SCOREBOARD')
-                cl_main.cl.scores[i].frags = MSG_ReadShort()
+                cl_main.cl.scores[i].frags = common.MSG_ReadShort()
 
             case protocol.svc_updatecolors:
-                Sbar_Changed()
-                i = MSG_ReadByte()
+                sbar.Sbar_Changed()
+                i = common.MSG_ReadByte()
                 if i >= cl_main.cl.maxclients:
                     host.Host_Error('CL_ParseServerMessage: svc_updatecolors > MAX_SCOREBOARD')
-                cl_main.cl.scores[i].colors = MSG_ReadByte ();
+                cl_main.cl.scores[i].colors = common.MSG_ReadByte ();
 
             case protocol.svc_particle:
-                R_ParseParticleEffect()
+                r_part.R_ParseParticleEffect()
 
             case protocol.svc_spawnbaseline:
-                i = MSG_ReadShort()
+                i = common.MSG_ReadShort()
                 CL_ParseBaseline(CL_EntityNum(i), 1)
 
             case protocol.svc_spawnstatic:
                 CL_ParseStatic(1)
 
             case protocol.svc_temp_entity:
-                CL_ParseTEnt()
+                cl_tent.CL_ParseTEnt()
 
             case protocol.svc_setpause:
-                cl_main.cl.paused = MSG_ReadByte()
+                cl_main.cl.paused = common.MSG_ReadByte()
                 if cl_main.cl.paused:
                     pass
 
             case protocol.svc_signonnum:
-                i = MSG_ReadByte()
+                i = common.MSG_ReadByte()
                 if i <= cl_main.cls.signon:
                     host.Host_Error('received signon %i when at %i' % ( i, cl_main.cls.signon))
 
@@ -247,9 +902,9 @@ def CL_ParseServerMessage():
                 if i == 2:
                     if cl_main.cl.num_statics > 128:
                         console.Con_Warning('i static entities exceeds standard limit of 128 (max = %d).\n' % (cl_main.cl.num_statics, client.MAX_STATIC_ENTITIES))
-                    R_CheckEfrags()
+                    gl_refrag.R_CheckEfrags()
 
-                CL_SignonReply()
+                cl_main.CL_SignonReply()
 
             case protocol.svc_killedmonster:
                 cl_main.cl.stats[quakedef.STAT_MONSTERS] += 1
@@ -263,7 +918,7 @@ def CL_ParseServerMessage():
                 if i < 0 or i >= quakedef.MAX_CL_STATS:
                     sys_sdl_unix.Sys_Error('svc_updatestat %i is invalid' % i)
 
-                cl_main.cl.stats[i] = MSG_ReadLong()
+                cl_main.cl.stats[i] = common.MSG_ReadLong()
 
             case protocol.svc_spawnstaticsound:
                 CL_ParseStaticSound(1)
@@ -276,44 +931,44 @@ def CL_ParseServerMessage():
                 cl_main.cl.completed_time = cl_main.cl.time
 
                 gl_vidsdl._vid.recalc_refdef = True
-                V_RestoreAngles()
+                view.V_RestoreAngles()
 
             case protocol.svc_finale:
                 cl_main.cl.intermission = 2
                 cl_main.cl.completed_time = cl_main.cl.time
                 gl_vidsdl._vid.recalc_refdef = True
 
-                s = MSG_ReadString()
+                s = common.MSG_ReadString()
                 gl_screen.SCR_CenterPrint(s)
                 console.Con_LogCenterPrint(s)
 
-                V_RestoreAngles()
+                view.V_RestoreAngles()
 
             case protocol.svc_cutscene:
                 cl_main.cl.intermission = 3
                 cl_main.cl.completed_time = cl_main.cl.time
                 gl_vidsdl._vid.recalc_refdef = True
 
-                s = MSG_ReadString()
+                s = common.MSG_ReadString()
                 gl_screen.SCR_CenterPrint(s)
                 console.Con_LogCenterPrint(s)
 
-                V_RestoreAngles()
+                view.V_RestoreAngles()
 
             case protocol.svc_sellscreen:
                 _cmd.Cmd_ExecuteString('help', _cmd.cmd_source_t.src_command)
 
             case protocol.svc_skybox:
-                gl_sky.Sky_LoadSkyBox(MSG_ReadString())
+                gl_sky.Sky_LoadSkyBox(common.MSG_ReadString())
 
             case protocol.svc_bf:
                 _cmd.Cmd_ExecuteString('bf', _cmd.cmd_source_t.src_command)
 
             case protocol.svc_fog:
-                Fog_ParseServerMessage()
+                gl_fog.Fog_ParseServerMessage()
 
             case protocol.svc_spawnbaseline2:
-                i = MSG_ReadShort()
+                i = common.MSG_ReadShort()
                 CL_ParseBaseline(CL_EntityNum(i), 2)
 
             case protocol.svc_spawnstatic2:
@@ -334,133 +989,4 @@ def CL_ParseServerMessage():
 
         lastcmd = cmd
 
-
-def CL_ParseServerInfo():
-
-    console.Con_DPrintf('server info packet received \n')
-
-    if cl_main.cls.demoplayback:
-        gl_screen.SCR_BeginLoadingPlaque()
-
-
-    CL_ClearState()
-
-    i = MSG_ReadLong()
-
-    if i not in (protocol.PROTOCOL_NETQUAKE, protocol.PROTOCOL_FITZQUAKE, protocol.PROTOCOL_RMQ):
-        console.Con_Printf('\n')
-        host.Host_Error(f'Server returned version {i}, not supported')
-
-    cl_main.cl.protocol = i
-
-    if cl_main.cl.protocol == protocol.PROTOCOL_RMQ:
-        supportedflags = (PRFL_SHORTANGLE | PRFL_FLOATANGLE | PRFL_24BITCOORD | PRFL_FLOATCOORD | PRFL_EDICTSCALE | PRFL_INT32COORD)
-
-        cl_main.cl.protocolflags = MSG_ReadLong()
-
-        if 0 != ( cl_main.cl.protocolflags & ( ~supportedflags)):
-            console.Con_Warning('PROTOCOL_RMQ protocolflags %i contains unsupported flags\n' % cl_main.cl.protocolflags)
-
-    else:
-        cl_main.cl.protocolflags = 0
-
-    cl_main.cl.maxclients = MSG_ReadByte()
-
-
-    cl_main.cl.maxclients = MSG_ReadByte()
-    if cl_main.cl.maxclients < 1 or cl_main.cl.maxclients > quakedef.MAX_SCOREBOARD:
-        host.Host_Error('bad maxclients %u from server' % cl_main.cl.maxclients)
-
-    cl_main.cl.scores = [client.scoreboard_t() for _ in range(cl_main.cl.maxclients)]
-
-    cl_main.cl.gametype = MSG_ReadByte()
-
-    s = MSG_ReadString()
-    cl_main.cl.levelname = s
-
-    console.Con_Printf('\n%s\n' % console.Con_Quakebar(40))
-    console.Con_Printf('%c%s\n' % (2, s))
-
-    console.Con_Printf('using protocol %i' % i)
-
-    cl_main.cl.model_precache = []
-
-    nummodels = 1
-    model_precache = []
-    while True:
-        s = MSG_ReadString()
-        if not s:
-            break
-
-        if nummodels >= quakedef.MAX_MODELS:
-            host.Host_Error('Server sent too many model precaches')
-
-        model_precache.append(s)
-        gl_model.Mod_TouchModel(s)
-
-        nummodels += 1
-
-    if nummodels >= 256:
-        console.Con_Warning('%i models exceeds the standard limit of 256 ' % nummodels)
-
-
-    cl_main.cl.model_precache = [None] * (nummodels + 1)
-
-    sound_precache = []
-    cl_main.cl.sound_precache = []
-    numsounds = 1
-    while True:
-        s = MSG_ReadString()
-        if not s:
-            break
-
-        if numsounds >= quakedef.MAX_SOUNDS:
-            host.Host_Error('server sent too many sound precaches')
-
-        sound_precache.append(s)
-        S_TouchSound(s)
-        numsounds += 1
-
-    if numsounds >= 256:
-        console.Con_Warning('%i sounds exceed standard limit of 256' % numsounds)
-
-    cl_main.cl.mapname = common.COM_StripExtension(common.COM_SkipPath(model_precache[0]))
-
-    # Following the C source's 1-based indexing for models
-    for i in range(len(model_precache)):
-        model_name = model_precache[i]
-        # Quake models start at index 1 (World is always 1)
-        cl_main.cl.model_precache[i + 1] = gl_model.Mod_ForName(model_name, False)
-
-        if cl_main.cl.model_precache[i + 1] is None:
-            host.Host_Error(f"Model {model_name} not found")
-
-        host.CL_KeepaliveMessage()
-
-    # Pre-allocate sound list
-    cl_main.cl.sound_precache = [None] * (numsounds + 1)
-
-    S_BeginPrecaching()
-    for i in range(len(sound_precache)):
-        sound_name = sound_precache[i]
-        # In Quake, sound index 0 is null, index 1 is the first real sound
-        cl_main.cl.sound_precache[i + 1] = S_PrecacheSound(sound_name)
-        host.CL_KeepaliveMessage()
-    S_EndPrecaching()
-
-    cl_main.cl_entities[0].model = cl_main.cl.worldmodel = cl_main.cl.model_precache[1]
-
-    R_NewMap()
-
-    console.con_lastcenterstring = ''
-
-    #Hunk_Check() ????
-
-    host_cmd.noclip_anglehack = False
-
-    warn_about_nehahra_protocol = True
-
-    #host.dev_stats = 0
-    #host.dev_peakstats = 0
-    #host.dev_overflows = 0
 

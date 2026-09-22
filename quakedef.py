@@ -3,8 +3,14 @@ import ctypes
 import io
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import Optional
 
-#import bspfile
+import common
+import gl_texmgr
+import protocol
+import q_sound
+import quakedef
+import render
 
 # --- Constants ---
 MAXLIGHTMAPS = 4
@@ -35,6 +41,11 @@ MAX_MAP_PORTALS     = 65536
 
 MAX_KEY = 32
 MAX_VALUE = 1024
+
+MAX_SKINS = 32
+MAXALIASVERTS = 2000
+MAXALIASFRAMES = 1024
+MAXALIASTRIS   = 4096
 
 # Lump Indices
 LUMP_ENTITIES     = 0
@@ -228,11 +239,25 @@ SOUND_CHANNELS = 8
 LMBLOCK_WIDTH = 128
 LMBLOCK_HEIGHT = 128
 
+EF_ROCKET   = 1
+EF_GRENADE  = 2
+EF_GIB      = 4
+EF_ROTATE   = 8
+EF_TRACER   = 16
+EF_ZOMGIB   = 32
+EF_TRACER2  = 64
+EF_TRACER3  = 128
+MF_HOLEY    = (1<<14)
+
+MOD_NOLERP = 256
+MOD_NOSHADOW = 512
+MOD_FBRIGHTHACK = 1024
 
 vec3_t = ctypes.c_float * 3
 vec4_t = ctypes.c_float * 4
 vec5_t = ctypes.c_float * 5
 
+NUM_SPAWN_PARMS = 16
 class cache_user_t:
     """Python equivalent of cache_user_t handle."""
     def __init__(self, data=None):
@@ -469,23 +494,23 @@ class texture_t:
     def __init__(self, name, width, height, shift = 0,
                 gltexture = None, fullbright = None,
                 warpimage = None, update_warp = False,
-                texturechains: list['msurface_t'] = None, # Use string for forward ref
+                texturechains: list[msurface_t] = None, # Use string for forward ref
                 anim_total = 0, anim_min = 0, anim_max = 0,
                 anim_next = None, alternate_anims = None):
-        self.name = name
-        self.width = width
-        self.height = height
-        self.shift = shift
-        self.gltexture = gltexture
-        self.fullbright = fullbright
-        self.warpimage = warpimage
-        self.update_warp = update_warp
-        self.texturechains = texturechains if texturechains is not None else []
-        self.anim_total = anim_total
-        self.anim_min = anim_min
-        self.anim_max = anim_max
-        self.anim_next = anim_next
-        self.alternate_anims = alternate_anims
+        self.name:str = name
+        self.width: int = width
+        self.height: int = height
+        self.shift:int = shift
+        self.gltexture: gl_texmgr.gl_texture_t = gltexture
+        self.fullbright: gl_texmgr.gl_texure_t = fullbright
+        self.warpimage:gl_texmgr.gl_texture_t = warpimage
+        self.update_warp:bool = update_warp
+        self.texturechains:list[msurface_t] = texturechains
+        self.anim_total:int = anim_total
+        self.anim_min:int = anim_min
+        self.anim_max:int = anim_max
+        self.anim_next:texture_t = anim_next
+        self.alternate_anims:texture_t = alternate_anims
 
 SURF_PLANEBACK      = 2
 SURF_DRAWSKY        = 4
@@ -509,24 +534,24 @@ class medge_t:
 class mtexinfo_t:
     def __init__(self):
         self.vecs = [[0., 0., 0., 0.], [0., 0., 0., 0.]]
-        self.texture : Optional[texture_t] = None
+        self.texture : list[texture_t] | None = None
         self.flags = 0
 
 VERTEXSIZE = 7
 
 class glpoly_t:
     def __init__(self):
-        self.next  : Optional[glpoly_t] = None
-        self.chain : Optional[glpoly_t] = None
+        self.next  : glpoly_t | None = None
+        self.chain : glpoly_t | None = None
         self.numverts = 0
-        self.verts = [] # Initialize empty, built in GL_BuildPolygon
+        self.verts: list[list[float]] = [[0.0] * VERTEXSIZE for _ in range(4)]
 
 class msurface_t:
     def __init__(self):
         self.visframe = 0
         self.mins = [0, 0, 0]
         self.maxs = [0, 0, 0]
-        self.plane : Optional[mplane_t] = None
+        self.plane : list[mplane_t] | None = None
         self.flags = 0
         self.firstedge = 0
         self.numedges = 0
@@ -534,63 +559,229 @@ class msurface_t:
         self.extents = [0, 0]
         self.light_s = 0
         self.light_t = 0
-        self.polys : Optional[glpoly_t] = None
-        self.texturechain : Optional[msurface_t] = None
-        self.texinfo : Optional[mtexinfo_t] = None
+        self.polys : glpoly_t | None = None
+        self.texturechain : msurface_t | None = None
+        self.texinfo : mtexinfo_t | None = None
+        self.vbo_firstvert: int = 0
+        self.dlightframe: int = 0
+        self.dlightbits: list[int] = [0] * ((MAX_DLIGHTS + 31) >> 5)
+        self.lightmaptexturenum: int = 0
         self.styles = [0, 0, 0, 0]
-        self.lightofs = -1
-        self.lightmap_texture = 0
+        self.cached_light[0, 0, 0, 0]
+        self.cached_dlight: bool = False
+        self.samples:bytearray = bytearray()
+        #self.lightofs = -1         # ?
+        #self.lightmap_texture = 0  # ?
 
 class mnode_t:
     def __init__(self):
         self.contents = 0             # 0 or greater for nodes
         self.parent = None            # Set by Mod_SetParent
-        self.plane = None             # Pointer to mplane_t
+        self.plane: quakedef.mplane_t = None             # Pointer to mplane_t
         self.children = [None, None]  # Set to Node or Leaf objects by Mod_SetParent
-        self.mins = [0, 0, 0]
-        self.maxs = [0, 0, 0]
-        self.firstface = 0
-        self.numfaces = 0
+        #self.mins = [0, 0, 0]
+        #self.maxs = [0, 0, 0]
+        self.firstsurface = 0
+        self.numsurfaces = 0
 
 class mleaf_t:
     def __init__(self):
         self.contents = -1            # Negative for leaves (e.g., CONTENTS_SOLID)
+        self.visframe = 0
+        self.minmaxs = [0, 0, 0, 0, 0, 0]
         self.parent = None            # Set by Mod_SetParent
-        self.mins = [0, 0, 0]
-        self.maxs = [0, 0, 0]
-        self.firstmarksurface = 0
+        self.compressed_vis: bytearray = bytearray()
+        self.efrags: render.efrag_t = None
+        self.firstmarksurface: msurface_t = None
         self.nummarksurface = 0
+        self.key = 0
         self.visofs = 0               # Offset into visdata for PVS
         self.ambient_sound_levels = [0, 0, 0, 0]
 
+
+class mclipnode_t:
+    def __init__(self):
+        self.planenum = 0
+        self.children: list[int] = [0, 0]
+
+class hull_t:
+    def __init__(self):
+        self.clipnodes: list[mclipnode_t] = [None]
+        self.planes: list[mplane_t] = [None]
+        self.firstclipnode = 0
+        self.lastclipnode = 0
+        self.clip_mins: list[float] = [0, 0, 0]
+        self.clip_maxs: list[float] = [0, 0, 0]
+
+class mspriteframe_t:
+    def __init__(self):
+        self.width = 0
+        self.height = 0
+        self.up = 0.0
+        self.down = 0.0
+        self.left = 0.0
+        self.right = 0.0
+        self.smax = 0.0
+        self.tmax = 0.0
+        self.gltexture: gl_texmgr.gltexture_t = None
+
+class mspritegroup_t:
+    def __init__(self):
+        self.numframes = 0
+        self.intervals :list[float] = [0.0]
+        self.frames : list[mspriteframe_t] = []
+
+class mspriteframedesc_t:
+    def __init__(self):
+        self.type: spritegn.spriteframetype_t = 0
+        self.frameptr: mspriteframe_t = None
+
+class msprite_t:
+    def __init__(self):
+        self.type = 0
+        self.maxwidth = 0
+        self.maxheight = 0
+        self.numframes = 0
+        self.beamlength = 0
+        self.cachespot = None
+        self.frames: list[mspriteframedesc_t] = []
+
+class aliasmesh_t:
+    def __init__(self):
+        self.st: list[float] = [0, 0]
+        self.vertindex = 0
+
+class meshxyz_t:
+    def __init__(self):
+        self.xyz: list[int] = [0, 0, 0, 0]
+        self.normal: list[int] = [0, 0, 0, 0]
+
+class meshst_t:
+    def __init__(self):
+        self.st: list[float] = [0, 0]
+
+class maliasframedesc_t:
+    def __init__(self):
+        self.firstpose = 0
+        self.numposes = 0
+        self.interval = 0
+        self.bboxmin: trivertx_t = None
+        self.bboxmax: trivertx_t = None
+        self.frame = 0
+        self.name = ''
+
+class maliasgroupframedesc_t:
+    def __init__(self):
+        self.bboxmin: trivertx_t = None
+        self.bboxmax: trivertx_t = None
+        self.frame = 0
+
+class maliasgroup_t:
+    def __init__(self):
+        self.numframes = 0
+        self.intervals = 0
+        self.frames: list[maliasgroupframedesc_t] = []
+
+class mtriangle_t:
+    def __init__(self):
+        self.facesfront = 0
+        self.vertindex: list[int] = [0, 0, 0]
+
+class aliashdr_t:
+    def __init__(self):
+        self.ident = 0
+        self.version = 0
+        self.scale: list[float] = [0, 0, 0]
+        self.scale_origin: list[float] = [0, 0, 0]
+        self.boundingradius = 0.0
+        self.eyeposition: list[float] = [0, 0, 0]
+        self.numskins = 0
+        self.skinwidth = 0
+        self.skinheight = 0
+        self.numverts = 0
+        self.numtris = 0
+        self.numframes = 0
+        self.synctype: synctype_t = 0 # enum
+        self.flags = 0
+        self.size = 0
+
+        self.numverts_vbo = 0
+        self.meshdesc = 0 # intptr_t
+        self.numindexes = 0
+        self.indexes = 0
+        self.vertexes = 0
+
+        self.numposes = 0
+        self.poseverts = 0
+        self.posedata = 0
+        self.commands = 0
+
+        self.gltextures: list[list[Optional[gltexture_t]]] = [
+            [None] * 4 for _ in range(MAX_SKINS)
+        ]
+        self.fbtextures: list[list[Optional[gltexture_t]]] = [
+            [None] * 4 for _ in range(MAX_SKINS)
+        ]
+
+        self.texels = list[int] = []
+        self.frames: list[maliasframedesc_t] = []
+
+class synctype_t(Enum):
+    ST_SYNC = 0
+    ST_RAND = 1
 
 class qmodel_t:
     def __init__(self):
         # General model info
         self.name = ""            # The filename (e.g., "maps/e1m1.bsp")
-        self.type = 0               # modtype_t: mod_brush (0), mod_sprite (1), mod_alias (2)
+        self.type:modtype_t = modtype_t.mod_brush # 0 # modtype_t: mod_brush (0), mod_sprite (1), mod_alias (2)
         self.numframes = 0
         self.flags = 0
+        self.path_id = 0
+
+        self.synctype = synctype_t.ST_SYNC
 
         # Bounding box for Culling
         self.mins = [0.0, 0.0, 0.0]
         self.maxs = [0.0, 0.0, 0.0]
-        self.radius = 0.0
+        self.ymins = [0.0, 0.0, 0.0]
+        self.ymaxs = [0.0, 0.0, 0.0]
+        self.rmins = [0.0, 0.0, 0.0]
+        self.rmaxs = [0.0, 0.0, 0.0]
+        self.radius = 0.0 # not used
+
+        self.clipbox = False
+        self.clipmins = [0, 0, 0]
+        self.clipmaxs = [0, 0, 0]
+
+        self.firstmodelsurface = 0
+        self.nummodelsurfaces = 0
 
         # --- Brush (BSP) Specific Data ---
         # These correspond to the Lumps in the BSP file
-        self.planes = []          # List of dplane_t
-        self.leafs = []           # List of dleaf_t
-        self.nodes = []           # List of dnode_t
-        self.clipnodes = []       # List of dclipnode_t
-        self.vertexes = []        # List of mvertex_t (x, y, z)
+        self.planes:list[dplane_t] = []          # List of dplane_t
+        self.leafs:list[mleaf_t] = []            # List of mleaf_t
+        self.nodes: list[mnode_t] = []           # List of mnode_t
+        self.clipnodes:list[mclipnode_t] = []    # List of dclipnode_t
+        self.vertexes: list[mvertex_t] = []      # List of mvertex_t (x, y, z)
         self.faces = []           # List of msurface_t
-        self.textures = []        # List of texture_t (mipmaps)
-        self.texinfo = []         # List of mtexinfo_t
-        self.edges = []           # List of medge_t
-        self.surfedges = []       # List of int (indices into edges)
+        self.textures: list[texture_t] = []        # List of texture_t (mipmaps)
+        self.texinfo:list[mtexinfo_t] = []         # List of mtexinfo_t
+        self.edges: list[medge_t] = []           # List of medge_t
+        self.surfedges:list[int] = []       # List of int (indices into edges)
+        self.surfaces: list[msurface_t] = []
+        self.marksurfaces: list[msurface_t | None] | None = None
+
+        self.hulls: list[hull_t] = [hull_t() for _ in range(MAX_MAP_HULLS)]
+        self.entities:bytearray = bytearray()
+
+        self.viswarn = False
+
+        self.bspversioni = 0
+        self.haslitwater = False
 
         # Counters for the above
+        self.numsurfaces = 0
         self.numplanes = 0
         self.numleafs = 0
         self.numnodes = 0
@@ -601,13 +792,22 @@ class qmodel_t:
         self.numtexinfo = 0
         self.numedges = 0
         self.numsurfedges = 0
+        self.nummarksurfaces = 0
+
+        self.meshvbo = 0
+        self.meshindexesvbo = 0
+
+        self.vboindexofs = 0
+        self.vbxyzofs = 0
+        self.vbostofs = 0
+
 
         # Visibility and Lighting
-        self.visdata = None       # The decompressed PVS (Potentially Visible Set)
-        self.lightdata = None     # The raw lightmap data
+        self.visdata = bytearray()       # The decompressed PVS (Potentially Visible Set)
+        self.lightdata = bytearray()     # The raw lightmap data
 
         # Submodels (used for moving parts like doors/elevators)
-        self.submodels = []       # List of dmodel_t
+        self.submodels: list[dmodel_t] = []       # List of dmodel_t
         self.numsubmodels = 0
 
         # Sync/Loading metadata
@@ -707,7 +907,9 @@ class client_static_t:
         self.signon = 0
         self.netcon: qsocket_t = None
 
-        self.message = bytearray()
+        self.message = common.sizebuf_s()
+
+import render
 
 class client_state_t:
     def __init__(self):
@@ -753,7 +955,7 @@ class client_state_t:
         self.last_received_message = 0.0
 
         self.model_precache : list[qmodel_t] = []
-        self.sound_precache : list[sfx_s]    = []
+        self.sound_precache : list[q_sound.sfx_s]    = []
 
         self.mapname = ''
         self.levelname = ''
@@ -768,13 +970,12 @@ class client_state_t:
         self.num_entities = 0
         self.num_statics = 0
 
-        self.viewent : entity_t = None
+        self.viewent : render.entity_t = render.entity_t()
 
         self.cdtrack = 0
         self.looptrace = 0
 
-
-        self.scores : scoreboard_t = None
+        self.scores : list[scoreboard_t] = [None] * quakedef.MAX_SCOREBOARD
 
         self.protocol = 0
         self.protocolflags = 0
@@ -839,4 +1040,23 @@ class refdef_t:
 
         self.ambientlight = 0
 
+class canvastype(Enum):
+    CANVAS_NONE         = 0
+    CANVAS_DEFAULT      = 1
+    CANVAS_CONSOLE      = 2
+    CANVAS_MENU         = 3
+    CANVAS_SBAR         = 4
+    CANVAS_WARPIMAGE    = 5
+    CANVAS_CROSSHAIR    = 6
+    CANVAS_BOTTOMLEFT   = 7
+    CANVAS_BOTTOMRIGHT  = 8
+    CANVAS_TOPRIGHT     = 9
+    CANVAS_INVALID      = -1
 
+
+class vispatch_t:
+    def __init__(self):
+        self.mapname = ''
+        self.filelen = 0
+
+VISPATCH_HEADER_LEN = 36

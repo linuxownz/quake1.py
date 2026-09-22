@@ -16,8 +16,12 @@ import common
 import console
 import cvar
 import gl_draw
+import gl_fog
+import gl_mesh
+import gl_rmain
 import gl_rmisc
 import gl_screen
+import gl_texmgr
 import gl_vidsdl
 import host
 import in_sdl
@@ -25,7 +29,9 @@ import keys
 import menu
 import quakedef
 import r_alias
+import r_brush
 import r_world
+import sbar
 import snd_dma
 import sys_sdl_unix
 import vid
@@ -116,6 +122,37 @@ vid_menu_numbpps = 0
 vid_menu_rates = [ 0 for i in range(MAX_RATES_LIST)]
 vid_menu_numrates = 0
 
+gammaworks = False
+
+
+def VID_Gamma_SetGamma():
+    if gl_glsl_able:
+        return
+
+    vid_gamma = cvar.Cvar_GetCvar('vid_gamma').value
+
+    if draw_context and gammaworks:
+        value = vid.GAMMA_MAX
+        if vid_gamma > 1.0 / vid.GAMMA_MAX:
+            value = 1.0 / vid_gamma
+
+        if sdl2.SDL_SetWindowBrightness(draw_context, value) != 0:
+            console.Con_Printf('VID_Gamma_SetGamma: failed on SDL_SetWindowBrightness')
+
+
+
+def VID_Gamma_Restore():
+    if gl_glsl_able:
+        return
+    if draw_context and gammaworks:
+        if sdl2.SDL_SetWindowBrightness(draw_context, 1) != 0:
+            console.Con_Printf('VID_Gamma_Restore: failed on SDL_SetWindowBrightness')
+
+
+def VID_Gamma_Shutdown():
+    VID_Gamma_Restore()
+
+
 def VID_InitModelist():
     sdlmodes = sdl2.SDL_GetNumDisplayModes(0)
 
@@ -145,7 +182,6 @@ def VID_Unlock():
     VID_SyncCvars()
 
 def VID_Restart():
-    global _vid
     if vid_locked or not vid_changed:
         return
 
@@ -159,24 +195,24 @@ def VID_Restart():
         console.Con_Printf(f'{width}x{height}x{bpp} {refreshrate}Hz {"fullscreen" if fullscreen else "windowed"} is not a valid mode')
         return
 
-    TexMgr_DeleteTextureObjects()
-    GLSLGamma_DeleteTexture ()
-    R_ScaleView_DeleteTexture ()
-    R_DeleteShaders ()
-    GL_DeleteBModelVertexBuffer ()
-    GLMesh_DeleteVertexBuffers ()
+    gl_texmgr.TexMgr_DeleteTextureObjects()
+    gl_rmain.GLSLGamma_DeleteTexture ()
+    gl_rmain.R_ScaleView_DeleteTexture ()
+    gl_rmisc.R_DeleteShaders ()
+    r_brush.GL_DeleteBModelVertexBuffer ()
+    gl_mesh.GLMesh_DeleteVertexBuffers ()
 
     VID_SetMode(width, height, refreshrate, bpp, fullscreen)
 
     GL_Init()
-    TexMgr_ReloadImages ();
-    GL_BuildBModelVertexBuffer ();
-    GLMesh_LoadVertexBuffers ();
+    gl_texmgr.TexMgr_ReloadImages ();
+    r_brush.GL_BuildBModelVertexBuffer ();
+    gl_mesh.GLMesh_LoadVertexBuffers ();
     GL_SetupState ();
-    Fog_SetupState ();
+    gl_fog.Fog_SetupState ();
 
     # warpimages needs to be recalced
-    TexMgr_RecalcWarpImageSize()
+    gl_texmgr.TexMgr_RecalcWarpImageSize()
 
     scr_conwidth = cvar.Cvar_GetCvar('scr_conwidth').value
     scr_conscale = cvar.Cvar_GetCvar('scr_conscale').value
@@ -198,9 +234,9 @@ def VID_Restart():
 
     if keys.key_dest == keys.keydest_t.key_console or keys.key_dest == keys.keydest_t.key_menu:
         if modestate == vid.modestate_t.MS_WINDOWED:
-            IN_Deactivate(True)
+            in_sdl.IN_Deactivate(True)
         elif modestate == vid.modestate_t.MS_FULLSCREEN:
-            IN_Activate()
+            in_sdl.IN_Activate()
 
 def  VID_Test():
     if vid_locked or not vid_changed:
@@ -210,7 +246,7 @@ def  VID_Test():
     old_height      = VID_GetCurrentHeight()
     old_refreshrate = VID_GetCurrentRefreshRate()
     old_bpp         = VID_GetCurrentBPP()
-    old_fullscreen  = VID_GetCurrentFullscreen()
+    old_fullscreen  = VID_GetFullscreen()
 
     VID_Restart()
 
@@ -267,10 +303,7 @@ def VID_ValidMode(width, height, refreshrate, bpp, fullscreen):
     if fullscreen and VID_SDL2_GetDisplayMode(width, height, refreshrate, bpp) is None:
         bpp = 0
 
-    if bpp in [16, 24, 32]:
-        return True
-
-    return False
+    return bpp in [16, 24, 32]
 
 def VID_GetFullscreen():
     return (sdl2.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_FULLSCREEN) != 0
@@ -300,6 +333,18 @@ def VID_GetCurrentRefreshRate():
         return DEFAULT_REFRESHRATE
 
     return mode.refresh_rate
+
+def VID_GetFullscreen() -> bool:
+    return ( sdl2.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_FULLSCREEN) != 0
+
+def VID_GetDesktopFullscreen() -> bool:
+    return (sdl2.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_FULLSCREEN_DESKTOP) == sdl2.SDL_WINDOW_FULLSCREEN_DESKTOP
+
+def VID_GetVSync() -> bool:
+    return sdl2.SDL_GL_GetSwapInterval() == 1
+
+
+
 
 def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
     global draw_context
@@ -363,9 +408,8 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
     else:
         previous_display = sdl2.SDL_GetWindowDisplayIndex(draw_context)
 
-    if VID_GetFullscreen():
-        if sdl2.SDL_SetWindowFullscreen(draw_context, 0) != 0:
-            Sys_Error('Couldnt set fullscreen state mode')
+    if VID_GetFullscreen() and sdl2.SDL_SetWindowFullscreen(draw_context, 0) != 0:
+        sys_sdl_unix.Sys_Error('Couldnt set fullscreen state mode')
 
     sdl2.SDL_SetWindowSize(draw_context, width, height)
 
@@ -382,7 +426,7 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
         flag = sdl2.SDL_WINDOW_FULLSCREEN_DESKTOP if cvar.Cvar_GetCvar('vid_borderless').value else sdl2.SDL_WINDOW_FULLSCREEN
 
         if sdl2.SDL_SetWindowFullscreen(draw_context, flag) != 0:
-            Sys_Error('couldnt set fullscreen state mode')
+            sys_sdl_unix.Sys_Error('couldnt set fullscreen state mode')
 
     sdl2.SDL_ShowWindow(draw_context)
     sdl2.SDL_RaiseWindow(draw_context)
@@ -391,8 +435,9 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
         gl_context = sdl2.SDL_GL_CreateContext(draw_context)
 
         if gl_context is None:
-            Sys_Error('failed to create GL context')
+            sys_sdl_unix.Sys_Error('failed to create GL context')
 
+    global gl_swap_control
     gl_swap_control = True
 
     if sdl2.SDL_GL_SetSwapInterval(int(cvar.Cvar_GetCvar('vid_vsync').value)) == -1:
@@ -445,7 +490,7 @@ def GL_MakeNiceExtensionList(gl_ext):
 
     gl_extensions_nice = gl_ext.split(' ')
 
-    print(gl_extensions_nice)
+    #print(gl_extensions_nice)
 
     return gl_extensions_nice
 
@@ -531,7 +576,7 @@ def GL_CheckExtensions():
             console.Con_Printf('Found: EXT_texture_filter_anisotropic')
             gl_anisotropy_able = True
         else:
-            console.Con_Warning('anisotropic filtering locked by driver, current setting is %f' % test1)
+            console.Con_Warning(f'anisotropic filtering locked by driver, current setting is {test1:f}')
 
 
         max_anisotropy = ctypes.c_float()
@@ -631,7 +676,7 @@ def GL_SetupState():
 def GL_Init():
     global gl_vendor, gl_renderer
     global gl_version, gl_version_major, gl_version_minor
-    global gl_extensions, gl_extensions_nice
+    global gl_extensions #, gl_extensions_nice
 
     gl_vendor     = OpenGL.GL.glGetString(OpenGL.GL.GL_VENDOR).decode('ascii')
     gl_renderer   = OpenGL.GL.glGetString(OpenGL.GL.GL_RENDERER).decode('ascii')
@@ -662,10 +707,10 @@ def GL_Init():
 
 
 def GL_Info_f():
-    console.Con_Printf('GL_VENDOR %s' % gl_vendor )
-    console.Con_Printf('GL_RENDERER %s' % gl_renderer )
-    console.Con_Printf('GL_VERSION %s' % gl_version )
-    console.Con_Printf('GL_EXTENSIONS %s' % '\n'.join(gl_extensions_nice) )
+    console.Con_Printf(f'GL_VENDOR {gl_vendor}' )
+    console.Con_Printf(f'GL_RENDERER {gl_renderer}' )
+    console.Con_Printf(f'GL_VERSION {gl_version}' )
+    console.Con_Printf('GL_EXTENSIONS {}'.format('\n'.join(gl_extensions_nice)) )
 
 def VID_Init():
     import cvar
@@ -706,8 +751,8 @@ def VID_Init():
     cvar.Cvar_RegisterVariable(vid_fsaa)
     cvar.Cvar_RegisterVariable(vid_desktopfullscreen)
     cvar.Cvar_RegisterVariable(vid_borderless)
-    #cvar.Cvar_RegisterVariable(vid_gamma)
-    #cvar.Cvar_RegisterVariable(vid_contrast)
+    cvar.Cvar_RegisterVariable(vid_gamma)
+    cvar.Cvar_RegisterVariable(vid_contrast)
 
     cvar.Cvar_SetCallback(vid_fullscreen, VID_Changed_f)
     cvar.Cvar_SetCallback(vid_width, VID_Changed_f)
@@ -756,7 +801,6 @@ def VID_Init():
     fullscreen = cvar.Cvar_GetCvar('vid_fullscreen').value
     fsaa  = int(cvar.Cvar_GetCvar('vid_fsaa').value)
 
-
     if common.COM_CheckParm('-current'):
         width = display_width
         height = display_height
@@ -785,7 +829,7 @@ def VID_Init():
             bpp = int(common.argv[p+1])
 
         if common.COM_CheckParm('-window') or common.COM_CheckParm('-w'):
-            fullscreen = false
+            fullscreen = False
         elif common.COM_CheckParm('-fullscreen') or common.COM_CheckParm('-f'):
             fullscreen = True
 
@@ -829,6 +873,9 @@ def VID_Init():
     VID_Gamma_Init()
     VID_Menu_Init()
 
+    import gl_warp
+    gl_warp.GL_WarpInit()
+
     global vid_locked
     vid_locked = True
 
@@ -856,8 +903,10 @@ def VID_Gamma_f():
 
     # shouldn't get here
     raise NotImplementedError
+    VID_Gamma_SetGamma()
 
 def VID_Gamma_Init():
+    global gammaworks
     import cvar
 
     vid_gamma    = {'name':"gamma",    'value':"1", 'flags': cvar.CVAR_ARCHIVE}; #johnfitz -- moved here from view.c
@@ -871,7 +920,14 @@ def VID_Gamma_Init():
     if gl_glsl_gamma_able:
         return
 
-    raise NotImplementedError
+    gammaworks = bool( sdl2.SDL_SetWindowBrightness(draw_context, 1) == 0)
+
+    if not gammaworks:
+        console.Con_Printf('gamma adjustment not available')
+
+
+
+
 
 def VID_Menu_RebuildBppList():
     global vid_menu_numbpps
@@ -952,9 +1008,60 @@ def VID_MenuDraw():
 
     y += 28
 
-    raise NotImplementedError
+    title = 'Video Options'
 
-def VID_Menu_ChooseNextMode(dir):
+    menu.M_PrintWhite((320-8*len(title))/2, y, title)
+
+    y += 16
+
+    for i in range(gl_vidsdl.VIDEO_OPTIONS_ITEMS):
+        match i:
+            case gl_vidsdl.vid_opt_e.VID_OPT_MODE:
+                menu.M_Print(16, y, "        Video mode")
+                menu.M_Print (184, y, va("%ix%i", int(cvar.Cvar_GetCvar('vid_width').value), int(cvar.Cvar_GetCvar('vid_height').value)))
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_BPP:
+                menu.M_Print (16, y, "       Color depth");
+                menu.M_Print (184, y, f'{int(cvar.Cvar_GetCvar('vid_bpp').value)}')
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_REFRESHRATE:
+                menu.M_Print (16, y, "      Refresh rate");
+                menu.M_Print (184, y, f"{int(cvar.Cvar_GetCvar('vid_refreshrate').value)}")
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_FULLSCREEN:
+                menu.M_Print (16, y, "        Fullscreen");
+                menu.M_DrawCheckbox (184, y, int(cvar.Cvar_GetCvar('vid_fullscreen').value))
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_VSYNC:
+                menu.M_Print (16, y, "     Vertical sync");
+                if gl_swap_control:
+                    M_DrawCheckbox (184, y, int(cvar.Cvar_GetCvar('vid_vsync').value))
+                else:
+                    menu.M_Print (184, y, "N/A");
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_TEST:
+                y += 8
+                menu.M_Print(16, y, "      Test changes")
+
+            case gl_vidsdl.vid_opt_e.VID_OPT_APPLY:
+                menu.M_Print (16, y, "     Apply changes")
+
+        if video_options_cursor == i:
+            menu.M_DrawCharacter(168, y, 12 + (int(host.realtime)*4)&1)
+
+        y += 8
+
+
+
+
+
+
+
+
+
+
+
+def VID_Menu_ChooseNextMode(_dir):
     if vid_menu_nummodes:
         for i in range(vid_menu_nummodes):
             if vid_menu_modes[i].width == cvar.Cvar_GetCvar('vid_width').value and vid_menu_modes[i].height == cvar.Cvar_GetCvar('vid_height').value:
@@ -962,7 +1069,7 @@ def VID_Menu_ChooseNextMode(dir):
         if i == vid_menu_nummodes:
             i = 0
         else:
-            i += dir
+            i += _dir
             if i >= vid_menu_nummodes:
                 i = 0
             elif i < 0:
@@ -991,7 +1098,7 @@ def VID_Menu_ChooseNextBPP(dir):
         cvar.Cvar_SetValueQuick('vid_bpp', vid_menu_bpps[i])
 
 
-def VID_Menu_ChooseNextRate(dir):
+def VID_Menu_ChooseNextRate(_dir):
     if vid_menu_numrates:
         for i in range(vid_menu_numrates):
             if vid_menu_rates[i] == cvar.Cvar_GetCvar('vid_refreshrate').value:
@@ -999,7 +1106,7 @@ def VID_Menu_ChooseNextRate(dir):
         if i == vid_menu_numrates:
             i = 0
         else:
-            i += dir
+            i += _dir
             if i >= vid_menu_numrates:
                 i = 0
             elif i < 0:
@@ -1073,33 +1180,16 @@ def VID_MenuKey(key):
                     IN_Activate()
 
 
-
-
-
-
-
-
-
-
 def VID_Shutdown():
     global gl_context
     global draw_context
 
     if vid_initialized:
-        #VID_Gamma_Shutdown()
         sdl2.SDL_GL_DeleteContext(gl_context)
         gl_context = None
         sdl2.SDL_DestroyWindow(draw_context)
-
         sdl2.SDL_QuitSubSystem(sdl2.SDL_INIT_VIDEO)
         draw_context = None
-        #PL_VID_Shutdown()
-
-
-
-
-
-
 
 
 def VID_Menu_f():
@@ -1139,10 +1229,7 @@ def VID_IsMinimized():
 def VID_HasMouseOrInputFocus():
     flags = sdl2.video.SDL_GetWindowFlags(draw_context)
 
-    if flags & sdl2.SDL_WINDOW_INPUT_FOCUS or flags & sdl2.SDL_WINDOW_MOUSE_FOCUS:
-        return True
-
-    return False
+    return bool(flags & sdl2.SDL_WINDOW_INPUT_FOCUS or flags & sdl2.SDL_WINDOW_MOUSE_FOCUS)
 
 def GL_BeginRendering():
     gl_screen.glx = 0
@@ -1153,3 +1240,71 @@ def GL_BeginRendering():
 def GL_EndRendering():
     if not gl_vidsdl.scr_skipupdate:
         sdl2.SDL_GL_SwapWindow(gl_vidsdl.draw_context)
+
+
+def VID_Changed_f(var: cvar.cvar_t):
+    global vid_changed
+    vid_changed = True
+
+
+def VID_Unlock():
+    global vid_locked
+    vid_locked = False
+    VID_SyncCvars()
+
+def Vid_Lock():
+    global vid_locked
+    vid_locked = True
+
+
+def VID_FSAA_f(var):
+    if vid_initialized:
+        console.Con_Printf(f'{var.name} {var.value} requires engine restart to take effect')
+
+
+
+vid_toggle_works = False
+def VID_Toggle():
+    global vid_toggle_works
+    global modestate
+
+    toggleWorked = False
+    flags = 0
+
+    snd_dma.S_ClearBuffer()
+
+    if not vid_toggle_works:
+        cvar.Cvar_SetQuick(cvar.Cvar_GetCvar('vid_fullscreen'), "0" if VID_GetFullscreen() else "1")
+        _cmd.Cbuf_AddText('vid_restart')
+        return
+
+    if gl_vbo_able:
+        vid_toggle_works = False
+        cvar.Cvar_SetQuick(cvar.Cvar_GetCvar('vid_fullscreen'), "0" if VID_GetFullscreen() else "1")
+        _cmd.Cbuf_AddText('vid_restart')
+        return
+
+    if not VID_GetFullscreen():
+        flags = sdl2.SDL_WINDOW_FULLSCREEN_DESKTOP if cvar.Cvar_GetCvar('vid_desktopfullscreen').value else sdl2.SDL_WINDOW_FULLSCREEN
+
+    toggleWorked = sdl2.SDL_SetWindowFullscreen(draw_context, flags) == 0
+
+    if toggleWorked:
+        sbar.Sbar_Changed()
+
+        modestate = vid.modestate_t.MS_FULLSCREEN if VID_GetFullscreen() else vid.modestate_t.MS_WINDOWED
+
+        VID_SyncCvars()
+
+        if keys.key_dest in [keys.keydest_t.key_console, keys.keydest_t.key_menu]:
+            if modestate == vid.modestate_t.MS_WINDOWED:
+                in_sdl.IN_Deactivate(True)
+            elif modestate == vid.modestate_t.MS_FULLSCREEN:
+                in_sdl.IN_Activate()
+
+    else:
+        vid_toggle_works = False
+        console.Con_Printf('SDL_WM_ToggleFullScreen failed, attempting VID_Restart\n')
+        cvar.Cvar_SetQuick(cvar.Cvar_GetCvar('vid_fullscreen'), "0" if VID_GetFullscreen() else "1")
+        _cmd.Cbuf_AddText('vid_restart')
+

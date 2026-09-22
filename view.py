@@ -8,11 +8,6 @@ import quakedef
 
 v_punchangles = []; #johnfitz -- copied from cl.punchangle.  0 is current, 1 is previous valu
 
-cshift_empty = quakedef.cshift_t([130, 80, 50],0)
-cshift_water = quakedef.cshift_t([130, 80, 50],128)
-cshift_slime = quakedef.cshift_t([0, 25, 5],150)
-cshift_lava  = quakedef.cshift_t([255, 80, 0],150)
-
 v_dmg_time = 0.0
 v_dmg_roll = 0.0
 v_dmg_pitch = 0.0
@@ -79,6 +74,14 @@ def V_Init():
     global gl_cshiftpercent_damage
     global gl_cshiftpercent_bonus
     global gl_cshiftpercent_powerup
+
+    global cshift_empty, cshift_water, cshift_slime, cshift_lava
+
+    cshift_empty = quakedef.cshift_t([130, 80, 50],0)
+    cshift_water = quakedef.cshift_t([130, 80, 50],128)
+    cshift_slime = quakedef.cshift_t([0, 25, 5],150)
+    cshift_lava  = quakedef.cshift_t([255, 80, 0],150)
+
 
     _cmd.Cmd_AddCommand('v_cshift', V_cshift_f)
     _cmd.Cmd_AddCommand('bf', V_BonusFlash_f)
