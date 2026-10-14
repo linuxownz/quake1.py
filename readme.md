@@ -21,6 +21,7 @@ A Python implementation of Quake 1.
 
    pip install PyOpenGL PyOpenGL_accelerate
    pip install pysdl2 pysdl2-dll
+   pip install pillow numpy
 ```
 ---
 ## Running the game
