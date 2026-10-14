@@ -32,10 +32,6 @@ A Python implementation of Quake 1.
    source quakevenv/bin/activate
 
    python main_sdl.py -basedir ~/path/to/quake1/installation
-
-   or
-
-   python main_sdl.py -basedir ~/path/to/quake1/installation -rogue
 ```
 
 
