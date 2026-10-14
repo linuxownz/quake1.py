@@ -1221,6 +1221,8 @@ def COM_FileGetExtension(file:str):
     return ''
 
 def COM_AddExtension(name, ext):
+    if os.path.splitext(name)[1]:
+        return name
     return name + ext
 
 def COM_SkipPath(pathname):

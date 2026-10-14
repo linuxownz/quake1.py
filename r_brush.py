@@ -245,7 +245,7 @@ def R_RenderDynamicLightmaps(fa: quakedef.msurface_t) -> None:
             theRect.h = (fa.light_t - theRect.t) + tmax
 
         # Calculate buffer byte offset into lightmap atlas memory
-        stride_bytes = quakedef.LMBLOCK_WIDTH * lightmap_bytes
+        stride_bytes = glquake.LMBLOCK_WIDTH * lightmap_bytes
         base_offset = (fa.light_t * stride_bytes) + (fa.light_s * lightmap_bytes)
 
         # Build dynamic surface lightmap pixels directly into lightmap data buffer
@@ -698,8 +698,8 @@ def R_AddDynamicLights(surf: quakedef.msurface_t) -> None:
 
 def R_InitBrush():
     global allocated, blocklights
-    allocated = [0 for i in range(quakedef.LMBLOCK_WIDTH)]
-    blocklights = [ 0 for _ in range(quakedef.LMBLOCK_WIDTH * quakedef.LMBLOCK_HEIGHT * 3)]
+    allocated = []  # per-page skyline lists are appended by AllocBlock
+    blocklights = [ 0 for _ in range(glquake.LMBLOCK_WIDTH * glquake.LMBLOCK_HEIGHT * 3)]
 
 
 def R_BuildLightMap(
@@ -872,15 +872,15 @@ def R_UploadLightmap(lmap: int):
         gl.GL_TEXTURE_2D,
         0, 0,
         lm.rectchange.t,
-        quakedef.LMBLOCK_WIDTH,
+        glquake.LMBLOCK_WIDTH,
         lm.rectchange.h,
         gl_lightmap_format,
         _type,
-        lm.data[lm.rectchange.t * quakedef.LMBLOCK_WIDTH * lightmap_bytes:]
+        lm.data[lm.rectchange.t * glquake.LMBLOCK_WIDTH * lightmap_bytes:]
     )
 
-    lm.rectchange.l = quakedef.LMBLOCK_WIDTH
-    lm.rectchange.t = quakedef.LMBLOCK_HEIGHT
+    lm.rectchange.l = glquake.LMBLOCK_WIDTH
+    lm.rectchange.t = glquake.LMBLOCK_HEIGHT
     lm.rectchange.h = 0
     lm.rectchange.w = 0
 
@@ -902,7 +902,7 @@ def R_RebuildAllLightmaps() -> None:
     Rebuilds all surface lightmaps across precached models and uploads
     the full lightmap texture blocks directly to the GPU.
     """
-    wide10bits = bool(cvar.Cvar_GetCvar('r_lightmapwide').value)
+    wide10bits = bool(cvar.r_lightmapwide.value)
     _type = gl.GL_UNSIGNED_INT_10_10_10_2 if wide10bits else gl.GL_UNSIGNED_BYTE
 
     if not cl_main.cl.worldmodel:
@@ -922,7 +922,7 @@ def R_RebuildAllLightmaps() -> None:
 
             # Calculate byte offset into target lightmap block data array
             offset = (
-                fa.light_t * quakedef.LMBLOCK_WIDTH * lightmap_bytes
+                fa.light_t * glquake.LMBLOCK_WIDTH * lightmap_bytes
                 + fa.light_s * lightmap_bytes
             )
 
@@ -930,7 +930,7 @@ def R_RebuildAllLightmaps() -> None:
                 fa,
                 lightmaps[fa.lightmaptexturenum].data,
                 offset,
-                quakedef.LMBLOCK_WIDTH * lightmap_bytes
+                glquake.LMBLOCK_WIDTH * lightmap_bytes
             )
 
     # 2. For each lightmap block, bind and upload the complete texture
@@ -941,8 +941,8 @@ def R_RebuildAllLightmaps() -> None:
             0,
             0,
             0,
-            quakedef.LMBLOCK_WIDTH,
-            quakedef.LMBLOCK_HEIGHT,
+            glquake.LMBLOCK_WIDTH,
+            glquake.LMBLOCK_HEIGHT,
             gl_lightmap_format,
             _type,
             lightmaps[i].data

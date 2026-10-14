@@ -354,6 +354,12 @@ def CL_PlayDemo_f():
         cl_main.cls.demonum = -1
         return
 
+    # first line of a .dem is the forced cd track, terminated by '\n'
+    while True:
+        ch = cl_main.cls.demofile.read(1)
+        if not ch or ch == b'\n':
+            break
+
     cl_main.cls.demoplayback = True
     cl_main.cls.demopaused = False
     cl_main.cls.state = cl_main.cactive_t.ca_connected

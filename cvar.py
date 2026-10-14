@@ -30,7 +30,7 @@ class cvar_t:
 #HAVE TO CONVERT THIS TO A dictionary
 #HAVE TO CONVERT THIS TO A dictionary
 #HAVE TO CONVERT THIS TO A dictionary
-__cvars: list[cvar_t] = []
+__cvars: dict[cvar_t] = {}
 #HAVE TO CONVERT THIS TO A dictionary
 #HAVE TO CONVERT THIS TO A dictionary
 #HAVE TO CONVERT THIS TO A dictionary
@@ -162,9 +162,8 @@ def Cvar_Reset(name):
         Cvar_SetQuick(cvar, cvar.default_string)
 
 def Cvar_FindVar(name) -> cvar_t:
-    for var in __cvars:
-        if var.name == name:
-            return var
+    if name in __cvars:
+        return __cvars[name]
     return None
 
 def Cvar_FindVarAfter(prev_name: str, with_flags: int) -> cvar_t:
@@ -243,13 +242,12 @@ def Cvar_RegisterVariable(variable):
         next = None
     )
 
-    __cvars.append(new_cvar)
+    __cvars[name] = new_cvar
 
 def Cvar_GetCvar(name) -> cvar_t:
     """ convert __cvars to a hash """
-    for cvar in __cvars:
-        if cvar.name == name:
-            return cvar
+    if name in __cvars:
+        return __cvars[name]
     console.Con_Printf(f'failed to look up {name} in Cvar_GetCvar()')
     return None
 

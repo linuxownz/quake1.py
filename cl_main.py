@@ -264,9 +264,9 @@ def CL_NextDemo():
     if cls.demonum == -1:
         return
 
-    if not cls.demos[cls.demonum] or cls.demonum == quakedef.MAX_DEMOS:
+    if cls.demonum >= len(cls.demos) or cls.demonum >= quakedef.MAX_DEMOS or not cls.demos[cls.demonum]:
         cls.demonum = 0
-        if not cls.demos[cls.demonum]:
+        if not cls.demos or not cls.demos[0]:
             console.Con_Printf('no demos listed with startdemos')
             cls.demonum = -1
             CL_Disconnect()

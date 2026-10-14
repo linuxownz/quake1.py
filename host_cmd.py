@@ -470,7 +470,7 @@ def Host_Say(teamonly: bool):
 
     if _cmd.cmd_source == _cmd.cmd_source_t.src_command:
         if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
-            _cmd.Cmd_ForwardToServer()
+            _cmd.Cmd_ForwardToServer_f()
             return
         fromServer = True
         teamonly = False
@@ -559,7 +559,7 @@ def Host_Noclip_f():
 def Host_SetPos_f():
     global noclip_anglehack
     if _cmd.cmd_source == _cmd.cmd_source_t.src_command:
-        _cmd.Cmd_ForwardToServer()
+        _cmd.Cmd_ForwardToServer_f()
         return
 
     if pr_edict.pr_global_struct.deathmatch:
@@ -1253,8 +1253,7 @@ def Host_Startdemos_f():
 
     console.Con_Printf(f'{c} demos in loop')
 
-    for i in range(1, c+1):
-        cl_main.cls.demos.insert(i-1,_cmd.Cmd_Argv(i))
+    cl_main.cls.demos = [_cmd.Cmd_Argv(i) for i in range(1, c+1)]
 
     import cvar
     cl_startdemos = int(cvar.Cvar_GetCvar('cl_startdemos').value)
@@ -1281,7 +1280,7 @@ def Host_Stopdemo_f():
         return
     if not cl_main.cls.demoplayback:
         return
-    cl_main.CL_StopPlayback()
+    cl_demo.CL_StopPlayback()
     cl_main.CL_Disconnect()
 
 def Host_Viewmodel_f():

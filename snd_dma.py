@@ -212,7 +212,7 @@ def S_Init():
 
     snd_filterquality = {'name':"snd_filterquality",  'value':SND_FILTERQUALITY_DEFAULT, 'flags': cvar.CVAR_NONE};
 
-    nosound           = {'name': "nosound",           'value': "1",     'flags' : cvar.CVAR_NONE}; # TODO should be 0 for sound
+    nosound           = {'name': "nosound",           'value': "0",     'flags' : cvar.CVAR_NONE}; # TODO should be 0 for sound
     ambient_level     = {'name': "ambient_level",     'value': "0.3",   'flags' : cvar.CVAR_NONE};
     ambient_fade      = {'name': "ambient_fade",      'value': "100",   'flags' : cvar.CVAR_NONE};
     snd_noextraupdate = {'name': "snd_noextraupdate", 'value': "0",     'flags' : cvar.CVAR_NONE};

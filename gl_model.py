@@ -2504,7 +2504,7 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
     if (
         mod.bspversion == BSPVERSION
         and cvar.Cvar_GetCvar('external_vis').value
-        and sv_main.sv.modelname[0]
+        and sv_main.sv.modelname # was modelname[0] FIXME
         and loadname.lower() == sv_main.sv.name.lower() == 0
     ):
 

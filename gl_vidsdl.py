@@ -227,8 +227,8 @@ def VID_Restart():
     from common import CLAMP
 
     _vid.conwidth = CLAMP(320, _vid.conwidth, _vid.width)
-    _vid.conwidth &= 0xFFFFFFFF8
-    _vid.conheight = _vid.conwidth * _vid.height / _vid.width
+    _vid.conwidth = int(_vid.conwidth) & ~7
+    _vid.conheight = _vid.conwidth * _vid.height // _vid.width
 
     VID_SyncCvars()
 
@@ -445,8 +445,8 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
 
     _vid.width = VID_GetCurrentWidth()
     _vid.height = VID_GetCurrentHeight()
-    _vid.conwidth = _vid.width & 0xFFFFFFF8
-    _vid.conheight = _vid.conwidth * _vid.width / _vid.height
+    _vid.conwidth = _vid.width & ~7
+    _vid.conheight = _vid.conwidth * _vid.height // _vid.width
     _vid.numpages = 2
 
     _depthbits = ctypes.c_int()

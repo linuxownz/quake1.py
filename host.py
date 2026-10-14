@@ -458,7 +458,7 @@ def Host_Init():
         if not sv_main.sv.active:
             _cmd.Cbuf_AddText ("map start\n")
 
-    _cmd.Cbuf_AddText("map start\n")
+    # quake.rc runs startdemos (demo loop); no unconditional 'map start'
     # _cmd.cmd_source = _cmd.cmd_source_t.src_command
     # _cmd.Cbuf_Execute()
 
@@ -577,6 +577,7 @@ def _Host_Frame(time):
 
         Host_GetConsoleCommands()
 
+
         # --- Server Operations ---
         if sv_main.sv.active:
             Host_ServerFrame() # Added sv_main prefix
@@ -585,6 +586,10 @@ def _Host_Frame(time):
         if not sv_main.sv.active:
             cl_main.CL_SendCmd()
 
+        if (cl_main.cls.demonum != -1 and not cl_main.cls.demoplayback
+                and cl_main.cls.state != cl_main.cactive_t.ca_connected):
+            cl_main.CL_NextDemo()
+
         if cl_main.cls.state == cl_main.cactive_t.ca_connected:
             cl_main.CL_ReadFromServer()
 
@@ -592,6 +597,9 @@ def _Host_Frame(time):
         host_speeds = cvar.Cvar_GetCvar('host_speeds')
         if int(host_speeds.value):
             time1 = sys_sdl_unix.Sys_DoubleTime()
+
+        # ? in_sdl.IN_MouseMove()
+        # ? cl_main.CL_Move(time)
 
         gl_screen.SCR_UpdateScreen()
 
