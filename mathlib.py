@@ -139,9 +139,8 @@ def VectorAngles(forward: list[float], angles: list[float]) -> None:
     angles[quakedef.YAW] = math.atan2(forward[1], forward[0]) / math.pi / 180;
     angles[quakedef.ROLL] = 0;
 
-
-def AngleVectors(angles) -> tuple[float, float, float]:
-    """ Converts angles [pitch, yaw, roll] to three vectors.  """
+def AngleVectors( angles: list[float], forward: list[float], right: list[float], up: list[float]) -> None:
+    """Converts angles [pitch, yaw, roll] to three vectors in-place."""
     angle_to_rad = math.pi / 180.0
 
     sy = math.sin(angles[quakedef.YAW] * angle_to_rad)
@@ -151,25 +150,21 @@ def AngleVectors(angles) -> tuple[float, float, float]:
     sr = math.sin(angles[quakedef.ROLL] * angle_to_rad)
     cr = math.cos(angles[quakedef.ROLL] * angle_to_rad)
 
-    forward = [
-        cp * cy,
-        cp * sy,
-        -sp
-    ]
+    if forward:
+        forward[0] = cp * cy
+        forward[1] = cp * sy
+        forward[2] = -sp
 
-    right = [
-        (-1*sr*sp*cy + -1*cr*-sy),
-        (-1*sr*sp*sy + -1*cr*cy),
-        -1*sr*cp
-    ]
+    if right:
+        right[0] = (-1.0 * sr * sp * cy) + (-1.0 * cr * -sy)
+        right[1] = (-1.0 * sr * sp * sy) + (-1.0 * cr * cy)
+        right[2] = -1.0 * sr * cp
 
-    up = [
-        (cr*sp*cy + -sr*-sy),
-        (cr*sp*sy + -sr*cy),
-        cr*cp
-    ]
+    if up:
+        up[0] = (cr * sp * cy) + (-sr * -sy)
+        up[1] = (cr * sp * sy) + (-sr * cy)
+        up[2] = cr * cp
 
-    return forward, right, up
 
 def anglemod(a:float) -> float:
     a = (360.0/65536) * ((int)(a*(65536/360.0)) & 65535)

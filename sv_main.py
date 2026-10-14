@@ -44,6 +44,9 @@ def SV_Init():
     sv = server.server_t()
     sv.edicts = None
 
+    svs.maxclientslimit = 32
+    svs.clients = [server.client_t() for _ in range(svs.maxclientslimit)]
+
     sv_freezenonclients = {'name': 'sv_freezenonclients', 'value': '0',    'flags' : cvar.CVAR_NONE}
     sv_friction         = {'name': 'sv_friction',         'value': '4',    'flags' : cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
     sv_gravity          = {'name': 'sv_gravity',          'value': '800',  'flags' : cvar.CVAR_NOTIFY|cvar.CVAR_SERVERINFO}
@@ -89,8 +92,8 @@ def SV_Init():
     global sv_protocol
     i = common.COM_CheckParm('-protocol')
 
-    if i != 0 and i < com_argc - 1:
-        sv_protocol = int(com_argv[i + 1])
+    if i != 0 and i < common.com_argc - 1:
+        sv_protocol = int(common.com_argv[i + 1])
 
     p = ''
     match sv_protocol:
@@ -101,7 +104,7 @@ def SV_Init():
         case protocol.PROTOCOL_RMQ:
             p = 'RMQ'
         case _:
-            Sys_Error(f'Bad protocol {sv_protocol}, accepted values {protocol.PROTOCOL_NETQUAKE}, {protocol.PROTOCOL_FITZQUAKE}, {protocol.PROTOCOL_RMQ}')
+            sys_sdl_unix.Sys_Error(f'Bad protocol {sv_protocol}, accepted values {protocol.PROTOCOL_NETQUAKE}, {protocol.PROTOCOL_FITZQUAKE}, {protocol.PROTOCOL_RMQ}')
             return
 
     sys_sdl_unix.Sys_Printf(f'Server using protocol {sv_protocol} {p}')
@@ -129,82 +132,95 @@ def SV_StartParticle(org: list[float], dir: list[float], color: int, count: int)
 
 
 def SV_StartSound(entity: progs.edict_t, channel: int, sample: str, volume: int, attenuation: float):
-    if volume < 0 or volume > 255:
-        host.Host_Error('SV_StartSound: volume = %i', volume)
-    if attenuation < 0 or attenuation > 4.0:
-        host.Host_Error('SV_StartSound: attenuation = %f', attenuation)
-    if channel < 0 or channel > 7:
-        host.Host_Error('SV_StartSound: channel = %i', channel)
+    sv = sv_main.sv
 
-    if sv_main.sv.datagram.cursize > quakedef.MAX_DATAGRAM - 21:
+    # PF_sound passes floats; everything below needs ints
+    volume = int(volume)
+    channel = int(channel)
+
+    if volume < 0 or volume > 255:
+        host.Host_Error(f'SV_StartSound: volume = {volume}')
+    if attenuation < 0 or attenuation > 4.0:
+        host.Host_Error(f'SV_StartSound: attenuation = {attenuation}')
+    if channel < 0 or channel > 7:
+        host.Host_Error(f'SV_StartSound: channel = {channel}')
+
+    if sv.datagram.cursize > quakedef.MAX_DATAGRAM - 21:
         return
 
-    for sound_num in range(quakedef.MAX_SOUNDS):
-        if not sv_main.sv.sound_precache[sound_num]:
+    # Find the precache number. Slot 0 is the "" placeholder, so the search
+    # starts at 1 exactly like the C code. Starting at 0 stopped immediately
+    # on the empty slot and reported every sound as not precached.
+    sp = sv.sound_precache
+    limit = min(quakedef.MAX_SOUNDS, len(sp))
+    sound_num = 1
+    while sound_num < limit and sp[sound_num]:
+        if sample == sp[sound_num]:
             break
-        if sample == sv_main.sv.sound_precache[sound_num]:
-            break
+        sound_num += 1
 
-    if sound_num == quakedef.MAX_SOUNDS or not sv_main.sv.sound_precache[sound_num]:
-        console.Con_Printf('SV_StartSound: %s not precached\n' % sample)
+    if sound_num >= limit or not sp[sound_num]:
+        console.Con_Printf(f'SV_StartSound: {sample} not precached\n')
         return
 
     ent = pr_edict.NUM_FOR_EDICT(entity)
+
     field_mask = 0
     if volume != protocol.DEFAULT_SOUND_PACKET_VOLUME:
         field_mask |= protocol.SND_VOLUME
     if attenuation != protocol.DEFAULT_SOUND_PACKET_ATTENUATION:
         field_mask |= protocol.SND_ATTENUATION
 
+    # johnfitz -- PROTOCOL_FITZQUAKE
     if ent >= 8192:
-        if sv_main.sv.protocol == protocol.PROTOCOL_NETQUAKE:
-            return
+        if sv.protocol == protocol.PROTOCOL_NETQUAKE:
+            return  # can't do this on nq
         field_mask |= protocol.SND_LARGEENTITY
-
     if sound_num >= 256 or channel >= 8:
-        if sv_main.sv.protocol == protocol.PROTOCOL_NETQUAKE:
-            return
-        field_mask |= protocol.PROTOCOL_NETQUAKE
+        if sv.protocol == protocol.PROTOCOL_NETQUAKE:
+            return  # can't do this on nq
+        field_mask |= protocol.SND_LARGESOUND  # (was PROTOCOL_NETQUAKE by mistake)
 
-    if sv_main.sv.datagram.cursize > quakedef.MAX_DATAGRAM - 21:
-        return
-
-    common.MSG_WriteByte(sv_main.sv.datagram, protocol.svc_sound)
-    common.MSG_WriteByte(sv_main.sv.datagram, field_mask)
-
+    common.MSG_WriteByte(sv.datagram, protocol.svc_sound)
+    common.MSG_WriteByte(sv.datagram, field_mask)
     if field_mask & protocol.SND_VOLUME:
-        common.MSG_WriteByte(sv_main.sv.datagram, volume)
+        common.MSG_WriteByte(sv.datagram, volume)
     if field_mask & protocol.SND_ATTENUATION:
-        common.MSG_WriteByte(sv_main.sv.datagram, attenuation * 64)
-
+        common.MSG_WriteByte(sv.datagram, int(attenuation * 64))
     if field_mask & protocol.SND_LARGEENTITY:
-        common.MSG_WriteShort(sv_main.sv.datagram, ent)
-        common.MSG_WriteByte(sv_main.sv.datagram, channel)
+        common.MSG_WriteShort(sv.datagram, ent)
+        common.MSG_WriteByte(sv.datagram, channel)
     else:
-        common.MSG_WriteShort(sv_main.sv.datagram, (ent<<3) | channel)
-
+        common.MSG_WriteShort(sv.datagram, (ent << 3) | channel)
     if field_mask & protocol.SND_LARGESOUND:
-        common.MSG_WriteShort(sv_main.sv.datagram, sound_num)
+        common.MSG_WriteShort(sv.datagram, sound_num)
     else:
-        common.MSG_WriteByte(sv_main.sv.datagram, sound_num)
-
+        common.MSG_WriteByte(sv.datagram, sound_num)
     for i in range(3):
-        common.MSG_WriteCoord (sv_main.sv.datagram, entity.v.origin[i]+0.5*(entity.v.mins[i]+entity.v.maxs[i]), sv_main.sv.protocolflags)
+        common.MSG_WriteCoord(
+            sv.datagram,
+            entity.v.origin[i] + 0.5 * (entity.v.mins[i] + entity.v.maxs[i]),
+            sv.protocolflags,
+        )
+
 
 def SV_LocalSound(client: server.client_t, sample: str):
-    for sound_num in range(quakedef.MAX_SOUNDS):
-        if not sv_main.sv.sound_precache[sound_num]:
+    sv = sv_main.sv
+    sp = sv.sound_precache
+    limit = min(quakedef.MAX_SOUNDS, len(sp))
+    sound_num = 1  # slot 0 is the "" placeholder
+    while sound_num < limit and sp[sound_num]:
+        if sample == sp[sound_num]:
             break
-        if sample == sv_main.sv.sound_precache[sound_num]:
-            break
+        sound_num += 1
 
-    if sound_num == quakedef.MAX_SOUNDS or not sv_main.sv.sound_precache[sound_num]:
-        console.Con_Printf('SV_LocalSound: %s not precached\n' % sample)
+    if sound_num >= limit or not sp[sound_num]:
+        console.Con_Printf(f'SV_LocalSound: {sample} not precached\n')
         return
 
     field_mask = 0
     if sound_num >= 256:
-        if sv_main.sv.protocol == protocol.PROTOCOL_NETQUAKE:
+        if sv.protocol == protocol.PROTOCOL_NETQUAKE:
             return
         field_mask = protocol.SND_LARGESOUND
 
@@ -225,58 +241,67 @@ def SV_IsLocalClient(client: server.client_t) -> bool:
 
 
 def SV_SendServerInfo(client: server.client_t):
-    common.MSG_WriteByte(client.message, protocol.svc_print)
-    message = '%c\nQuakeSpasm %1.2f SERVER' %  ( 2, quakedef.QUAKESPASM_VERSION )
-    common.MSG_WriteString(client.message, message)
+    sv = sv_main.sv
+    msg = client.message
 
-    common.MSG_WriteByte(client.message, protocol.svc_serverinfo)
-    common.MSG_WriteLong(client.message, sv_main.sv.protocol)
+    common.MSG_WriteByte(msg, protocol.svc_print)
+    message = '%c\nQuakeSpasm %1.2f SERVER' % (2, getattr(quakedef, 'QUAKESPASM_VERSION', 0.95))
+    common.MSG_WriteString(msg, message)
 
-    if sv_main.sv.protocol == protocol.PROTOCOL_RMQ:
-        common.MSG_WriteLong( client.message, sv_main.sv.protocolflags)
+    common.MSG_WriteByte(msg, protocol.svc_serverinfo)
+    common.MSG_WriteLong(msg, sv.protocol)
 
-    common.MSG_WriteByte(client.message, sv_main.svs.maxclients)
+    if sv.protocol == protocol.PROTOCOL_RMQ:
+        common.MSG_WriteLong(msg, sv.protocolflags)
+
+    common.MSG_WriteByte(msg, sv_main.svs.maxclients)
 
     coop = cvar.Cvar_GetCvar('coop').value
     deathmatch = cvar.Cvar_GetCvar('deathmatch').value
 
     if not coop and deathmatch:
-        common.MSG_WriteByte(client.message, protocol.GAME_DEATHMATCH)
+        common.MSG_WriteByte(msg, protocol.GAME_DEATHMATCH)
     else:
-        common.MSG_WriteByte(client.message, protocol.GAME_COOP)
+        common.MSG_WriteByte(msg, protocol.GAME_COOP)
 
-    common.MSG_WriteString(client.message, pr_edict.PR_GetString(sv_main.sv.edicts.v.message))
+    # sv.edicts is a list: the world is sv.edicts[0] (sv.edicts.v raised AttributeError)
+    world_ent = sv.edicts[0]
+    common.MSG_WriteString(msg, pr_edict.PR_GetString(world_ent.v.message))
 
-    i = i
-    s = sv_main.sv.model_precache[i]
-    while s:
-        if sv_main.sv.protocol != protocol.PROTOCOL_NETQUAKE or i < 256:
-            common.MSG_WriteString(client.message, s)
+    # model and sound lists start at slot 1 (slot 0 is the "" placeholder)
+    mp = sv.model_precache
+    i = 1
+    while i < len(mp) and mp[i]:
+        if sv.protocol != protocol.PROTOCOL_NETQUAKE or i < 256:
+            common.MSG_WriteString(msg, mp[i])
         i += 1
-        s = sv_main.sv.model_precache[i]
-    common.MSG_WriteByte(client.message, 0)
+    common.MSG_WriteByte(msg, 0)
 
-    i = i
-    s = sv_main.sv.sound_precache[i]
-    while s:
-        if sv_main.sv.protocol != protocol.PROTOCOL_NETQUAKE or i < 256:
-            common.MSG_WriteString(client.message, s)
+    sp = sv.sound_precache
+    i = 1
+    while i < len(sp) and sp[i]:
+        if sv.protocol != protocol.PROTOCOL_NETQUAKE or i < 256:
+            common.MSG_WriteString(msg, sp[i])
         i += 1
-        s = sv_main.sv.sound_precache[i]
-    common.MSG_WriteByte(client.message, 0)
+    common.MSG_WriteByte(msg, 0)
 
-    common.MSG_WriteByte(client.message, protocol.svc_cdtrack )
-    common.MSG_WriteByte(client.message, sv_main.sv.edicts.v.sounds)
-    common.MSG_WriteByte(client.message, sv_main.sv.edicts.v.sounds)
+    # send music
+    common.MSG_WriteByte(msg, protocol.svc_cdtrack)
+    common.MSG_WriteByte(msg, int(world_ent.v.sounds))
+    common.MSG_WriteByte(msg, int(world_ent.v.sounds))
 
-    common.MSG_WriteByte(client.message, protocol.svc_setview)
-    common.MSG_WriteShort(client.message, pr_edict.NUM_FOR_EDICT(client.edict))
+    # set view
+    common.MSG_WriteByte(msg, protocol.svc_setview)
+    common.MSG_WriteShort(msg, pr_edict.NUM_FOR_EDICT(client.edict))
 
-    common.MSG_WriteByte(client.message, protocol.svc_signonnum)
-    common.MSG_WriteByte(client.message, 1)
+    common.MSG_WriteByte(msg, protocol.svc_signonnum)
+    common.MSG_WriteByte(msg, 1)
 
-    client.sendsignon = server.PRESPAWN_FLUSH
-    client.spawned = False
+    # the signon buffers (baselines, statics) must be sent next, not flushed
+    client.sendsignon = server.sendsignon_e.PRESPAWN_SIGNONBUFS
+    client.signonidx = 0
+    client.spawned = False  # need prespawn, spawn, etc
+
 
 def SV_ConnectClient(clientnum: int):
     client: server.client_t = sv_main.svs.clients[clientnum]
@@ -284,10 +309,7 @@ def SV_ConnectClient(clientnum: int):
     console.Con_DPrintf('Client %s connected\n' % net_main.NET_QSocketGetAddressString(client.netconnection))
 
     edictnum = clientnum + 1
-
     ent = pr_edict.EDICT_NUM(edictnum)
-
-    netconnection = client.netconnection
 
     spawn_parms = []
     if sv_main.sv.loadgame:
@@ -297,39 +319,51 @@ def SV_ConnectClient(clientnum: int):
     client.active = True
     client.spawned = False
     client.edict = ent
-    client.message.data = client.msgbuf
-    client.message.allowoverflow = True
+
+    # C: message.data = msgbuf; message.maxsize = sizeof(msgbuf). maxsize was
+    # never set here, so every write to client.message overflowed.
+    msgbuf = getattr(client, 'msgbuf', None)
+    if not msgbuf:
+        msgbuf = bytearray(65535)  # NET_MAXMESSAGE
+        client.msgbuf = msgbuf
+    client.message.data = msgbuf
+    client.message.maxsize = len(msgbuf)
+    client.message.cursize = 0
+    client.message.overflowed = False
+    client.message.allowoverflow = True  # we can catch it
 
     if sv_main.sv.loadgame:
         client.spawn_parms = spawn_parms[:]
     else:
+        # call the progs to get default spawn parms for the new client
         pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.SetNewParms)
-        for i in range ( server.NUM_SPAWN_PARMS ):
-            client.spawn_parms[i] = pr_edict.pr_global_struct.parm1[i]
+        for i in range(server.NUM_SPAWN_PARMS):
+            client.spawn_parms[i] = getattr(pr_edict.pr_global_struct, f'parm{i + 1}')
 
     SV_SendServerInfo(client)
+
 
 sv_active = False
 
 def SV_CheckForNewClients():
-    ret: net_defs.qsocket_t = None
-
     while True:
         ret = net_main.NET_CheckNewConnections()
         if ret is None:
             break
 
+        # init a new client structure: find a free slot
         for i in range(svs.maxclients):
             if not svs.clients[i].active:
                 break
+        else:
+            sys_sdl_unix.Sys_Error('Host_CheckForNewClients: no free clients')
+            return
 
-            if i == svs.maxclients:
-                sys_sdl_unix.Sys_Error('Host_CheckForNewClients: no free clients')
+        svs.clients[i].netconnection = ret
+        SV_ConnectClient(i)
 
-            svs.clients[i].netconnection = ret
-            SV_ConnectClient(i)
+        net_main.net_activeconnections += 1
 
-            net_main.net_activeconnections += 1
 
 def SV_ClearDatagram():
     common.SZ_Clear(sv.datagram)
@@ -340,18 +374,13 @@ fatpvs: bytearray = bytearray()
 fatpvs_capacity: int = 0
 
 def SV_AddToFatPVS(org: list[float], node: quakedef.mnode_t, worldmodel: quakedef.qmodel_t):
-    global fatpvs
-
-    pvs: bytearray = None
-    plane: quakedef.mplane_t = None
-
     while True:
+        # if this is a leaf, accumulate the pvs bits
         if node.contents < 0:
-            if node.contents != bspfile.CONTENTS_SOLID:
-                pvs = gl_model.Mod_LeadPVS(node, worldmodel)
-                for i in range(fatbytes):
+            if node.contents != quakedef.CONTENTS_SOLID:
+                pvs = gl_model.Mod_LeafPVS(node, worldmodel)  # (was Mod_LeadPVS)
+                for i in range(min(fatbytes, len(pvs))):
                     fatpvs[i] |= pvs[i]
-
             return
 
         plane = node.plane
@@ -361,22 +390,24 @@ def SV_AddToFatPVS(org: list[float], node: quakedef.mnode_t, worldmodel: quakede
         elif d < -8:
             node = node.children[1]
         else:
+            # go down both
             SV_AddToFatPVS(org, node.children[0], worldmodel)
             node = node.children[1]
 
-def SV_FatPVS(org: list[float], worldmodel: quakedef.qmodel_t) -> bytes:
-    global fatpvs
 
-    fatbytes = ( worldmodel.numleafs + 7 ) >> 3
+def SV_FatPVS(org: list[float], worldmodel: quakedef.qmodel_t) -> bytes:
+    global fatbytes, fatpvs, fatpvs_capacity
+
+    fatbytes = (worldmodel.numleafs + 7) >> 3
     if fatpvs is None or fatbytes > fatpvs_capacity:
         fatpvs_capacity = fatbytes
         fatpvs = bytearray(fatpvs_capacity)
-        if fatpvs is None:
-            sys_sdl_unix.Sys_Error('SV_FatPVS: realloc() failed on %d bytes' % fatpvs_capacity)
+    else:
+        fatpvs[:fatbytes] = bytes(fatbytes)  # memset to 0
 
-    # Q_memset ( fat_pvs, 0, fatbytes);
-    SV_AddToFatPVS(org, worldmodel.nodes, worldmodel)
+    SV_AddToFatPVS(org, worldmodel.nodes[0], worldmodel)
     return fatpvs
+
 
 def SV_VisibleToClient(client: progs.edict_t, test: progs.edict_t, worldmodel: quakedef.qmodel_t) -> bool:
     org: list[float] = [0, 0, 0]
@@ -389,43 +420,53 @@ def SV_VisibleToClient(client: progs.edict_t, test: progs.edict_t, worldmodel: q
     return False
 
 
-def SV_WriteEntitiesToClient(clent: progs.edict_t, msg: common.sizebuf_s): # not client?
-    org: list[float] = [0, 0, 0]
+def SV_WriteEntitiesToClient(clent: progs.edict_t, msg: common.sizebuf_s):
+    sv = sv_main.sv
+    org = [0.0, 0.0, 0.0]
     mathlib.VectorAdd(clent.v.origin, clent.v.view_ofs, org)
     pvs = SV_FatPVS(org, sv.worldmodel)
-    val: progs.eval_t = None
+    effects_mask = pr_edict.pr_effects_mask
 
-    gotostats = False
-
-    ent = progs.NEXT_EDICT(sv.edicts)
+    # Index the edict list directly. The old code advanced `ent` at the end of
+    # the loop body, so every `continue` left it stuck on the same edict.
     for e in range(1, sv.num_edicts):
-        if not ent is clent:
-            if not ent.v.modelindex or not pr_edict.PR_GetString(ent.v.model)[0]:
+        ent = sv.edicts[e]
+
+        if ent is not clent:  # clent is ALWAYS sent
+            # ignore ents without visible models
+            if not ent.v.modelindex or not pr_edict.PR_GetString(ent.v.model):
                 continue
 
+            # johnfitz -- don't send model>255 entities if protocol is 15
             if sv.protocol == protocol.PROTOCOL_NETQUAKE and int(ent.v.modelindex) & 0xFF00:
                 continue
 
+            # ignore if not touching a PV leaf
+            visible = False
             for i in range(ent.num_leafs):
-                if pvs[ent.leafnums[i] >> 3] & ( 1 << (ent.leafnums[i] & 7)):
+                ln = ent.leafnums[i]
+                if pvs[ln >> 3] & (1 << (ln & 7)):
+                    visible = True
                     break
 
-            if i == ent.num_leafs and ent.num_leafs < progs.MAX_ENT_LEAFS:
-                continue
+            # ericw -- added ent.num_leafs < MAX_ENT_LEAFS condition
+            if not visible and ent.num_leafs < progs.MAX_ENT_LEAFS:
+                continue  # not visible
 
+        # max size for protocol 15 is 1024 and for 666 is 1400
         if msg.cursize + 40 > msg.maxsize:
-            if not host.dev_overflows.packetsize or  host.dev_overflows.packetsize + glquake.CONSOLE_RESPAM_TIME < host.realtime:
+            if not host.dev_overflows.packetsize or host.dev_overflows.packetsize + glquake.CONSOLE_RESPAM_TIME < host.realtime:
                 console.Con_Printf('packet overflow\n')
                 host.dev_overflows.packetsize = host.realtime
-            gotostats = True
             break
 
+        # send an update
         bits = 0
 
         for i in range(3):
-            miss = ent.v.origin[i]  - ent.baseline.origin[i]
+            miss = ent.v.origin[i] - ent.baseline.origin[i]
             if miss < -0.1 or miss > 0.1:
-                bits |= protocol.U_ORIGIN1
+                bits |= protocol.U_ORIGIN1 << i  # (was always U_ORIGIN1)
 
         if ent.v.angles[0] != ent.baseline.angles[0]:
             bits |= protocol.U_ANGLE1
@@ -433,15 +474,15 @@ def SV_WriteEntitiesToClient(clent: progs.edict_t, msg: common.sizebuf_s): # not
             bits |= protocol.U_ANGLE2
         if ent.v.angles[2] != ent.baseline.angles[2]:
             bits |= protocol.U_ANGLE3
-        if ent.v.movetype == server.MOVETYPE_STEP:
-            bits |= protocol.U_STEP # don't mess up the step animation
+        if int(ent.v.movetype) == server.MOVETYPE_STEP:
+            bits |= protocol.U_STEP  # don't mess up the step animation
         if ent.baseline.colormap != ent.v.colormap:
             bits |= protocol.U_COLORMAP
         if ent.baseline.skin != ent.v.skin:
             bits |= protocol.U_SKIN
         if ent.baseline.frame != ent.v.frame:
             bits |= protocol.U_FRAME
-        if (ent.baseline.effects ^ int(ent.v.effects)) & pr_edict.pr_effects_mask:
+        if (int(ent.baseline.effects) ^ int(ent.v.effects)) & effects_mask:
             bits |= protocol.U_EFFECTS
         if ent.baseline.modelindex != ent.v.modelindex:
             bits |= protocol.U_MODEL
@@ -449,25 +490,34 @@ def SV_WriteEntitiesToClient(clent: progs.edict_t, msg: common.sizebuf_s): # not
         if pr_edict.pr_alpha_supported:
             val = pr_edict.GetEdictFieldValue(ent, 'alpha')
             if val:
-                ent.alpha = protocol.ENTALPHA_ENCODE(val._float)
+                ent.alpha = protocol.ENTALPHA_ENCODE(float(val))
 
-        if ent.alpha == protocol.ENTALPHA_ZERO and not int(ent.v.effects & pr_edict.pr_effects_mask):
+        # don't send invisible entities unless they have effects
+        if ent.alpha == protocol.ENTALPHA_ZERO and not (int(ent.v.effects) & effects_mask):
             continue
 
         val = pr_edict.GetEdictFieldValue(ent, 'scale')
         if val:
-            ent.scale = protocol.ENTSCALE_ENCODE(val._float)
+            ent.scale = protocol.ENTSCALE_ENCODE(float(val))
         else:
             ent.scale = protocol.ENTSCALE_DEFAULT
 
+        # johnfitz -- PROTOCOL_FITZQUAKE
         if sv.protocol != protocol.PROTOCOL_NETQUAKE:
-            if (ent.baseline.alpha != ent.alpha): bits |= protocol.U_ALPHA
-            if (ent.baseline.scale != ent.scale): bits |= protocol.U_SCALE
-            if bits & protocol.U_FRAME and int(ent.v.frame & 0xFF00): bits |= protocol.U_FRAME2
-            if bits & protocol.U_MODEL and int(ent.v.modelindex & 0xFF00): bits |= protocol.U_MODEL2
-            if (ent.sendinterval): bits |= protocol.U_LERPFINISH
-            if (bits >= 65536): bits |= protocol.U_EXTEND1
-            if (bits >= 16777216): bits |= protocol.U_EXTEND2
+            if ent.baseline.alpha != ent.alpha:
+                bits |= protocol.U_ALPHA
+            if ent.baseline.scale != ent.scale:
+                bits |= protocol.U_SCALE
+            if bits & protocol.U_FRAME and int(ent.v.frame) & 0xFF00:
+                bits |= protocol.U_FRAME2
+            if bits & protocol.U_MODEL and int(ent.v.modelindex) & 0xFF00:
+                bits |= protocol.U_MODEL2
+            if getattr(ent, 'sendinterval', 0):
+                bits |= protocol.U_LERPFINISH
+            if bits >= 65536:
+                bits |= protocol.U_EXTEND1
+            if bits >= 16777216:
+                bits |= protocol.U_EXTEND2
 
         if e >= 256:
             bits |= protocol.U_LONGENTITY
@@ -475,91 +525,100 @@ def SV_WriteEntitiesToClient(clent: progs.edict_t, msg: common.sizebuf_s): # not
         if bits >= 256:
             bits |= protocol.U_MOREBITS
 
+        # write the message
         common.MSG_WriteByte(msg, bits | protocol.U_SIGNAL)
 
         if bits & protocol.U_MOREBITS:
             common.MSG_WriteByte(msg, bits >> 8)
 
-        if (bits & protocol.U_EXTEND1):
-            MSG_WriteByte(msg, bits>>16)
-        if (bits & protocol.U_EXTEND2):
-            MSG_WriteByte(msg, bits>>24)
-        #johnfitz
+        # johnfitz -- PROTOCOL_FITZQUAKE
+        if bits & protocol.U_EXTEND1:
+            common.MSG_WriteByte(msg, bits >> 16)
+        if bits & protocol.U_EXTEND2:
+            common.MSG_WriteByte(msg, bits >> 24)
 
-        if (bits & protocol.U_LONGENTITY):
-            MSG_WriteShort (msg,e)
+        if bits & protocol.U_LONGENTITY:
+            common.MSG_WriteShort(msg, e)
         else:
-            MSG_WriteByte (msg,e)
+            common.MSG_WriteByte(msg, e)
 
-        if (bits & protocol.U_MODEL):
-            MSG_WriteByte (msg, ent.v.modelindex)
-        if (bits & protocol.U_FRAME):
-            MSG_WriteByte (msg, ent.v.frame)
-        if (bits & protocol.U_COLORMAP):
-            MSG_WriteByte (msg, ent.v.colormap)
-        if (bits & protocol.U_SKIN):
-            MSG_WriteByte (msg, ent.v.skin)
-        if (bits & protocol.U_EFFECTS):
-            MSG_WriteByte (msg, int(ent.v.effects & pr_effects_mask))
-        if (bits & protocol.U_ORIGIN1):
-            MSG_WriteCoord (msg, ent.v.origin[0], sv.protocolflags)
-        if (bits & protocol.U_ANGLE1):
-            MSG_WriteAngle(msg, ent.v.angles[0], sv.protocolflags)
-        if (bits & protocol.U_ORIGIN2):
-            MSG_WriteCoord (msg, ent.v.origin[1], sv.protocolflags)
-        if (bits & protocol.U_ANGLE2):
-            MSG_WriteAngle(msg, ent.v.angles[1], sv.protocolflags)
-        if (bits & protocol.U_ORIGIN3):
-            MSG_WriteCoord (msg, ent.v.origin[2], sv.protocolflags)
-        if (bits & protocol.U_ANGLE3):
-            MSG_WriteAngle(msg, ent.v.angles[2], sv.protocolflags)
+        if bits & protocol.U_MODEL:
+            common.MSG_WriteByte(msg, int(ent.v.modelindex))
+        if bits & protocol.U_FRAME:
+            common.MSG_WriteByte(msg, int(ent.v.frame))
+        if bits & protocol.U_COLORMAP:
+            common.MSG_WriteByte(msg, int(ent.v.colormap))
+        if bits & protocol.U_SKIN:
+            common.MSG_WriteByte(msg, int(ent.v.skin))
+        if bits & protocol.U_EFFECTS:
+            common.MSG_WriteByte(msg, int(ent.v.effects) & effects_mask)
+        if bits & protocol.U_ORIGIN1:
+            common.MSG_WriteCoord(msg, ent.v.origin[0], sv.protocolflags)
+        if bits & protocol.U_ANGLE1:
+            common.MSG_WriteAngle(msg, ent.v.angles[0], sv.protocolflags)
+        if bits & protocol.U_ORIGIN2:
+            common.MSG_WriteCoord(msg, ent.v.origin[1], sv.protocolflags)
+        if bits & protocol.U_ANGLE2:
+            common.MSG_WriteAngle(msg, ent.v.angles[1], sv.protocolflags)
+        if bits & protocol.U_ORIGIN3:
+            common.MSG_WriteCoord(msg, ent.v.origin[2], sv.protocolflags)
+        if bits & protocol.U_ANGLE3:
+            common.MSG_WriteAngle(msg, ent.v.angles[2], sv.protocolflags)
 
-        #johnfitz -- PROTOCOL_FITZQUAKE
-        if (bits & protocol.U_ALPHA):
-            MSG_WriteByte(msg, ent.alpha)
-        if (bits & protocol.U_SCALE):
-            MSG_WriteByte(msg, ent.scale)
-        if (bits & protocol.U_FRAME2):
-            MSG_WriteByte(msg, int(ent.v.frame >> 8))
-        if (bits & protocol.U_MODEL2):
-            MSG_WriteByte(msg, int(ent.v.modelindex >> 8))
-        if (bits & protocol.U_LERPFINISH):
-            MSG_WriteByte(msg, (byte)(Q_rint((ent.v.nextthink-sv.time)*255)))
+        # johnfitz -- PROTOCOL_FITZQUAKE
+        if bits & protocol.U_ALPHA:
+            common.MSG_WriteByte(msg, int(ent.alpha))
+        if bits & protocol.U_SCALE:
+            common.MSG_WriteByte(msg, int(ent.scale))
+        if bits & protocol.U_FRAME2:
+            common.MSG_WriteByte(msg, int(ent.v.frame) >> 8)
+        if bits & protocol.U_MODEL2:
+            common.MSG_WriteByte(msg, int(ent.v.modelindex) >> 8)
+        if bits & protocol.U_LERPFINISH:
+            common.MSG_WriteByte(msg, int((ent.v.nextthink - sv.time) * 255 + 0.5))
 
-        ent = progs.NEXT_EDICT(ent)
-
-# stats:
-    if msg.cursize > 1024 and host.dev_peakstats.packetsize <= 1024:
-        console.Con_DPrintf('%i byhte packet exceeds standard limit of 1024 (max = %d),\n' % (msg.cursize, msg.maxsize))
+    # stats
+    try:
+        if msg.cursize > 1024 and host.dev_peakstats.packetsize <= 1024:
+            console.Con_DPrintf(f'{msg.cursize} byte packet exceeds standard limit of 1024.\n')
         host.dev_stats.packetsize = msg.cursize
         host.dev_peakstats.packetsize = max(msg.cursize, host.dev_peakstats.packetsize)
+    except AttributeError:
+        pass
 
 
 def SV_CleanupEnts():
-    ent: progs.edict_t = progs.NEXT_EDICT(sv.edicts)
+    sv = sv_main.sv
     for e in range(1, sv.num_edicts):
-        ent.v.effects = ent.v.effects & ~server.EF_MUZZLEFLASH
-        ent = progs.NEXT_EDICT(ent)
+        ent = sv.edicts[e]
+        ent.v.effects = float(int(ent.v.effects) & ~server.EF_MUZZLEFLASH)
 
 
 def SV_WriteClientdataToMessage(ent: progs.edict_t, msg: common.sizebuf_s):
-    other: progs.edict_t = None
-    val: progs.eval_t = None
+    sv = sv_main.sv
 
+    # send a damage message
     if ent.v.dmg_take or ent.v.dmg_save:
-        other = progs.PROG_TO_EDICT(ent.v.dmg_inflictor)
+        other = pr_edict.PROG_TO_EDICT(ent.v.dmg_inflictor)
         common.MSG_WriteByte(msg, protocol.svc_damage)
-        common.MSG_WriteByte(msg, ent.v.dmg_save)
-        common.MSG_WriteByte(msg, ent.v.dmg_take)
+        common.MSG_WriteByte(msg, int(ent.v.dmg_save))
+        common.MSG_WriteByte(msg, int(ent.v.dmg_take))
 
         for i in range(3):
-            common.MSG_WriteCoord(msg, other.v.origin[i]+ 0.5*(other.v.mins[i] + other.v.maxs[i]), sv.protocolflags )
+            common.MSG_WriteCoord(msg, other.v.origin[i] + 0.5 * (other.v.mins[i] + other.v.maxs[i]), sv.protocolflags)
 
         ent.v.dmg_take = 0
         ent.v.dmg_save = 0
 
-    SV_SetIdealPitch()
+    # how much to look up / down ideally (lives in sv_user.py in the C source)
+    try:
+        import sv_user
+    except ImportError:
+        sv_user = None
+    if sv_user is not None and hasattr(sv_user, 'SV_SetIdealPitch'):
+        sv_user.SV_SetIdealPitch()
 
+    # a fixangle might get lost in a dropped packet. Oh well.
     if ent.v.fixangle:
         common.MSG_WriteByte(msg, protocol.svc_setangle)
         for i in range(3):
@@ -574,12 +633,12 @@ def SV_WriteClientdataToMessage(ent: progs.edict_t, msg: common.sizebuf_s):
     if ent.v.idealpitch:
         bits |= protocol.SU_IDEALPITCH
 
+    # stuff the sigil bits into the high bits of items for sbar, or else mix in items2
     val = pr_edict.GetEdictFieldValue(ent, 'items2')
-
     if val:
-        items = int(ent.v.items) | int(val._float << 23)
+        items = int(ent.v.items) | (int(val) << 23)
     else:
-        items = int(ent.v.items) | int(pr_edict.pr_global_struct.serverflags << 28)
+        items = int(ent.v.items) | (int(pr_edict.pr_global_struct.serverflags) << 28)
 
     bits |= protocol.SU_ITEMS
 
@@ -591,9 +650,9 @@ def SV_WriteClientdataToMessage(ent: progs.edict_t, msg: common.sizebuf_s):
 
     for i in range(3):
         if ent.v.punchangle[i]:
-            bits |= ( protocol.SU_PUNCH1 << i )
+            bits |= protocol.SU_PUNCH1 << i
         if ent.v.velocity[i]:
-            bits |= ( protocol.SU_VELOCITY1 << i )
+            bits |= protocol.SU_VELOCITY1 << i
 
     if ent.v.weaponframe:
         bits |= protocol.SU_WEAPONFRAME
@@ -603,8 +662,11 @@ def SV_WriteClientdataToMessage(ent: progs.edict_t, msg: common.sizebuf_s):
 
     bits |= protocol.SU_WEAPON
 
+    weaponmodel_index = SV_ModelIndex(pr_edict.PR_GetString(ent.v.weaponmodel))
+
+    # johnfitz -- PROTOCOL_FITZQUAKE
     if sv.protocol != protocol.PROTOCOL_NETQUAKE:
-        if bits & protocol.SU_WEAPON and SV_ModelIndex(PR_GetString(ent.v.weaponmodel)) & 0xFF00:
+        if bits & protocol.SU_WEAPON and weaponmodel_index & 0xFF00:
             bits |= protocol.SU_WEAPON2
         if int(ent.v.armorvalue) & 0xFF00:
             bits |= protocol.SU_ARMOR2
@@ -621,74 +683,77 @@ def SV_WriteClientdataToMessage(ent: progs.edict_t, msg: common.sizebuf_s):
         if bits & protocol.SU_WEAPONFRAME and int(ent.v.weaponframe) & 0xFF00:
             bits |= protocol.SU_WEAPONFRAME2
         if bits & protocol.SU_WEAPON and ent.alpha != protocol.ENTALPHA_DEFAULT:
-            bits |= protocol.SU_WEAPONALPHA
+            bits |= protocol.SU_WEAPONALPHA  # for now, weaponalpha = client entity alpha
         if bits >= 65536:
             bits |= protocol.SU_EXTEND1
         if bits >= 16777216:
             bits |= protocol.SU_EXTEND2
 
+    # send the data
     common.MSG_WriteByte(msg, protocol.svc_clientdata)
     common.MSG_WriteShort(msg, bits)
 
     if bits & protocol.SU_EXTEND1:
         common.MSG_WriteByte(msg, bits >> 16)
     if bits & protocol.SU_EXTEND2:
-        common.MSG_WriteByte(msg, bits >> 24 )
+        common.MSG_WriteByte(msg, bits >> 24)
 
     if bits & protocol.SU_VIEWHEIGHT:
-        common.MSG_WriteChar(msg, ent.v.view_ofs[2])
+        common.MSG_WriteChar(msg, int(ent.v.view_ofs[2]))
 
     if bits & protocol.SU_IDEALPITCH:
-        common.MSG_WriteChar(msg, ent.v.idealpitch)
+        common.MSG_WriteChar(msg, int(ent.v.idealpitch))
 
     for i in range(3):
-        if bits & ( protocol.SU_PUNCH1 << 1):
-            common.MSG_WriteChar(msg, ent.v.punchangle[i])
-        if bits & ( protocol.SU_VELOCITY1 << 1 ):
-            common.MSG_WriteChar(msg, ent.v.velocity[i] / 16)
+        if bits & (protocol.SU_PUNCH1 << i):   # (was << 1 for every i)
+            common.MSG_WriteChar(msg, int(ent.v.punchangle[i]))
+        if bits & (protocol.SU_VELOCITY1 << i):
+            common.MSG_WriteChar(msg, int(ent.v.velocity[i] / 16))
 
+    # [always sent] if bits & SU_ITEMS
     common.MSG_WriteLong(msg, items)
 
     if bits & protocol.SU_WEAPONFRAME:
-        common.MSG_WriteByte(msg, ent.v.weaponframe)
+        common.MSG_WriteByte(msg, int(ent.v.weaponframe))
     if bits & protocol.SU_ARMOR:
-        common.MSG_WriteByte(msg, ent.v.armorvalue)
+        common.MSG_WriteByte(msg, int(ent.v.armorvalue))
     if bits & protocol.SU_WEAPON:
-        common.MSG_WriteByte (msg, SV_ModelIndex(PR_GetString(ent.v.weaponmodel)))
+        common.MSG_WriteByte(msg, weaponmodel_index)
 
-    MSG_WriteShort (msg, ent.v.health)
-    MSG_WriteByte (msg, ent.v.currentammo)
-    MSG_WriteByte (msg, ent.v.ammo_shells)
-    MSG_WriteByte (msg, ent.v.ammo_nails)
-    MSG_WriteByte (msg, ent.v.ammo_rockets)
-    MSG_WriteByte (msg, ent.v.ammo_cells)
+    common.MSG_WriteShort(msg, int(ent.v.health))
+    common.MSG_WriteByte(msg, int(ent.v.currentammo))
+    common.MSG_WriteByte(msg, int(ent.v.ammo_shells))
+    common.MSG_WriteByte(msg, int(ent.v.ammo_nails))
+    common.MSG_WriteByte(msg, int(ent.v.ammo_rockets))
+    common.MSG_WriteByte(msg, int(ent.v.ammo_cells))
 
     if common.standard_quake:
-        common.MSG_WriteByte(msg, ent.v.weapon)
+        common.MSG_WriteByte(msg, int(ent.v.weapon))
     else:
         for i in range(32):
-            if int(ent.v.weapon) & ( 1 << i ):
-                common.MSG_ReadByte(msg, i)
+            if int(ent.v.weapon) & (1 << i):
+                common.MSG_WriteByte(msg, i)   # (was MSG_ReadByte)
                 break
 
+    # johnfitz -- PROTOCOL_FITZQUAKE
     if bits & protocol.SU_WEAPON2:
-        common.MSG_WriteByte (msg, SV_ModelIndex(PR_GetString(ent.v.weaponmodel)) >> 8)
+        common.MSG_WriteByte(msg, weaponmodel_index >> 8)
     if bits & protocol.SU_ARMOR2:
-        common.MSG_WriteByte (msg, int(ent.v.armorvalue) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.armorvalue) >> 8)
     if bits & protocol.SU_AMMO2:
-        common.MSG_WriteByte (msg, int(ent.v.currentammo) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.currentammo) >> 8)
     if bits & protocol.SU_SHELLS2:
-        common.MSG_WriteByte (msg, int(ent.v.ammo_shells) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.ammo_shells) >> 8)
     if bits & protocol.SU_NAILS2:
-        common.MSG_WriteByte (msg, int(ent.v.ammo_nails) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.ammo_nails) >> 8)
     if bits & protocol.SU_ROCKETS2:
-        common.MSG_WriteByte (msg, int(ent.v.ammo_rockets) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.ammo_rockets) >> 8)
     if bits & protocol.SU_CELLS2:
-        common.MSG_WriteByte (msg, int(ent.v.ammo_cells) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.ammo_cells) >> 8)
     if bits & protocol.SU_WEAPONFRAME2:
-        common.MSG_WriteByte (msg, int(ent.v.weaponframe) >> 8)
+        common.MSG_WriteByte(msg, int(ent.v.weaponframe) >> 8)
     if bits & protocol.SU_WEAPONALPHA:
-        common.MSG_WriteByte (msg, ent.alpha)
+        common.MSG_WriteByte(msg, int(ent.alpha))
 
 
 def SV_SendClientDatagram(client: server.client_t) -> bool:
@@ -719,20 +784,20 @@ def SV_SendClientDatagram(client: server.client_t) -> bool:
     return True
 
 def SV_UpdateToReliableMessages():
-    client: server.client_t = None
-
-    for i in range (svs.maxclients):
+    # check for changes to be sent over the reliable streams to all clients
+    for i in range(svs.maxclients):
         host.host_client = svs.clients[i]
-        if host.host_client.old_frags != host.host_client.v.frags:
-            for j in range (svs.maxclients):
+        frags = int(host.host_client.edict.v.frags)   # client_t has no .v
+        if host.host_client.old_frags != frags:
+            for j in range(svs.maxclients):
                 client = svs.clients[j]
                 if not client.active:
                     continue
                 common.MSG_WriteByte(client.message, protocol.svc_updatefrags)
                 common.MSG_WriteByte(client.message, i)
-                common.MSG_WriteShort(client.message, host.host_client.edict.v.frags)
+                common.MSG_WriteShort(client.message, frags)
 
-            host.host_client.old_frags = host.host_client.edict.v.frags
+            host.host_client.old_frags = frags
 
     for j in range(svs.maxclients):
         client = svs.clients[j]
@@ -741,6 +806,7 @@ def SV_UpdateToReliableMessages():
         common.SZ_Write(client.message, sv.reliable_datagram.data, sv.reliable_datagram.cursize)
 
     common.SZ_Clear(sv.reliable_datagram)
+
 
 def SV_SendNop(client: server.client_t):
     msg: common.sizebuf_s = common.sizebuf_s()
@@ -753,7 +819,7 @@ def SV_SendNop(client: server.client_t):
     common.MSG_WriteChar(msg, protocol.svc_nop)
 
     if net_main.NET_SendUnreliableMessage(client.netconnection, msg) == -1:
-        host.SV_DropClient(true)
+        host.SV_DropClient(True)
     client.last_message = host.realtime
 
 
@@ -839,47 +905,58 @@ def SV_ReserveSignonSpace(numbytes: int):
 
 
 def SV_ModelIndex(name: str) -> int:
-    if not name or name == '':
+    if not name:
         return 0
 
-    for i in range(quakedef.MAX_MODELS):
+    for i in range(1, quakedef.MAX_MODELS):
+        # Stop searching at the first unallocated slot
         if not sv.model_precache[i]:
             break
+        # Match found
         if sv.model_precache[i] == name:
             return i
-    if i == quakedef.MAX_MODELS or not sv.model_precache[i]:
-        sys_sdl_unix.Sys_Error('SV_ModelIndex-: model %s not precached\n' % name)
-    return i
+
+    # If the loop broke or hit MAX_MODELS without returning, it's an error
+    sys_sdl_unix.Sys_Error(f'SV_ModelIndex-: model {name} not precached\n')
+    return 0
 
 def SV_CreateBaseline():
-    svent: progs.edict_t = None
-
     for entnum in range(sv.num_edicts):
         svent = pr_edict.EDICT_NUM(entnum)
         if svent.free:
             continue
-        if entnum > svs.maxclients and not svent.v.modelindex:
+
+        # Skip static entities outside client slots that have no model assigned
+        if entnum > svs.maxclients and not int(svent.v.modelindex):
             continue
 
         mathlib.VectorCopy(svent.v.origin, svent.baseline.origin)
         mathlib.VectorCopy(svent.v.angles, svent.baseline.angles)
-        svent.baseline.frame = svent.v.frame
-        svent.baseline.skin = svent.v.skin
+        svent.baseline.frame = int(svent.v.frame)
+        svent.baseline.skin = int(svent.v.skin)
 
-        if entnum > 0 and entnumn <= svs.maxclients:
+        if 0 < entnum <= svs.maxclients:
             svent.baseline.colormap = entnum
             svent.baseline.modelindex = SV_ModelIndex('progs/player.mdl')
             svent.baseline.alpha = protocol.ENTALPHA_DEFAULT
             svent.baseline.scale = protocol.ENTSCALE_DEFAULT
         else:
             svent.baseline.colormap = 0
-            svent.baseline.modelindex = SV_ModelIndex(pr_edict.PR_GetString(svent.v.model))
-            svent.baseline.alpha = svent.alpha
+            # FIX 1: Copy svent.v.modelindex directly instead of re-indexing strings
+            svent.baseline.modelindex = int(svent.v.modelindex)
+
+            # FIX 3: Safely resolve alpha / scale fields
+            svent.baseline.alpha = protocol.ENTALPHA_DEFAULT
             svent.baseline.scale = protocol.ENTSCALE_DEFAULT
+
             if sv.protocol == protocol.PROTOCOL_RMQ:
-                val: progs.eval_t = pr_edict.GetEdictFieldValue(svent, 'scale')
-                if val:
-                    svent.baseline.scale = protocol.ENTSCALE_DECODE(val._float)
+                val_alpha = pr_edict.GetEdictFieldValue(svent, 'alpha')
+                if val_alpha:
+                    svent.baseline.alpha = int(val_alpha._float)
+
+                val_scale = pr_edict.GetEdictFieldValue(svent, 'scale')
+                if val_scale:
+                    svent.baseline.scale = protocol.ENTSCALE_DECODE(val_scale._float)
 
         bits = 0
         if sv.protocol == protocol.PROTOCOL_NETQUAKE:
@@ -889,7 +966,7 @@ def SV_CreateBaseline():
                 svent.baseline.frame = 0
 
             svent.baseline.alpha = protocol.ENTALPHA_DEFAULT
-            svent.baseline.scale =  protocol.ENTSCALE_DEFAULT
+            svent.baseline.scale = protocol.ENTSCALE_DEFAULT
         else:
             if svent.baseline.modelindex & 0xFF00:
                 bits |= protocol.B_LARGEMODEL
@@ -952,19 +1029,22 @@ def SV_SendReconnect():
         _cmd.Cmd_ExecuteString('reconnect\n', _cmd.cmd_source_t.src_command)
 
 def SV_SaveSpawnparms():
-    svs.serverflags = pr_edict.pr_global_struct.serverflags
+    gs = pr_edict.pr_global_struct
+    svs.serverflags = int(gs.serverflags)
 
     for i in range(svs.maxclients):
         host.host_client = svs.clients[i]
         if not host.host_client.active:
             continue
 
-        pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(host.host_client.edict)
-        pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.SetChangeParms)
+        # call the progs to get default spawn parms for the new client
+        gs.self = pr_edict.EDICT_TO_PROG(host.host_client.edict)
+        pr_exec.PR_ExecuteProgram(gs.SetChangeParms)
 
         for j in range(server.NUM_SPAWN_PARMS):
-            # note in original source, pr_global_struct.parm is parm1 to parm16
-            host.host_client.spawn_parms[j] = pr_edict.pr_global_struct.parm[j]
+            # parm1..parm16 are separate globals
+            host.host_client.spawn_parms[j] = getattr(gs, f'parm{j + 1}')
+
 
 def SV_SpawnServer2(mapname):
     global sv_active
@@ -1026,7 +1106,7 @@ def SV_SpawnServer(_server: str):
     max_edicts = cvar.Cvar_GetCvar('max_edicts').value
 
     sv.max_edicts = common.CLAMP(quakedef.MIN_EDICTS, int(max_edicts), quakedef.MAX_EDICTS)
-    sv.edicts = [None for _ in range(sv.max_edicts)] # <---
+    sv.edicts = [progs.edict_t() for _ in range(sv.max_edicts)] # <---
 
     sv.datagram.maxsize = len(sv.datagram_buf)
     sv.datagram.cursize = 0
@@ -1051,35 +1131,43 @@ def SV_SpawnServer(_server: str):
 
     sv.time = 1.0
 
+
     sv.name = _server
     sv.modelname = f'maps/{_server}.bsp'
-    sv.worldmodel = gl_model.Mod_ForName(sv.modelname, False)
+    sv.worldmodel = gl_model.Mod_ForName(sv.modelname, True)
     if not sv.worldmodel:
         console.Con_Printf('Couldnt spawn server %s\n' % sv.modelname)
         sv.active = False
         return
 
-    sv.models[1] = sv.worldmodel
-
     world.SV_ClearWorld()
 
-    sv.sound_precache = ['', '', '', '', '', '', '', '']
-    sv.model_precache = ['', '', '', '', '', '', '', '']
+    # Fixed array bounds: sound uses MAX_SOUNDS, models use MAX_MODELS
+    sv.sound_precache = [''] * quakedef.MAX_SOUNDS
+    sv.model_precache = [''] * quakedef.MAX_MODELS
+    sv.models = [None] * quakedef.MAX_MODELS
+
+    # Assign worldmodel struct to models[1], and string path to model_precache[1]
+    sv.models[1] = sv.worldmodel
     sv.model_precache[1] = sv.modelname
 
+    # Precache inline BSP brush submodels (*1, *2, etc. for moving doors/platforms)
     for i in range(1, sv.worldmodel.numsubmodels):
-        sv.model_precache[i + 1] = localmodels[i]
-        sv.models[i + 1] = gl_model.Mod_ForName(localmodels[i], False)
+        local_name = f"*{i}"
+        sv.model_precache[i + 1] = local_name
+        sv.models[i + 1] = gl_model.Mod_ForName(local_name, False)
+
 
     ent = pr_edict.EDICT_NUM(0)
-    # ent.v = LEFT OFF HERE sv_main:1575
     ent.free = False
-    ent.v.model = pr_edict.PR_SetEngingString(sv.worldmodel.name)
+    ent.v.model = pr_edict.PR_SetEngineString(sv.worldmodel.name)
     ent.v.modelindex = 1
     ent.v.solid = server.SOLID_BSP
     ent.v.movetype = server.MOVETYPE_PUSH
 
-    if coop.value:
+    coop = cvar.Cvar_GetCvar('coop').value
+    deathmatch = cvar.Cvar_GetCvar('deathmatch').value
+    if coop:
         pr_edict.pr_global_struct.coop = coop
     else:
         pr_edict.pr_global_struct.deathmatch = deathmatch
@@ -1087,6 +1175,8 @@ def SV_SpawnServer(_server: str):
     pr_edict.pr_global_struct.mapname = pr_edict.PR_SetEngineString(sv.name)
 
     pr_edict.pr_global_struct.serverflags = svs.serverflags
+
+    pr_edict.ED_LoadFromFile(sv.worldmodel.entities)
 
     sv.active = True
 
@@ -1104,17 +1194,17 @@ def SV_SpawnServer(_server: str):
         signonsize += sv.signon_buffers[i].cursize
 
     if signonsize > 64000 - 2:
-        console.Con_Warning("%i byte signon buffer exceeds QS limit of 63998", signonsize)
+        console.Con_Warning(f"{signonsize} byte signon buffer exceeds QS limit of 63998\n")
     elif signonsize > 8000 - 2:
-        console.Con_Warning("%i byte signon buffer exceeds QS limit of 7998", signonsize)
+        console.Con_Warning(f"{signonsize} byte signon buffer exceeds QS limit of 7998\n")
 
-    host.host_client = svs.clients
-
-    for host.host_client in svs.clients:
+    # send serverinfo to all connected clients
+    for i in range(svs.maxclients):
+        host.host_client = svs.clients[i]
         if host.host_client.active:
             SV_SendServerInfo(host.host_client)
 
-    console.Con_DPrintf('Server spawned')
+    console.Con_DPrintf('Server spawned.\n')
 
 
 

@@ -130,6 +130,7 @@ def IN_Init():
     IN_StartupJoystick()
 
 def IN_Activate():
+    global total_dx, total_dy
     if no_mouse:
         return
 
@@ -244,20 +245,20 @@ def IN_ApplyDeadzone(axis: joyaxis_t, deadzone: float, outer_threshold: float) -
 
 def IN_KeyForControllerButton(button: sdl2.SDL_GameControllerButton) -> int:
     match button:
-        case sdl2.SDL_CONTROLLER_BUTTON_A: return keys.K_ABUTTON
-        case sdl2.SDL_CONTROLLER_BUTTON_B: return keys.K_BBUTTON
-        case sdl2.SDL_CONTROLLER_BUTTON_X: return keys.K_XBUTTON
-        case sdl2.SDL_CONTROLLER_BUTTON_Y: return keys.K_YBUTTON
-        case sdl2.SDL_CONTROLLER_BUTTON_BACK: return keys.K_TAB
-        case sdl2.SDL_CONTROLLER_BUTTON_START: return keys.K_ESCAPE
-        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSTICK: return keys.K_LTHUMB
-        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSTICK: return keys.K_RTHUMB
-        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return keys.K_LSHOULDER
-        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return keys.K_RSHOULDER
-        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_UP: return keys.K_UPARROW
-        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_DOWN: return keys.K_DOWNARROW
-        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_LEFT: return keys.K_LEFTARROW
-        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return keys.K_RIGHTARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_A: return keys.Key.K_ABUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_B: return keys.Key.K_BBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_X: return keys.Key.K_XBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_Y: return keys.Key.K_YBUTTON
+        case sdl2.SDL_CONTROLLER_BUTTON_BACK: return keys.Key.K_TAB
+        case sdl2.SDL_CONTROLLER_BUTTON_START: return keys.Key.K_ESCAPE
+        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSTICK: return keys.Key.K_LTHUMB
+        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSTICK: return keys.Key.K_RTHUMB
+        case sdl2.SDL_CONTROLLER_BUTTON_LEFTSHOULDER: return keys.Key.K_LSHOULDER
+        case sdl2.SDL_CONTROLLER_BUTTON_RIGHTSHOULDER: return keys.Key.K_RSHOULDER
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_UP: return keys.Key.K_UPARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_DOWN: return keys.Key.K_DOWNARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_LEFT: return keys.Key.K_LEFTARROW
+        case sdl2.SDL_CONTROLLER_BUTTON_DPAD_RIGHT: return keys.Key.K_RIGHTARROW
         case _: return 0
 
 
@@ -287,7 +288,7 @@ def IN_SendKeyEvents():
     global joy_active_instanceid
     global windowhasfocus
 
-    sdl2.SDL_StartTextInput()
+    IN_UpdateInputMode()
     #in_debugkeys = int(cvar.Cvar_GetCvar('in_debugkeys').value)
 
     event : sdl2.SDL_Event = sdl2.SDL_Event()
@@ -303,12 +304,9 @@ def IN_SendKeyEvents():
                     snd_dma.S_BlockSound()
 
             case sdl2.SDL_TEXTINPUT:
-                if keys.key_dest == keys.keydest_t.key_console:
-                    text = event.text.text.decode('utf-8').split('\x00')[0]
-                    # Don't type the character if it's the console toggle
-                    if text not in ('`', '~'):
-                        for char in text:
-                            keys.Key_Console(ord(char))
+                text = event.text.text.decode('utf-8', errors='replace').split('\x00')[0]
+                for char in text:
+                    keys.Char_Event(ord(char))
 
 
             case sdl2.SDL_KEYDOWN | sdl2.SDL_KEYUP:
@@ -325,11 +323,11 @@ def IN_SendKeyEvents():
 
             case sdl2.SDL_MOUSEWHEEL:
                 if event.wheel.y > 0:
-                    keys.Key_Event(keys.K_MWHEELUP, True)
-                    keys.Key_Event(keys.K_MWHEELUP, False)
+                    keys.Key_Event(keys.Key.K_MWHEELUP, True)
+                    keys.Key_Event(keys.Key.K_MWHEELUP, False)
                 elif event.wheel.y < 0:
-                    keys.Key_Event(keys.K_MWHEELDOWN, True)
-                    keys.Key_Event(keys.K_MWHEELDOWN, False)
+                    keys.Key_Event(keys.Key.K_MWHEELDOWN, True)
+                    keys.Key_Event(keys.Key.K_MWHEELDOWN, False)
 
             case sdl2.SDL_MOUSEMOTION:
                 IN_MouseMotion(event.motion.xrel, event.motion.yrel)
@@ -362,11 +360,11 @@ def IN_SendKeyEvents():
 def IN_SDL2_ScancodeToQuakeKey(scancode):
 
     match scancode:
-        case sdl2.SDL_SCANCODE_TAB:     return keys.K_TAB
-        case sdl2.SDL_SCANCODE_RETURN:  return keys.K_ENTER
-        case sdl2.SDL_SCANCODE_RETURN2: return keys.K_ENTER
-        case sdl2.SDL_SCANCODE_ESCAPE:  return keys.K_ESCAPE
-        case sdl2.SDL_SCANCODE_SPACE:   return keys.K_SPACE
+        case sdl2.SDL_SCANCODE_TAB:     return keys.Key.K_TAB
+        case sdl2.SDL_SCANCODE_RETURN:  return keys.Key.K_ENTER
+        case sdl2.SDL_SCANCODE_RETURN2: return keys.Key.K_ENTER
+        case sdl2.SDL_SCANCODE_ESCAPE:  return keys.Key.K_ESCAPE
+        case sdl2.SDL_SCANCODE_SPACE:   return keys.Key.K_SPACE
 
         case sdl2.SDL_SCANCODE_A: return 'a'
         case sdl2.SDL_SCANCODE_B: return 'b'
@@ -412,7 +410,7 @@ def IN_SDL2_ScancodeToQuakeKey(scancode):
         case sdl2.SDL_SCANCODE_RIGHTBRACKET: return ']'
         case sdl2.SDL_SCANCODE_BACKSLASH: return '\\'
         case sdl2.SDL_SCANCODE_NONUSHASH: return '#'
-        case sdl2.SDL_SCANCODE_SEMICOLON: return '';
+        case sdl2.SDL_SCANCODE_SEMICOLON: return ';'
         case sdl2.SDL_SCANCODE_APOSTROPHE: return '\''
         case sdl2.SDL_SCANCODE_GRAVE: return '`'
         case sdl2.SDL_SCANCODE_COMMA: return ','
@@ -420,60 +418,60 @@ def IN_SDL2_ScancodeToQuakeKey(scancode):
         case sdl2.SDL_SCANCODE_SLASH: return '/'
         case sdl2.SDL_SCANCODE_NONUSBACKSLASH: return '\\'
 
-        case sdl2.SDL_SCANCODE_BACKSPACE: return keys.K_BACKSPACE
-        case sdl2.SDL_SCANCODE_UP:        return keys.K_UPARROW
-        case sdl2.SDL_SCANCODE_DOWN:      return keys.K_DOWNARROW
-        case sdl2.SDL_SCANCODE_LEFT:      return keys.K_LEFTARROW
-        case sdl2.SDL_SCANCODE_RIGHT:     return keys.K_RIGHTARROW
+        case sdl2.SDL_SCANCODE_BACKSPACE: return keys.Key.K_BACKSPACE
+        case sdl2.SDL_SCANCODE_UP:        return keys.Key.K_UPARROW
+        case sdl2.SDL_SCANCODE_DOWN:      return keys.Key.K_DOWNARROW
+        case sdl2.SDL_SCANCODE_LEFT:      return keys.Key.K_LEFTARROW
+        case sdl2.SDL_SCANCODE_RIGHT:     return keys.Key.K_RIGHTARROW
 
-        case sdl2.SDL_SCANCODE_LALT: return keys.K_ALT
-        case sdl2.SDL_SCANCODE_RALT: return keys.K_ALT
-        case sdl2.SDL_SCANCODE_LCTRL: return keys.K_CTRL
-        case sdl2.SDL_SCANCODE_RCTRL: return keys.K_CTRL
-        case sdl2.SDL_SCANCODE_LSHIFT: return keys.K_SHIFT
-        case sdl2.SDL_SCANCODE_RSHIFT: return keys.K_SHIFT
+        case sdl2.SDL_SCANCODE_LALT: return keys.Key.K_ALT
+        case sdl2.SDL_SCANCODE_RALT: return keys.Key.K_ALT
+        case sdl2.SDL_SCANCODE_LCTRL: return keys.Key.K_CTRL
+        case sdl2.SDL_SCANCODE_RCTRL: return keys.Key.K_CTRL
+        case sdl2.SDL_SCANCODE_LSHIFT: return keys.Key.K_SHIFT
+        case sdl2.SDL_SCANCODE_RSHIFT: return keys.Key.K_SHIFT
 
-        case sdl2.SDL_SCANCODE_F1: return  keys.K_F1
-        case sdl2.SDL_SCANCODE_F2: return  keys.K_F2
-        case sdl2.SDL_SCANCODE_F3: return  keys.K_F3
-        case sdl2.SDL_SCANCODE_F4: return  keys.K_F4
-        case sdl2.SDL_SCANCODE_F5: return  keys.K_F5
-        case sdl2.SDL_SCANCODE_F6: return  keys.K_F6
-        case sdl2.SDL_SCANCODE_F7: return  keys.K_F7
-        case sdl2.SDL_SCANCODE_F8: return  keys.K_F8
-        case sdl2.SDL_SCANCODE_F9: return  keys.K_F9
-        case sdl2.SDL_SCANCODE_F10: return keys.K_F10
-        case sdl2.SDL_SCANCODE_F11: return keys.K_F11
-        case sdl2.SDL_SCANCODE_F12: return keys.K_F12
-        case sdl2.SDL_SCANCODE_INSERT: return keys.K_INS
-        case sdl2.SDL_SCANCODE_DELETE: return keys.K_DEL
-        case sdl2.SDL_SCANCODE_PAGEDOWN: return keys.K_PGDN
-        case sdl2.SDL_SCANCODE_PAGEUP: return keys.K_PGUP
-        case sdl2.SDL_SCANCODE_HOME: return keys.K_HOME
-        case sdl2.SDL_SCANCODE_END: return keys.K_END
+        case sdl2.SDL_SCANCODE_F1: return  keys.Key.K_F1
+        case sdl2.SDL_SCANCODE_F2: return  keys.Key.K_F2
+        case sdl2.SDL_SCANCODE_F3: return  keys.Key.K_F3
+        case sdl2.SDL_SCANCODE_F4: return  keys.Key.K_F4
+        case sdl2.SDL_SCANCODE_F5: return  keys.Key.K_F5
+        case sdl2.SDL_SCANCODE_F6: return  keys.Key.K_F6
+        case sdl2.SDL_SCANCODE_F7: return  keys.Key.K_F7
+        case sdl2.SDL_SCANCODE_F8: return  keys.Key.K_F8
+        case sdl2.SDL_SCANCODE_F9: return  keys.Key.K_F9
+        case sdl2.SDL_SCANCODE_F10: return keys.Key.K_F10
+        case sdl2.SDL_SCANCODE_F11: return keys.Key.K_F11
+        case sdl2.SDL_SCANCODE_F12: return keys.Key.K_F12
+        case sdl2.SDL_SCANCODE_INSERT: return keys.Key.K_INS
+        case sdl2.SDL_SCANCODE_DELETE: return keys.Key.K_DEL
+        case sdl2.SDL_SCANCODE_PAGEDOWN: return keys.Key.K_PGDN
+        case sdl2.SDL_SCANCODE_PAGEUP: return keys.Key.K_PGUP
+        case sdl2.SDL_SCANCODE_HOME: return keys.Key.K_HOME
+        case sdl2.SDL_SCANCODE_END: return keys.Key.K_END
 
-        case sdl2.SDL_SCANCODE_NUMLOCKCLEAR: return keys.K_KP_NUMLOCK
-        case sdl2.SDL_SCANCODE_KP_DIVIDE: return keys.K_KP_SLASH
-        case sdl2.SDL_SCANCODE_KP_MULTIPLY: return keys.K_KP_STAR
-        case sdl2.SDL_SCANCODE_KP_MINUS: return keys.K_KP_MINUS
-        case sdl2.SDL_SCANCODE_KP_7: return keys.K_KP_HOME
-        case sdl2.SDL_SCANCODE_KP_8: return keys.K_KP_UPARROW
-        case sdl2.SDL_SCANCODE_KP_9: return keys.K_KP_PGUP
-        case sdl2.SDL_SCANCODE_KP_PLUS: return keys.K_KP_PLUS
-        case sdl2.SDL_SCANCODE_KP_4: return keys.K_KP_LEFTARROW
-        case sdl2.SDL_SCANCODE_KP_5: return keys.K_KP_5
-        case sdl2.SDL_SCANCODE_KP_6: return keys.K_KP_RIGHTARROW
-        case sdl2.SDL_SCANCODE_KP_1: return keys.K_KP_END
-        case sdl2.SDL_SCANCODE_KP_2: return keys.K_KP_DOWNARROW
-        case sdl2.SDL_SCANCODE_KP_3: return keys.K_KP_PGDN
-        case sdl2.SDL_SCANCODE_KP_ENTER: return keys.K_KP_ENTER
-        case sdl2.SDL_SCANCODE_KP_0: return keys.K_KP_INS
-        case sdl2.SDL_SCANCODE_KP_PERIOD: return keys.K_KP_DEL
+        case sdl2.SDL_SCANCODE_NUMLOCKCLEAR: return keys.Key.K_KP_NUMLOCK
+        case sdl2.SDL_SCANCODE_KP_DIVIDE: return keys.Key.K_KP_SLASH
+        case sdl2.SDL_SCANCODE_KP_MULTIPLY: return keys.Key.K_KP_STAR
+        case sdl2.SDL_SCANCODE_KP_MINUS: return keys.Key.K_KP_MINUS
+        case sdl2.SDL_SCANCODE_KP_7: return keys.Key.K_KP_HOME
+        case sdl2.SDL_SCANCODE_KP_8: return keys.Key.K_KP_UPARROW
+        case sdl2.SDL_SCANCODE_KP_9: return keys.Key.K_KP_PGUP
+        case sdl2.SDL_SCANCODE_KP_PLUS: return keys.Key.K_KP_PLUS
+        case sdl2.SDL_SCANCODE_KP_4: return keys.Key.K_KP_LEFTARROW
+        case sdl2.SDL_SCANCODE_KP_5: return keys.Key.K_KP_5
+        case sdl2.SDL_SCANCODE_KP_6: return keys.Key.K_KP_RIGHTARROW
+        case sdl2.SDL_SCANCODE_KP_1: return keys.Key.K_KP_END
+        case sdl2.SDL_SCANCODE_KP_2: return keys.Key.K_KP_DOWNARROW
+        case sdl2.SDL_SCANCODE_KP_3: return keys.Key.K_KP_PGDN
+        case sdl2.SDL_SCANCODE_KP_ENTER: return keys.Key.K_KP_ENTER
+        case sdl2.SDL_SCANCODE_KP_0: return keys.Key.K_KP_INS
+        case sdl2.SDL_SCANCODE_KP_PERIOD: return keys.Key.K_KP_DEL
 
-        case sdl2.SDL_SCANCODE_LGUI: return keys.K_COMMAND
-        case sdl2.SDL_SCANCODE_RGUI: return keys.K_COMMAND
+        case sdl2.SDL_SCANCODE_LGUI: return keys.Key.K_COMMAND
+        case sdl2.SDL_SCANCODE_RGUI: return keys.Key.K_COMMAND
 
-        case sdl2.SDL_SCANCODE_PAUSE: return keys.K_PAUSE
+        case sdl2.SDL_SCANCODE_PAUSE: return keys.Key.K_PAUSE
 
         case _: return 0;
 
@@ -510,8 +508,8 @@ def IN_MouseMove(cmd: protocol.usercmd_t):
     m_yaw  = cvar.Cvar_GetCvar('m_yaw').value
     m_pitch = cvar.Cvar_GetCvar('m_pitch').value
     m_forward = cvar.Cvar_GetCvar('m_forward').value
-    cl_maxpitch = cvar.Cvar_GetCvar('cl_maxpitch')
-    cl_minpitch = cvar.Cvar_GetCvar('cl_minpitch')
+    cl_maxpitch = cvar.Cvar_GetCvar('cl_maxpitch').value
+    cl_minpitch = cvar.Cvar_GetCvar('cl_minpitch').value
 
     if ( cl_input.in_strafe.state & 1 ) or lookstrafe and ( cl_input.in_mlook.state & 1 ):
         cmd.sidemove += m_side * dmx
@@ -611,16 +609,16 @@ def IN_Commands():
         joy_buttontimer[i] = IN_JoyKeyEvent(oldstate, newstate, IN_KeyForControllerButton(i), joy_buttontimer[i])
 
     for i in range(sdl2.SDL_CONTROLLER_AXIS_MAX):
-        newaxisstate.axisvalue[i] = sdl2.SDL_GameControllerGetAxis(joy_active_controller, i / 32768.0)
+        newaxisstate.axisvalue[i] = sdl2.SDL_GameControllerGetAxis(joy_active_controller, i) / 32768.0
 
     if keys.key_dest != keys.keydest_t.key_game:
-        joy_emulatedkeytimer[0] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, keys.K_LEFTARROW, joy_emulatedkeytimer[0])
-        joy_emulatedkeytimer[1] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold, keys.K_RIGHTARROW, joy_emulatedkeytimer[1])
-        joy_emulatedkeytimer[2] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, keys.K_UPARROW,   joy_emulatedkeytimer[2])
-        joy_emulatedkeytimer[3] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold, keys.K_DOWNARROW,  joy_emulatedkeytimer[3])
+        joy_emulatedkeytimer[0] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] < -stickthreshold, keys.Key.K_LEFTARROW, joy_emulatedkeytimer[0])
+        joy_emulatedkeytimer[1] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTX] > stickthreshold, keys.Key.K_RIGHTARROW, joy_emulatedkeytimer[1])
+        joy_emulatedkeytimer[2] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] < -stickthreshold, keys.Key.K_UPARROW,   joy_emulatedkeytimer[2])
+        joy_emulatedkeytimer[3] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_LEFTY] > stickthreshold, keys.Key.K_DOWNARROW,  joy_emulatedkeytimer[3])
 
-    joy_emulatedkeytimer[4] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  keys.K_LTRIGGER, joy_emulatedkeytimer[4])
-    joy_emulatedkeytimer[5] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold,  keys.K_RTRIGGER, joy_emulatedkeytimer[5])
+    joy_emulatedkeytimer[4] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERLEFT] > triggerthreshold,  keys.Key.K_LTRIGGER, joy_emulatedkeytimer[4])
+    joy_emulatedkeytimer[5] = IN_JoyKeyEvent(joy_axisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold, newaxisstate.axisvalue[sdl2.SDL_CONTROLLER_AXIS_TRIGGERRIGHT] > triggerthreshold,  keys.Key.K_RTRIGGER, joy_emulatedkeytimer[5])
 
     joy_axisstate = newaxisstate
 
@@ -675,7 +673,7 @@ def IN_JoyMove(cmd: protocol.usercmd_t):
     if ( cl_input.in_speed.state & 1 ) ^ ( cl_alwaysrun != 0.0 or cl_forwardspeed >= sv_maxspeed ):
         speed = sv_maxspeed
     elif cl_forwardspeed >= sv_maxspeed:
-        speed = min(sv_maxspeed, cl_forwardspeed/ cl_movespeedkey.value)
+        speed = min(sv_maxspeed, cl_forwardspeed / cl_movespeedkey)
     else:
         speed = cl_forwardspeed
 
@@ -687,13 +685,13 @@ def IN_JoyMove(cmd: protocol.usercmd_t):
     joy_invert = cvar.Cvar_GetCvar('joy_invert').value
 
     cl_main.cl.viewangles[quakedef.YAW] -= lookEased.x * joy_sensitivity_yaw * host.host_frametime
-    cl_main.cl.viewangles[quakedef.PITCH] -= lookEased.y * joy_sensitivity_pitch * host.host_frametime * -1.0 if joy_invert else 1.0
+    cl_main.cl.viewangles[quakedef.PITCH] -= lookEased.y * joy_sensitivity_pitch * host.host_frametime * (-1.0 if joy_invert else 1.0)
 
     if lookEased.x != 0 or lookEased.y != 0:
         view.V_StopPitchDrift()
 
-    cl_main.cl.viewangles[quakedef.PITCH] = min(cl_main.cl.viewangles[quakedef.PITCH], cl_main.cl_maxpitch.value)
-    cl_main.cl.viewangles[quakedef.PITCH] = max(cl_main.cl.viewangles[quakedef.PITCH], cl_main.cl_minpitch.value)
+    cl_main.cl.viewangles[quakedef.PITCH] = min(cl_main.cl.viewangles[quakedef.PITCH], cvar.Cvar_GetCvar('cl_maxpitch').value)
+    cl_main.cl.viewangles[quakedef.PITCH] = max(cl_main.cl.viewangles[quakedef.PITCH], cvar.Cvar_GetCvar('cl_minpitch').value)
 
 
 

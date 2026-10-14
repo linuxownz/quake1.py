@@ -3,12 +3,12 @@
 import random
 
 #import gl_refrag
-
 import _cmd
 import cl_demo
 import cl_main
 import common
 import console
+import cvar
 import gl_model
 import gl_rmisc
 import gl_screen
@@ -112,15 +112,16 @@ def CL_EntityNum(num: int) ->  render.entity_t:
     if num < 0:
         host.Host_Error(f'CL_EntityNum: {num} is an invalid number')
 
-    if num >= cl_main.cl.num_entities:  # noqa: SIM102
+    if num >= cl_main.cl.num_entities:
         if num >= cl_main.cl_max_edicts:
             host.Host_Error(f'CL_EntityNum: {num} is an invalid number')
 
-            while cl_main.cl.num_entities <= num:
-                cl_main.cl_entities[cl_main.cl.num_entities].colormap = gl_vidsdl._vid.colormap
-                cl_main.cl_entities[cl_main.cl.num_entities].lerpflags |= render.LERP_RESETMOVE | render.LERP_RESETANIM
-                cl_main.cl_entities[cl_main.cl.num_entities].baseline.scale = protocol.ENTSCALE_DEFAULT
-                cl_main.cl.num_entities += 1
+        while cl_main.cl.num_entities <= num:
+            e = cl_main.cl_entities[cl_main.cl.num_entities]
+            e.colormap = gl_vidsdl._vid.colormap
+            e.lerpflags |= render.LERP_RESETMOVE | render.LERP_RESETANIM
+            e.baseline.scale = protocol.ENTSCALE_DEFAULT
+            cl_main.cl.num_entities += 1
 
     return cl_main.cl_entities[num]
 
@@ -284,7 +285,7 @@ def CL_ParseServerInfo():
     if nummodels >=  256:
         console.Con_DWarning(f'{nummodels} models exceeds standard limit of 256 (max = {quakedef.MAX_MODELS})')
 
-    cl_main.cl.sound_precache = [ q_sound.sfx_s() for _ in range(quakedef.MAX_SOUNDS)]
+    cl_main.cl.sound_precache = [ q_sound.sfx_t() for _ in range(quakedef.MAX_SOUNDS)]
 
     for numsounds in range ( 1, quakedef.MAX_SOUNDS):
         string = common.MSG_ReadString()
@@ -493,7 +494,7 @@ def CL_ParseUpdate(bits: int):
 
         if model:
             if model.synctype == quakedef.synctype_t.ST_RAND:
-                ent.syncbase = random()
+                ent.syncbase = random.random()
             else:
                 ent.syncbase = 0.0
         else:
@@ -558,9 +559,15 @@ def CL_ParseClientdata():
             cl_main.cl.punchangle[i] = 0
 
         if bits & ( protocol.SU_VELOCITY1 << i):
-            cl_main.cl.mvelocity[0][i] = common.MSG_ReadChar * 16
+            cl_main.cl.mvelocity[0][i] = common.MSG_ReadChar() * 16
         else:
             cl_main.cl.mvelocity[0][i] = 0
+
+    # C: vec3_t v_punchangles[2] -- [0] = current, [1] = previous
+    _pv = getattr(view, 'v_punchangles', None)
+    if not (isinstance(_pv, list) and len(_pv) >= 2
+            and all(isinstance(x, list) and len(x) >= 3 for x in _pv)):
+        view.v_punchangles = [[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]
 
     if view.v_punchangles[0][0] != cl_main.cl.punchangle[0] or \
         view.v_punchangles[0][1] != cl_main.cl.punchangle[1] or \
@@ -574,7 +581,7 @@ def CL_ParseClientdata():
         sbar.Sbar_Changed()
 
         for j in range(32):
-            if ( i & ( i << j)) and not ( cl_main.cl.items & ( 1 << j)):
+            if ( i & ( 1 << j)) and not ( cl_main.cl.items & ( 1 << j)):
                 cl_main.cl.item_gettime[j] = cl_main.cl.time
         cl_main.cl.items = i
 
@@ -725,6 +732,7 @@ def CL_ParseStatic(version: int):
     mathlib.VectorCopy(ent.baseline.origin, ent.origin)
     mathlib.VectorCopy(ent.baseline.angles, ent.angles)
 
+    import gl_refrag
     gl_refrag.R_AddEfrags(ent)
 
 
@@ -813,7 +821,7 @@ def CL_ParseServerMessage():
                 _cmd.Cbuf_AddText(common.MSG_ReadString())
 
             case protocol.svc_damage:
-                V_ParseDamage()
+                view.V_ParseDamage()
 
             case protocol.svc_serverinfo:
                 CL_ParseServerInfo()
@@ -821,17 +829,17 @@ def CL_ParseServerMessage():
 
             case protocol.svc_setangle:
                 for i in range(3):
-                    cl_main.cl.viewangles[i] = MSG_ReadAngle(cl_main.cl.protocolflags)
+                    cl_main.cl.viewangles[i] = common.MSG_ReadAngle(cl_main.cl.protocolflags)
 
             case protocol.svc_setview:
-                cl_main.cl.viewentity = MSG_ReadShort()
+                cl_main.cl.viewentity = common.MSG_ReadShort()
 
             case protocol.svc_lightstyle:
-                i = MSG_ReadByte()
+                i = common.MSG_ReadByte()
                 if i >= quakedef.MAX_LIGHTSTYLES:
                     sys_sdl_unix.Sys_Error('svc_lightstyle > MAX_LIGHTSTYLES')
 
-                cl_main.cl_lightstyle[i].map = MSG_ReadString()
+                cl_main.cl_lightstyle[i].map = common.MSG_ReadString()
                 cl_main.cl_lightstyle[i].length = len(cl_main.cl_lightstyle[i].map)
 
                 if cl_main.cl_lightstyle[i].length:
@@ -839,12 +847,13 @@ def CL_ParseServerMessage():
                     cl_main.cl_lightstyle[i].peak = 'a'
 
                     for j in range(cl_main.cl_lightstyle[i].length):
-                        total += cl_main.cl_lightstyle[i].map[j] - ord('a')
+                        total += ord(cl_main.cl_lightstyle[i].map[j]) - ord('a')
                         cl_main.cl_lightstyle[i].peak = max(cl_main.cl_lightstyle[i].peak, cl_main.cl_lightstyle[i].map[j])
 
-                    cl_main.cl_lightstyle[i].average = total / cl_main.cl_lightstyle[i].length + ord('a')
+                    cl_main.cl_lightstyle[i].average = total // cl_main.cl_lightstyle[i].length + ord('a')
                 else:
-                    cl_main.cl_lightstyle[i].average = cl_main.cl_lightstyle[i].peak = 'm'
+                    cl_main.cl_lightstyle[i].peak = 'm'
+                    cl_main.cl_lightstyle[i].average = ord('m')
 
             case protocol.svc_sound:
                 CL_ParseStartSoundPacket()
@@ -875,6 +884,7 @@ def CL_ParseServerMessage():
                 cl_main.cl.scores[i].colors = common.MSG_ReadByte ();
 
             case protocol.svc_particle:
+                import r_part
                 r_part.R_ParseParticleEffect()
 
             case protocol.svc_spawnbaseline:
@@ -885,6 +895,7 @@ def CL_ParseServerMessage():
                 CL_ParseStatic(1)
 
             case protocol.svc_temp_entity:
+                import cl_tent
                 cl_tent.CL_ParseTEnt()
 
             case protocol.svc_setpause:
@@ -901,7 +912,8 @@ def CL_ParseServerMessage():
 
                 if i == 2:
                     if cl_main.cl.num_statics > 128:
-                        console.Con_Warning('i static entities exceeds standard limit of 128 (max = %d).\n' % (cl_main.cl.num_statics, client.MAX_STATIC_ENTITIES))
+                        console.Con_Warning('%i static entities exceeds standard limit of 128 (max = %d).\n' % (cl_main.cl.num_statics, quakedef.MAX_STATIC_ENTITIES))
+                    import gl_refrag
                     gl_refrag.R_CheckEfrags()
 
                 cl_main.CL_SignonReply()
@@ -913,7 +925,7 @@ def CL_ParseServerMessage():
                 cl_main.cl.stats[quakedef.STAT_SECRETS] += 1
 
             case protocol.svc_updatestat:
-                i = MSG_ReadByte()
+                i = common.MSG_ReadByte()
 
                 if i < 0 or i >= quakedef.MAX_CL_STATS:
                     sys_sdl_unix.Sys_Error('svc_updatestat %i is invalid' % i)
@@ -923,8 +935,10 @@ def CL_ParseServerMessage():
             case protocol.svc_spawnstaticsound:
                 CL_ParseStaticSound(1)
 
-            case protocol.svc_cdtrace:
-                raise NotImplementedError
+            case protocol.svc_cdtrack:
+                cl_main.cl.cdtrack = common.MSG_ReadByte()
+                cl_main.cl.looptrack = common.MSG_ReadByte()
+                print('case protocol.svc_cdtrack: not implemented')
 
             case protocol.svc_intermission:
                 cl_main.cl.intermission = 1
@@ -959,12 +973,14 @@ def CL_ParseServerMessage():
                 _cmd.Cmd_ExecuteString('help', _cmd.cmd_source_t.src_command)
 
             case protocol.svc_skybox:
+                import gl_sky
                 gl_sky.Sky_LoadSkyBox(common.MSG_ReadString())
 
             case protocol.svc_bf:
                 _cmd.Cmd_ExecuteString('bf', _cmd.cmd_source_t.src_command)
 
             case protocol.svc_fog:
+                import gl_fog
                 gl_fog.Fog_ParseServerMessage()
 
             case protocol.svc_spawnbaseline2:

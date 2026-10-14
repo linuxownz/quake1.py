@@ -49,6 +49,12 @@ import view
 class NotInitedError(RuntimeError):
     pass
 
+
+def _cv(name: str, default: float = 0.0):
+    """Cvar value, or `default` if the cvar is not registered (yet)."""
+    c = cvar.Cvar_GetCvar(name)
+    return default if c is None else c.value
+
 modelorg    = [0, 0, 0]
 r_entorigin = [0, 0, 0]
 
@@ -143,7 +149,7 @@ def GLSLGamma_CreateShaders():
 
     gammaLoc = gl_rmisc.GL_GetUniformLocation( r_gamma_program, 'GammaValue')
     contrastLoc = gl_rmisc.GL_GetUniformLocation( r_gamma_program, 'ContrastValue')
-    gammaLoc = gl_rmisc.GL_GetUniformLocation( r_gamma_program, 'GammaTexture')
+    textureLoc = gl_rmisc.GL_GetUniformLocation( r_gamma_program, 'GammaTexture')
 
 
 def GLSLGamma_GammaCorrect():
@@ -156,7 +162,7 @@ def GLSLGamma_GammaCorrect():
     if not gl_vidsdl.gl_glsl_gamma_able:
         return
 
-    if  cvar.Cvar_GetCvar('vid_gamma').value == 1 and cvar.Cvar_GetCvar('vid_contrast').value == 1:
+    if  cvar.Cvar_GetCvar('gamma').value == 1 and cvar.Cvar_GetCvar('contrast').value == 1:
         return
 
     if not r_gamma_texture:
@@ -187,8 +193,8 @@ def GLSLGamma_GammaCorrect():
     gl.glCopyTexSubImage2D(gl.GL_TEXTURE_2D, 0, 0, 0, gl_screen.glx, gl_screen.gly, gl_screen.glwidth, gl_screen.glheight)
 
     gl.glUseProgram(r_gamma_program)
-    vid_gamma = cvar.Cvar_GetCvar("vid_gamma").value
-    vid_contrast = cvar.Cvar_GetCvar("vid_contrast").value
+    vid_gamma = cvar.Cvar_GetCvar("gamma").value
+    vid_contrast = cvar.Cvar_GetCvar("contrast").value
 
     contrast_val = min(2.0, max(1.0, vid_contrast))
 
@@ -341,16 +347,17 @@ def R_SetupGL():
 
     scale = common.CLAMP(1, cvar.Cvar_GetCvar('r_scale').value, 4 )
 
-    gl.glViewport(gl_screen.glx + r_refdef.vrect.x, gl_screen.gly + gl_screen.glheight - r_refdef.vrect.y - r_refdef.vrect.height,
-            r_refdef.vrect.width / scale, r_refdef.vrect.height / scale)
+    gl.glViewport(int(gl_screen.glx + r_refdef.vrect.x),
+                  int(gl_screen.gly + gl_screen.glheight - r_refdef.vrect.y - r_refdef.vrect.height),
+                  int(r_refdef.vrect.width / scale), int(r_refdef.vrect.height / scale))
 
     GL_SetFrustum(r_fovx, r_fovy)
 
     gl.glMatrixMode(gl.GL_MODELVIEW)
     gl.glLoadIdentity()
 
-    gl.glRotate(-90, 1, 0, 0)
-    gl.glRotate(90, 0, 0, 1)
+    gl.glRotatef(-90, 1, 0, 0)
+    gl.glRotatef(90, 0, 0, 1)
     gl.glRotatef (-r_refdef.viewangles[2],  1, 0, 0)
     gl.glRotatef (-r_refdef.viewangles[0],  0, 1, 0)
     gl.glRotatef (-r_refdef.viewangles[1],  0, 0, 1)
@@ -389,7 +396,7 @@ def gl_rmain_Init():
     import quakedef
 
     r_refdef = quakedef.refdef_t()
-    frustum = [ quakedef.mplane_t(0, 0, 0, 0) for i in range(4)]
+    frustum = [ quakedef.mplane_t([0.0, 0.0, 0.0], 0.0, 0, 0) for i in range(4)]
 
     r_norefresh           = {'name': "r_norefresh",       'value':"0",        'flags': cvar.CVAR_NONE}
     r_drawentities        = {'name': "r_drawentities",    'value':"1",        'flags': cvar.CVAR_NONE}
@@ -438,6 +445,9 @@ def gl_rmain_Init():
     r_slimealpha          = {'name': "r_slimealpha",       'value':"0",        'flags': cvar.CVAR_NONE}
     r_scale               = {'name': "r_scale",            'value': "1",       'flags': cvar.CVAR_ARCHIVE}
 
+
+    gl_zfix               = {'name': "gl_zfix",            'value': "0",       'flags': cvar.CVAR_NONE}
+
     import gl_rmisc
     import gl_vidsdl
 
@@ -464,6 +474,7 @@ def gl_rmain_Init():
     cvar.Cvar_RegisterVariable(gl_flashblend)
     cvar.Cvar_RegisterVariable(gl_playermip)
     cvar.Cvar_RegisterVariable(gl_nocolors)
+    cvar.Cvar_RegisterVariable(gl_zfix)
 
     cvar.Cvar_RegisterVariable(r_stereo)
     cvar.Cvar_RegisterVariable(r_stereodepth)
@@ -489,6 +500,8 @@ def gl_rmain_Init():
     cvar.Cvar_RegisterVariable(r_telealpha)
     cvar.Cvar_RegisterVariable(r_slimealpha)
     cvar.Cvar_RegisterVariable(r_scale)
+
+    #cvar.Cvar_RegisterVariable(r_lightmapwide)
 
     cvar.Cvar_SetCallback (gl_fullbrights, gl_rmisc.GL_Fullbrights_f)
     cvar.Cvar_SetCallback (gl_overbright,  gl_rmisc.GL_Overbright_f)
@@ -555,6 +568,8 @@ def R_SetupView():
     global r_oldviewleaf
     global r_viewleaf
 
+    global vpn, vright, vup
+
     gl_rlight.R_PushDlights()
     gl_rlight.R_AnimateLight()
 
@@ -563,7 +578,7 @@ def R_SetupView():
     gl_fog.Fog_SetupFrame()
 
     mathlib.VectorCopy( r_refdef.vieworg, r_origin)
-    vpn, vright, vup = mathlib.AngleVectors(r_refdef.viewangles)
+    mathlib.AngleVectors(r_refdef.viewangles, vpn, vright, vup)
 
     r_oldviewleaf = r_viewleaf
     r_viewleaf = gl_model.Mod_PointInLeaf(r_origin, cl_main.cl.worldmodel)
@@ -574,12 +589,12 @@ def R_SetupView():
     r_fovx = r_refdef.fov_x
     r_fovy = r_refdef.fov_y
 
-    if cvar.Cvar_GetCvar('r_waterwarp').value:
+    if _cv('r_waterwarp'):
         contents = gl_model.Mod_PointInLeaf(r_origin, cl_main.cl.worldmodel).contents
 
-        if contents == bspfile.CONTENTS_WATER or contents == bspfile.CONTENTS_SLIME or contents == bspfile.CONTENTS_LAVA:
-            r_fovx = math.atan(math.tan(mathlib.DEG2RAD(r_refdef.fov_x)/2) * (0.97 + math.sin(cl_main.cl.time * 1.5) * 0.03)) * 2 / math.pi / 180
-            r_fovy = math.atan(math.tan(mathlib.DEG2RAD(r_refdef.fov_y)/2) * (1.03 + math.sin(cl_main.cl.time * 1.5) * 0.03)) * 2 / math.pi / 180
+        if contents == quakedef.CONTENTS_WATER or contents == quakedef.CONTENTS_SLIME or contents == quakedef.CONTENTS_LAVA:
+            r_fovx = math.degrees(math.atan(math.tan(mathlib.DEG2RAD(r_refdef.fov_x)/2) * (0.97 + math.sin(cl_main.cl.time * 1.5) * 0.03)) * 2)
+            r_fovy = math.degrees(math.atan(math.tan(mathlib.DEG2RAD(r_refdef.fov_y)/2) * (1.03 + math.sin(cl_main.cl.time * 1.5) * 0.03)) * 2)
 
     R_SetFrustum(r_fovx, r_fovy)
 
@@ -595,10 +610,10 @@ def R_SetupView():
 
     if cl_main.cl.maxclients == 1:
         if not cvar.Cvar_GetCvar('r_drawworld').value:
-            r_drawflat_cheatsafe = False
+            r_drawworld_cheatsafe = False
 
         if cvar.Cvar_GetCvar('r_drawflat').value:
-            r_drawworld_cheatsafe = False
+            r_drawflat_cheatsafe = True
         elif cvar.Cvar_GetCvar('r_fullbright').value or not cl_main.cl.worldmodel.lightdata:
             r_fullbright_cheatsafe = True
         elif cvar.Cvar_GetCvar('r_lightmap').value:
@@ -625,7 +640,7 @@ def R_DrawEntitiesOnList(alphapass: bool):
             case quakedef.modtype_t.mod_alias:
                 r_alias.R_DrawAliasModel(currententity)
             case quakedef.modtype_t.mod_brush:
-                r_alias.R_DrawBrushModel(currententity)
+                r_brush.R_DrawBrushModel(currententity)
             case quakedef.modtype_t.mod_sprite:
                 r_alias.R_DrawSpriteModel(currententity)
 
@@ -637,7 +652,7 @@ def R_DrawViewModel():
 
     r_drawviewmodel = cvar.Cvar_GetCvar('r_drawviewmodel').value
     r_drawentities  = cvar.Cvar_GetCvar('r_drawentities').value
-    chase_active    = cvar.Cvar_GetCvar('chase_active').value
+    chase_active    = _cv('chase_active')
 
     if not r_drawviewmodel or not r_drawentities or chase_active:
         return
@@ -732,7 +747,7 @@ def R_ShowTris():
     global currententity
 
     r_showtris = cvar.Cvar_GetCvar('r_showtris').value
-    r_particles = cvar.Cvar_GetCvar('r_particles').value
+    r_particles = _cv('r_particles')
     r_drawworld = cvar.Cvar_GetCvar('r_drawworld').value
     r_drawentities = cvar.Cvar_GetCvar('r_drawentities').value
 
@@ -751,7 +766,7 @@ def R_ShowTris():
         r_world.R_DrawWorld_ShowTris()
 
     if r_drawentities:
-        for i in range(cl_main.cl_visedicts):
+        for i in range(cl_main.cl_numvisedicts):
             currententity = cl_main.cl_visedicts[i]
 
             if currententity == cl_main.cl_entities[cl_main.cl.viewentity]:
@@ -759,7 +774,7 @@ def R_ShowTris():
 
             match currententity.model.type:
                 case quakedef.modtype_t.mod_brush:
-                    r_alias.R_DrawBrushModel_ShowTris(currententity)
+                    r_brush.R_DrawBrushModel_ShowTris(currententity)
                 case quakedef.modtype_t.mod_alias:
                     r_alias.R_DrawAliasModel_ShowTris(currententity)
                 case quakedef.modtype_t.mod_sprite:
@@ -768,7 +783,7 @@ def R_ShowTris():
         currententity = cl_main.cl.viewent
 
         r_drawviewmodel = cvar.Cvar_GetCvar('r_drawviewmodel').value
-        chase_active    = cvar.Cvar_GetCvar('chase_active').value
+        chase_active    = _cv('chase_active')
         if (
             r_drawviewmodel and not chase_active and
             cl_main.cl.stats[quakedef.STAT_HEALTH] > 0 and
@@ -799,6 +814,9 @@ def R_DrawShadows():
     r_shadows      = cvar.Cvar_GetCvar('r_shadows').value
     r_drawentities = cvar.Cvar_GetCvar('r_drawentities').value
 
+    if not r_shadows or not r_drawentities or r_drawflat_cheatsafe or r_lightmap_cheatsafe:
+        return
+
     if gl_vidsdl.gl_stencilbits:
         gl.glClear(gl.GL_STENCIL_BUFFER_BIT)
         gl.glStencilFunc(gl.GL_EQUAL, 0, ~0)
@@ -817,13 +835,13 @@ def R_DrawShadows():
         r_alias.GL_DrawAliasShadow(currententity)
 
     if gl_vidsdl.gl_stencilbits:
-        gl.glDisable(gl.GL_STENCIL_BITS)
+        gl.glDisable(gl.GL_STENCIL_TEST)
 
 
 def R_RenderScene():
     R_SetupScene()
 
-    gl_fog.Fog_EnableFog()
+    gl_fog.Fog_EnableGFog()
 
     gl_sky.Sky_DrawSky()
 
@@ -843,7 +861,7 @@ def R_RenderScene():
 
     r_part.R_DrawParticles()
 
-    gl_fog.Fog_DisableFog()
+    gl_fog.Fog_DisableGFog()
 
     R_DrawViewModel()
 
@@ -854,7 +872,7 @@ def R_RenderScene():
 
 def R_ScaleView_DeleteTexture():
     global r_scaleview_texture
-    gl.glDeleteTextures(1, r_scaleview_texture)
+    gl.glDeleteTextures(1, [r_scaleview_texture])
     r_scaleview_texture = 0
 
 
@@ -872,7 +890,7 @@ def R_ScaleView():
     if scale == 1:
         return
 
-    gl_texmgr.GL_DisableMultiTexture()
+    gl_texmgr.GL_DisableMultitexture()
 
     if not r_scaleview_texture:
         tex_id = (ctypes.c_uint * 1)()
@@ -929,6 +947,11 @@ def R_ScaleView():
 
 
 def R_RenderView():
+    global frustum_skew
+    global rs_brushpolys, rs_aliaspolys, rs_skypolys, rs_dynamiclightmaps
+    global rs_aliaspasses, rs_skypasses, rs_brushpasses
+
+    time1 = 0.0
     if cvar.Cvar_GetCvar('r_norefresh').value:
         return
 
@@ -957,7 +980,7 @@ def R_RenderView():
         gl.glColorMask(1,0,0,1)
         mathlib.VectorMA(r_refdef.vieworg, -.5 * eyesep, vright, r_refdef.vieworg)
         frustum_skew = 0.5 * eyesep * NEARCLIP / fdepth;
-        random.seed(cl_main.cl.time * 1000)
+        random.seed(int(cl_main.cl.time * 1000))
 
         R_RenderScene ();
 
@@ -965,7 +988,7 @@ def R_RenderView():
         gl.glColorMask(0, 1, 1, 1)
         mathlib.VectorMA (r_refdef.vieworg, 1.0 * eyesep, vright, r_refdef.vieworg)
         frustum_skew = -frustum_skew
-        random.seed(cl.time * 1000)
+        random.seed(int(cl_main.cl.time * 1000))
 
         R_RenderScene ()
 

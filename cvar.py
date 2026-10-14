@@ -27,15 +27,13 @@ class cvar_t:
         self.callback = callback
         self.next = next
 
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A dictionary
+#HAVE TO CONVERT THIS TO A dictionary
+#HAVE TO CONVERT THIS TO A dictionary
 __cvars: list[cvar_t] = []
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
-#HAVE TO CONVERT THIS TO A linked list
+#HAVE TO CONVERT THIS TO A dictionary
+#HAVE TO CONVERT THIS TO A dictionary
+#HAVE TO CONVERT THIS TO A dictionary
 
 def Cvar_List_f():
     """
@@ -252,6 +250,7 @@ def Cvar_GetCvar(name) -> cvar_t:
     for cvar in __cvars:
         if cvar.name == name:
             return cvar
+    console.Con_Printf(f'failed to look up {name} in Cvar_GetCvar()')
     return None
 
 def Cvar_SetCallback(Cvar:dict, callback):

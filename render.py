@@ -16,9 +16,9 @@ class entity_t:
         self.update_type = 0
         self.baseline : protocol.entity_state_t = protocol.entity_state_t()
         self.msgtime = 0.0
-        self.msg_origins = [ [0, 0, 0], [0, 0, 0]]
+        self.msg_origins = [[0, 0, 0], [0, 0, 0]]
         self.origin = [0, 0, 0]
-        self.msg_angles = [ [0, 0, 0], [0, 0, 0]]
+        self.msg_angles = [[0, 0, 0], [0, 0, 0]]
         self.angles = [0, 0, 0]
         self.model : quakedef.qmodel_t = None
         self.efrag : efrag_t = None # will this cause circular dep or undef

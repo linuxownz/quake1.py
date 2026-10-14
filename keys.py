@@ -7,11 +7,14 @@ from enum import Enum, IntEnum
 import _cmd
 import cl_main
 import console
+import gl_vidsdl
 import host
 import in_sdl
+import keys
 import menu
-import pl_linux
+import pl_linux  # Or wherever PL_GetClipboardData is defined
 import quakedef
+import sys_sdl_unix
 import vid
 
 
@@ -248,10 +251,10 @@ keynames = [
     ('MWHEELUP', Key.K_MWHEELUP),
     ('MWHEELDOWN', Key.K_MWHEELDOWN),
 
-    ('SEMICOLON', ';'), # because a raw semicolon seperates commands
+    ('SEMICOLON', ord(';')), # because a raw semicolon seperates commands
 
-    ('BACKQUOTE', '`'), # because a raw backquote may toggle the console
-    ('TILDE', '~'),     # because a raw tilde may toggle the console
+    ('BACKQUOTE', ord('`')), # because a raw backquote may toggle the console
+    ('TILDE', ord('~')),     # because a raw tilde may toggle the console
 
     ('LTHUMB', Key.K_LTHUMB),
     ('RTHUMB', Key.K_RTHUMB),
@@ -294,11 +297,10 @@ menubound   : list[bool] = [False for _ in range(256)]
 keydown     : list[bool] = [False for _ in range(256)]
 
 chat_team = False
-chat_buffer = [''] * MAXCMDLINE
-chat_bufferlen = 0
-
-import keys
-import sys_sdl_unix  # Or wherever PL_GetClipboardData is defined
+chat_buffer = ''
+key_tabpartial = bytearray(MAXCMDLINE)
+_current_line = bytearray(MAXCMDLINE)   # edit line saved while browsing history
+_key_forced = False
 
 
 def PasteToConsole() -> None:
@@ -310,7 +312,7 @@ def PasteToConsole() -> None:
     if keys.key_linepos >= keys.MAXCMDLINE - 1:
         return
 
-    cbd = sys_sdl_unix.PL_GetClipboardData()
+    cbd = pl_linux.PL_GetClipboardData()
     if cbd is None:
         return
 
@@ -346,8 +348,7 @@ def PasteToConsole() -> None:
     # Clamp move length if tail overflows MAXCMDLINE - 1
     if mvlen + inslen + keys.key_linepos > keys.MAXCMDLINE - 1:
         mvlen = keys.MAXCMDLINE - 1 - keys.key_linepos - inslen
-        if mvlen < 0:
-            mvlen = 0
+        mvlen = max(mvlen, 0)
 
     # memmove: shift existing trailing text to the right by inslen
     if mvlen > 0:
@@ -369,29 +370,54 @@ def PasteToConsole() -> None:
         workline[term_pos] = 0
 
 
-def Key_EndChat():
-    global key_dest
+def _linelen(b) -> int:
+    i = b.find(0)
+    return len(b) if i < 0 else i
 
-    key_dest = keydest_t.key_game
-    chat_buffer = []
+def _reset_line(b) -> None:
+    b[:] = bytes(MAXCMDLINE)
+    b[0] = ord(']')
+
+def _userdir():
+    p = getattr(host, 'host_parms', None) or getattr(host, 'parms', None)
+    return getattr(p, 'userdir', None)
 
 def History_Init():
-    global key_lines
-    try:
-        with open(f'{host.parms.userdir}/{HISTORY_FILE_NAME}', 'rt') as hf:
-            key_lines = [ line.rstrip() for line in hf ]
-        key_lines.insert(0, ']')
-    except:
-        pass
+    global edit_line, history_line, key_linepos
+    userdir = _userdir()
+    if userdir:
+        try:
+            with open(f'{userdir}/{HISTORY_FILE_NAME}', 'rt') as hf:
+                for line in hf:
+                    line = line.rstrip('\r\n')
+                    if not line:
+                        continue
+                    buf = bytearray(MAXCMDLINE)
+                    data = (']' + line).encode('latin-1', errors='replace')[:MAXCMDLINE - 1]
+                    buf[:len(data)] = data
+                    key_lines[edit_line] = buf
+                    edit_line = (edit_line + 1) % NUM_KEY_LINES
+        except OSError:
+            pass
+
+    history_line = edit_line
+    _reset_line(key_lines[edit_line])
+    key_linepos = 1
 
 
 def History_Shutdown():
+    userdir = _userdir()
+    if not userdir:
+        return
     try:
-        with open(f'{host.host_parms.userdir}/{HISTORY_FILE_NAME}', 'wt') as f:
-            for line in key_lines:  # noqa: FURB122
-                f.write(line)
+        with open(f'{userdir}/{HISTORY_FILE_NAME}', 'wt') as f:
+            for k in range(1, NUM_KEY_LINES + 1):
+                line = key_lines[(edit_line + k) % NUM_KEY_LINES]
+                n = _linelen(line)
+                if n > 1:
+                    f.write(line[1:n].decode('latin-1') + '\n')
     except OSError:
-        console.Con_Printf('failed to write histor file')
+        console.Con_Printf('failed to write history file\n')
 
 def Key_TextEntry() -> bool:
     if key_inputgrab.active:
@@ -413,6 +439,9 @@ def Key_EventWithKeycode(key, down, keycode):
     if not key:
         return
 
+    if isinstance(key, str):
+        key = ord(key)
+
     if key < 0 or key >= MAX_KEYS:
         return
 
@@ -432,15 +461,9 @@ def Key_EventWithKeycode(key, down, keycode):
     keydown[key] = down
 
     # 1. Handle Fullscreen Toggle (Alt + Enter)
-    if down and (key == K_ENTER or key == K_KP_ENTER) and keydown[K_ALT]:
+    if down and (key == keys.Key.K_ENTER or key == keys.Key.K_KP_ENTER) and keydown[keys.Key.K_ALT]:
         vid.VID_Toggle()
         return
-
-    if keydown[K_CTRL]:
-        print('ctrl')
-        if key == ord('l'):
-            print('l')
-
 
     # 3. Handle Input Grab (for binding keys in a menu)
     if key_inputgrab.active:
@@ -451,12 +474,12 @@ def Key_EventWithKeycode(key, down, keycode):
         return
 
     # 4. Handle Escape Key (Priority)
-    if key == K_ESCAPE:
+    if key == keys.Key.K_ESCAPE:
         if not down:
             return
 
         # Shift + Escape toggles console
-        if keydown[K_SHIFT]:
+        if keydown[keys.Key.K_SHIFT]:
             console.Con_ToggleConsole_f()
             return
 
@@ -495,6 +518,10 @@ def Key_EventWithKeycode(key, down, keycode):
         menu.M_Keydown(key)
         return
 
+    if key_dest == keydest_t.key_message:
+        Key_Message(key)
+        return
+
     # 8. Handle Game Bindings
     # If we are here, the key is either for the game or it's a key
     # the console/menu doesn't specifically claim.
@@ -516,8 +543,27 @@ def Key_EventWithKeycode(key, down, keycode):
         pass
 
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 def Key_Init():
-    global consolekeys, menubound, key_blinktime
+    global consolekeys, menubound, key_blinktime, key_linepos
 
     # Create clean lists of 256 False values
     consolekeys = [False] * 256
@@ -539,6 +585,12 @@ def Key_Init():
     ]
     for k in special_keys:
         consolekeys[k] = True
+    consolekeys[Key.K_MWHEELUP] = True
+    consolekeys[Key.K_MWHEELDOWN] = True
+
+    for line in key_lines:
+        _reset_line(line)
+    key_linepos = 1
 
     # Initialize menu keys
     menubound[Key.K_ESCAPE] = True
@@ -569,10 +621,8 @@ def Key_EndInputGrab():
     key_inputgrab.active = False
     in_sdl.IN_UpdateInputMode()
 
-def Key_GetGrabbedInput(lastkey, lastchar) -> tuple[int, int]:
-    lastkey = key_inputgrab.lastkey
-    lastchar = key_inputgrab.lastchar
-    return lastkey, lastchar
+def Key_GetGrabbedInput() -> tuple[int, int]:
+    return key_inputgrab.lastkey, key_inputgrab.lastchar
 
 
 
@@ -589,7 +639,7 @@ def Key_ClearStates():
 def Key_KeynumToString(keynum):
     # 1. Handle standard printable characters
     if 32 < keynum < 127:
-        return chr(keynum).upper()
+        return chr(keynum)
 
     # 2. Check the special names table
     for name, num in keynames:
@@ -612,7 +662,7 @@ def Key_StringToKeynum(string):
 
     # 2. Check single characters (A-Z)
     if len(string) == 1:
-        return ord(s_upper)
+        return ord(string.lower())
 
     return -1
 
@@ -693,79 +743,115 @@ def Key_Unbindall_f():
         if keybindings[i]:
             Key_SetBinding(i, '')
 
-def Key_Bind_f():
-    c = _cmd.Cmd_Argc()
-
-    if c != 2 and c != 3:
-        console.Con_Printf('bind <key> [command] : attach a command to a key')
-        return
-
-    b = Key_StringToKeynum(_cmd.Cmd_Argv(1))
-    if b == -1:
-        console.Con_Printf(f'{_cmd.Cmd_Argv(1)} isnt a valid key')
-
-    if c == 2:
-        if keybindings[b]:
-            console.Con_Printf(f'{_cmd.Cmd_Argv(1)} = {keybindings[b]}')
-        else:
-            console.Con_Printf(f'{_cmd.Cmd_Argv(1)} is not bound')
-        return
-
-    cmd = []
-    for i in range(c):
-        cmd.append(_cmd.Cmd_Argv(i))
-
-    Key_SetBinding(b, cmd)
-
-
 def Key_Console(key):
-    global key_linepos
+    global key_linepos, edit_line, history_line, key_insert, key_blinktime
 
-    if key == K_PGUP:
-        console.con_backscroll += 5
-        console.con_backscroll = min(console.con_backscroll, console.con_totallines - 25)
+    workline = key_lines[edit_line]
+    ctrl  = keydown[Key.K_CTRL]
+    shift = keydown[Key.K_SHIFT]
+
+    if key in (Key.K_ENTER, Key.K_KP_ENTER):
+        key_tabpartial[0] = 0
+        n = _linelen(workline)
+        _cmd.Cbuf_AddText(workline[1:n].decode('latin-1'))   # skip the prompt
+        _cmd.Cbuf_AddText('\n')
+        console.Con_Printf(workline[:n].decode('latin-1') + '\n')
+        edit_line = (edit_line + 1) % NUM_KEY_LINES
+        history_line = edit_line
+        _reset_line(key_lines[edit_line])
+        key_linepos = 1
         return True
 
-    if key == K_PGDN:
-        console.con_backscroll -= 5
-        console.con_backscroll = max(console.con_backscroll, 0)
+    if key == Key.K_BACKSPACE:
+        key_tabpartial[0] = 0
+        if key_linepos > 1:
+            del workline[key_linepos - 1]
+            workline.append(0)
+            key_linepos -= 1
         return True
 
-    # Reset scroll when user types or enters command
-    if key == K_ENTER:
-        console.con_backscroll = 0
+    if key == Key.K_DEL:
+        key_tabpartial[0] = 0
+        if key_linepos < _linelen(workline):
+            del workline[key_linepos]
+            workline.append(0)
+        return True
 
-    # Handle Backspace (127 or 8 depending on OS mapping)
-    if key == K_BACKSPACE or key == 8:
-        if len(console.con_input_buffer) > 0:
-            console.con_input_buffer = console.con_input_buffer[:-1]
-        return
+    if key == Key.K_HOME:
+        if ctrl:
+            console.con_backscroll = max(console.con_totallines - 25, 0)
+        else:
+            key_linepos = 1
+        return True
 
-    # Handle Enter
-    if key == K_ENTER or key == K_KP_ENTER:
-        # Add a newline to the console log for the user to see
-        console.Con_Printf(f"] {console.con_input_buffer}\n")
+    if key == Key.K_END:
+        if ctrl:
+            console.con_backscroll = 0
+        else:
+            key_linepos = _linelen(workline)
+        return True
 
-        # Pass to the command buffer to actually DO something
-        _cmd.Cbuf_AddText(f"{console.con_input_buffer}\n")
+    if key == Key.K_LEFTARROW:
+        if key_linepos > 1:
+            key_linepos -= 1
+            key_blinktime = host.realtime
+        return True
 
-        # Clear the input line
-        console.con_input_buffer = ""
-        return
+    if key == Key.K_RIGHTARROW:
+        if key_linepos < _linelen(workline):
+            key_linepos += 1
+            key_blinktime = host.realtime
+        return True
 
-    # Handle standard characters
-    if isinstance(key, int):
-        if key < 32 or key > 127:
-            return
-        char = chr(key)
-    else:
-        char = key # already a string from Char_Event
+    if key == Key.K_UPARROW:
+        if history_line == edit_line:
+            _current_line[:] = workline
+        while True:
+            history_line = (history_line - 1) % NUM_KEY_LINES
+            if history_line == edit_line or key_lines[history_line][1]:
+                break
+        if history_line == edit_line:
+            history_line = (edit_line + 1) % NUM_KEY_LINES
+        workline[:] = key_lines[history_line]
+        key_linepos = _linelen(workline)
+        return True
 
-    # Ignore the console toggle key so it doesn't type ` into the console
-    if char == '`':
-        return
+    if key == Key.K_DOWNARROW:
+        if history_line == edit_line:
+            return True
+        while True:
+            history_line = (history_line + 1) % NUM_KEY_LINES
+            if history_line == edit_line or key_lines[history_line][1]:
+                break
+        if history_line == edit_line:
+            workline[:] = _current_line
+        else:
+            workline[:] = key_lines[history_line]
+        key_linepos = _linelen(workline)
+        return True
 
-    console.con_input_buffer += char
+    if key in (Key.K_PGUP, Key.K_MWHEELUP):
+        console.con_backscroll = min(console.con_backscroll + (2 if key == Key.K_MWHEELUP else 5),
+                                     console.con_totallines - 25)
+        return True
+
+    if key in (Key.K_PGDN, Key.K_MWHEELDOWN):
+        console.con_backscroll = max(console.con_backscroll - (2 if key == Key.K_MWHEELDOWN else 5), 0)
+        return True
+
+    if key == Key.K_INS:
+        if shift:
+            PasteToConsole()
+        else:
+            key_insert = not key_insert
+        return True
+
+    if key == ord('v') and ctrl:
+        PasteToConsole()
+        return True
+
+    # printable characters arrive through Char_Event (text input), not here
+    return True
 
 def Char_Console(key: int) -> None:
     """Appends or inserts a character byte into the console input line.
@@ -818,10 +904,15 @@ def Char_Console(key: int) -> None:
         keys.key_linepos += 1
 
 def Char_Event(ch):
+    key = ord(ch) if isinstance(ch, str) else ch
+
     if key < 32 or key > 126:
         return
 
-    if keydown[K_CTRL]:
+    if key in (ord('`'), ord('~')):    # console toggle keys are never typed
+        return
+
+    if keydown[Key.K_CTRL]:
         return
 
     if key_inputgrab.active:
@@ -836,9 +927,7 @@ def Char_Event(ch):
         case keydest_t.key_game:
             pass
         case keydest_t.key_console:
-            Char_Console(ch)
-
-
+            Char_Console(key)
 
 
 def Key_WriteBindings(file_handle):
@@ -859,64 +948,55 @@ def Key_WriteBindings(file_handle):
         file_handle.write(f'bind "{bind_name}" "{command}"\n')
 
 def Key_UpdateForDest():
-    global key_dest
-    forced = False
+    global key_dest, _key_forced
 
     if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
         return
 
     match(key_dest):
         case keydest_t.key_console:
-            if forced and cl_main.cls.state == quakedef.cactive_t.ca_connected:
-                forced = False
+            if _key_forced and cl_main.cls.state == quakedef.cactive_t.ca_connected:
+                _key_forced = False
                 in_sdl.IN_Activate()
                 key_dest = keydest_t.key_game
         case keydest_t.key_game:
             if cl_main.cls.state != quakedef.cactive_t.ca_connected:
-                forced = True
-                in_sdl.IN_Deactivate()
+                _key_forced = True
+                in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.modestate_t.MS_WINDOWED)
                 key_dest = keydest_t.key_console
 
         case _:
-            forced = False
+            _key_forced = False
 
 
 def Key_GetChatBuffer() -> str:
     return chat_buffer
 
 def Key_GetChatMsgLen() -> int:
-    global chat_bufferlen
-    chat_bufferlen = len(chat_buffer)
-    return chat_bufferlen
+    return len(chat_buffer)
 
 def Key_EndChat():
+    global key_dest, chat_buffer
     key_dest = keydest_t.key_game
-    chat_buffer[0] = 0
-    chat_bufferlen = 0
+    chat_buffer = ''
 
 
 def Key_Message(key: int):
-    match key:
-        case Key.K_ENTER | Key.K_KP_ENTER:
-            if chat_team:
-                _cmd.Cbuf_AddText('say team "')
-            else:
-                _cmd.Cbuf_AddText('say "')
-            _cmd.Cbuf_AddText(chat_buffer)
-            _cmd.Cbuf_AddText('"\n')
-            Key_EndChat()
-        case Key.K_ESCAPE:
-            Key_EndChat()
-        case Key.K_BACKSPACE:
-            if chat_bufferlen:
-                chat_bufferlen -= 1
-                chat_buffer[chat_bufferlen] = 0
+    global chat_buffer
+
+    if key in (Key.K_ENTER, Key.K_KP_ENTER):
+        _cmd.Cbuf_AddText('say_team "' if chat_team else 'say "')
+        _cmd.Cbuf_AddText(chat_buffer)
+        _cmd.Cbuf_AddText('"\n')
+        Key_EndChat()
+    elif key == Key.K_ESCAPE:
+        Key_EndChat()
+    elif key == Key.K_BACKSPACE:
+        chat_buffer = chat_buffer[:-1]
 
 def Char_Message(key: int):
-    if chat_bufferlen == len(chat_buffer) - 1:
+    global chat_buffer
+
+    if len(chat_buffer) >= MAXCMDLINE - 1:
         return
-
-    chat_buffer[chat_bufferlen] = key
-    chat_buffer += 1
-    chat_buffer[chat_bufferlen] = 0
-
+    chat_buffer += chr(key)

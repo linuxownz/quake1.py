@@ -16,6 +16,7 @@ import gl_vidsdl
 import host
 #import image
 import keys
+import menu
 import quakedef
 import sbar
 import snd_dma
@@ -210,7 +211,7 @@ def SCR_ScreenShot_f():
         return
 
     for i in range(100):
-        imagename = '%s/spasm%04i.%s' % com_gamedir, i, ext
+        imagename = '%s/spasm%04i.%s' % common.com_gamedir, i, ext
         if sys_sdl_unix.Sys_FileType(imagename) == common.FS_ENT_NONE:
             break
 
@@ -263,8 +264,8 @@ def SCR_Init():
     scr_conwidth       = {'name':"scr_conwidth",       'value':"0",    'flags': cvar.CVAR_ARCHIVE}
     scr_conscale       = {'name':"scr_conscale",       'value':"1",    'flags': cvar.CVAR_ARCHIVE}
     scr_crosshairscale = {'name':"scr_crosshairscale", 'value':"1",    'flags': cvar.CVAR_ARCHIVE}
-    scr_showfps        = {'name':"scr_showfps",        'value':"0",    'flags': cvar.CVAR_NONE}
-    scr_clock          = {'name':"scr_clock",          'value':"0",    'flags': cvar.CVAR_NONE}
+    scr_showfps        = {'name':"scr_showfps",        'value':"1",    'flags': cvar.CVAR_NONE}
+    scr_clock          = {'name':"scr_clock",          'value':"1",    'flags': cvar.CVAR_NONE}
     scr_usekfont       = {'name':"scr_usekfont",       'value':"0",    'flags': cvar.CVAR_NONE}
     scr_viewsize       = {'name':"viewsize",           'value':"100",  'flags': cvar.CVAR_ARCHIVE}
     scr_fov            = {'name':"fov",                'value':"90",   'flags': cvar.CVAR_NONE}
@@ -343,23 +344,23 @@ def SCR_DrawFPS():
 
     if cvar.Cvar_GetCvar('scr_showfps').value:
         st = f'{lastfps:4.0f} fps'
-        x = 320 - len(st)
+        x = 320 - len(st) * 8
         y = 200 - 8
 
-        if cvar.Cvar_GetCvar('src_clock').value:
+        if cvar.Cvar_GetCvar('scr_clock').value:
             y -= 8
 
         gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_BOTTOMRIGHT)
-        gl_draw.DrawString(x, y, st)
+        gl_draw.Draw_String(x, y, st)
         global scr_tileclear_updates
         scr_tileclear_updates = 0
 
 def SCR_DrawClock():
     if cvar.Cvar_GetCvar('scr_clock').value == 1:
-        minutes = cl_main.cl.time / 60
-        seconds = cl_main.cl.time % 60
+        minutes = cl_main.cl.time // 60
+        seconds = int(cl_main.cl.time) % 60
 
-        string = f'{minutes}:{seconds/10}{seconds%10}'
+        string = f'{minutes}:{seconds}'
     else:
         return
 
@@ -393,7 +394,7 @@ def SCR_DrawDevStats():
 count = 0
 def SCR_DrawTurtle():
     global count
-    if not cvar.Cvar_GetCvar('scr_showturtle').value:
+    if not cvar.Cvar_GetCvar('showturtle').value:
         return
 
     if host.host_frametime < 0.1:
@@ -434,7 +435,7 @@ def SCR_DrawPause():
 
 
 def SCR_DrawLoading():
-    if not cvar.Cvar_GetCvar('scr_drawloading').value:
+    if not scr_drawloading:
         return
 
     gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_MENU)
@@ -445,7 +446,7 @@ def SCR_DrawLoading():
     global scr_tileclear_updates
     scr_tileclear_updates = 0
 
-def SCR_DrawCrosshair():
+def SCR_DrawCrosshairREMOVEME():
     if not cvar.Cvar_GetCvar('crosshair').value:
         return
 
@@ -693,7 +694,7 @@ def SCR_TileClear():
     global scr_tileclear_updates
 
     gl_clear = cvar.Cvar_GetCvar('gl_clear').value
-    vid_gamma = cvar.Cvar_GetCvar('vid_gamma').value
+    vid_gamma = cvar.Cvar_GetCvar('gamma').value
 
     if scr_tileclear_updates >= gl_vidsdl._vid.numpages and not gl_clear and not (gl_vidsdl.gl_glsl_able and vid_gamma != 1):
         return
@@ -733,7 +734,7 @@ def AdaptFovx(fov_x, width, height):
     if fov_x < 1 or fov_x > 179:
         sys_sdl_unix.Sys_Error("bad fov")
 
-    if not cvar.Cvar_GetCvar('scr_fov_adapt').value:
+    if not cvar.Cvar_GetCvar('fov_adapt').value:
         return fov_x
 
     x = height/width
@@ -765,22 +766,22 @@ def SCR_CalcRefdef():
 
     scr_tileclear_updates = 0
 
-    scr_viewsize = cvar.Cvar_GetCvar('scr_viewsize').value
+    scr_viewsize = cvar.Cvar_GetCvar('viewsize').value
 
     if scr_viewsize < 30:
-        cvar.Cvar_SetQuickByName('scr_viewsize', "30")
+        cvar.Cvar_SetQuickByName('viewsize', "30")
     elif scr_viewsize > 120:
-        cvar.Cvar_SetQuickByName('scr_viewsize', "120")
+        cvar.Cvar_SetQuickByName('viewsize', "120")
 
-    scr_fov = cvar.Cvar_GetCvar('scr_fov').value
+    scr_fov = cvar.Cvar_GetCvar('fov').value
     if scr_fov < 10:
-        cvar.Cvar_SetQuickByName('scr_fov', "10")
+        cvar.Cvar_SetQuickByName('fov', "10")
     elif scr_fov > 170:
-        cvar.Cvar_SetQuickByName('scr_fov', "170")
+        cvar.Cvar_SetQuickByName('fov', "170")
 
     gl_vidsdl._vid.recalc_refdef = 0
 
-    size = cvar.Cvar_GetCvar('scr_viewsize').value
+    size = cvar.Cvar_GetCvar('viewsize').value
     scale = common.CLAMP(1.0, float(cvar.Cvar_GetCvar('scr_sbarscale').value), glwidth / 320.0)
 
     if size >= 120 or cl_main.cl.intermission or cvar.Cvar_GetCvar('scr_sbaralpha').value < 1:
@@ -798,7 +799,7 @@ def SCR_CalcRefdef():
     gl_rmain.r_refdef.vrect.x = ( glwidth - gl_rmain.r_refdef.vrect.width) / 2
     gl_rmain.r_refdef.vrect.y = ( glheight - sbar.sb_lines - gl_rmain.r_refdef.vrect.height) / 2
 
-    scr_fov = cvar.Cvar_GetCvar('scr_fov').value
+    scr_fov = cvar.Cvar_GetCvar('fov').value
     gl_rmain.r_refdef.fov_x = AdaptFovx(scr_fov, gl_vidsdl._vid.width, gl_vidsdl._vid.height);
     gl_rmain.r_refdef.fov_y = CalcFovy (gl_rmain.r_refdef.fov_x, gl_rmain.r_refdef.vrect.width, gl_rmain.r_refdef.vrect.height);
 
@@ -913,35 +914,6 @@ def SCR_UpdateConsole():
 
 def Sbar_Changed():
     sbar.sb_updates = 0
-
-def SCR_BeginLoadingPlaque():
-    #S_StopAllSounds(True)
-
-    if cl_main.cls.state != cl_main.cactive_t.ca_connected:
-        return
-
-    if cl_main.cls.signon != client.SIGNONS:
-        return
-
-    console.Con_ClearNotify()
-
-    global scr_centertime_off
-    global scr_con_current
-    global scr_drawloading
-    global scr_disabled_for_loading
-    global scr_disabled_time
-
-    scr_centertime_off = 0
-    scr_con_current = 0
-
-    scr_drawloading = True
-    Sbar_Changed()
-
-    SCR_UpdateScreen()
-    scr_drawloading = False
-
-    scr_disabled_for_loading = True
-    scr_disabled_time = host.realtime
 
 
 def SCR_DrawCrosshair():

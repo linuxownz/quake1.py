@@ -30,12 +30,16 @@ def W_LoadWadFile(filename):
     global lumpinfo, wad_buffer
 
     # Load the entire WAD into the Hunk
-    result = common.COM_LoadHunkFile(filename)
-    if not result or result[0] is None:
+    result = common.COM_LoadMallocFile(filename, False)
+
+    if not isinstance(result, bytearray):
+        raise Exception('bad result not bytearray')
+
+    if not result:
         common.sys_sdl_unix.Sys_Error(f"W_LoadWadFile: {filename} not found")
 
     # Unpack the raw bytes buffer from the tuple (buffer, size)
-    wad_buffer = result[0] if isinstance(result, tuple) else result
+    wad_buffer = memoryview(result)
 
     # Header: magic (4), numlumps (4), infotableofs (4)
     magic, numlumps, infotableofs = struct.unpack_from("<4sII", wad_buffer, 0)
@@ -83,3 +87,7 @@ def W_CleanupName(name: str) -> str:
     # Quake lump names are max 16 chars, often null-padded
     # This ensures "palette" becomes "PALETTE" and matches correctly
     return name.split('\0')[0].strip().upper()[:16]
+
+def SwapPic(pic: qpic_t):
+    pic.width  = common.LittleLong(pic.width)
+    pic.height = common.LittleLong(pic.height)

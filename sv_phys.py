@@ -9,31 +9,35 @@ import mathlib
 import pr_edict
 import pr_exec
 import progs
+import quakedef
 import server
 import sv_main
 import sv_user
 import sys_sdl_unix
 import world
 
+def _cv(name: str) -> float:
+    c = cvar.Cvar_GetCvar(name)
+    return c.value if c is not None else 0.0
+
 STOP_EPSILON = 0.1
 MAX_CLIP_PLANES = 5
 STEPSIZE = 18
 
 def SV_CheckAllEnts():
-    check: progs.edict_t = progs.NEXT_EDICT(sv_main.sv.edicts)
-
-    for e in range(i, sv_main.sv.num_edicts):
+    for e in range(1, sv_main.sv.num_edicts):
+        check = sv_main.sv.edicts[e]
         if check.free:
             continue
-        if check.v.movetype in ( server.MOVETYPE_PUSH, server.MOVETYPE_NONE, server.MOVETYPE_NOCLIP):
+        if int(check.v.movetype) in ( server.MOVETYPE_PUSH, server.MOVETYPE_NONE, server.MOVETYPE_NOCLIP):
             continue
 
         if world.SV_TestEntityPosition(check):
-            console.Con_Printf('entity in invalid position')
+            console.Con_Printf('entity in invalid position\n')
 
 def SV_CheckVelocity(ent: progs.edict_t):
 
-    sv_maxvelocity = cvar.Cvar_GetCvar('sv_maxvelocity').value
+    sv_maxvelocity = _cv('sv_maxvelocity')
 
     for i in range(3):
         if mathlib.IS_NAN(ent.v.velocity[i]):
@@ -105,12 +109,11 @@ def ClipVelocity(_in: list[float], normal: list[float], out:list[float], overbou
 
     return blocked
 
-def SV_FlyMove(ent: progs.edict_t, time: float, steptrace: world.trace_t) -> int:
+def SV_FlyMove(ent: progs.edict_t, time: float, steptrace: list | None = None) -> int:
+    """steptrace: None, or a 1-element list that receives the trace of a blocking step (C: trace_t *steptrace)."""
     numbumps: int = 4
     blocked: int = 0
     numplanes : int = 0
-
-    trace: world.trace_t
 
     _dir: list[float] = [0.0 for _ in range(3)]
     end: list[float] = [0.0 for _ in range(3)]
@@ -130,71 +133,83 @@ def SV_FlyMove(ent: progs.edict_t, time: float, steptrace: world.trace_t) -> int
             break
 
         for i in range(3):
-            end[i] = ent.v.origin[i] + time_left * ent.v.velocityh[i]
+            end[i] = ent.v.origin[i] + time_left * ent.v.velocity[i]
 
-        trace = world.SV_Move(ent.v.origin, ent.v.mins, ent.v.maxs, end, False, ent)
+        trace = world.SV_Move(ent.v.origin, ent.v.mins, ent.v.maxs, end, 0, ent)
 
         if trace.allsolid:
-            mathlib.VectorCopy(vec3_origin, ent.v.velocity)
+            # entity is trapped in another solid
+            mathlib.VectorCopy(mathlib.vec3_origin, ent.v.velocity)
             return 3
 
         if trace.fraction > 0:
+            # actually covered some distance
             mathlib.VectorCopy(trace.endpos, ent.v.origin)
             mathlib.VectorCopy(ent.v.velocity, original_velocity)
             numplanes = 0
 
         if trace.fraction == 1:
-            break
+            break   # moved the entire distance
 
         if not trace.ent:
-            sys_sdl_unix.Sys_Error('SV_FlyMove:L !trace.ent')
+            sys_sdl_unix.Sys_Error('SV_FlyMove: !trace.ent')
 
         if trace.plane.normal[2] > 0.7:
-            blocked |= 1
+            blocked |= 1    # floor
             if trace.ent.v.solid == server.SOLID_BSP:
                 ent.v.flags = int(ent.v.flags) | server.FL_ONGROUND
                 ent.v.groundentity = progs.EDICT_TO_PROG(trace.ent)
 
         if not trace.plane.normal[2]:
-            blocked |= 2
-            if steptrace:
-                steptrace = trace
+            blocked |= 2    # step
+            if steptrace is not None:
+                steptrace[0] = trace
 
+        # run the impact function
         SV_Impact(ent, trace.ent)
         if ent.free:
-            break
+            break   # removed by the impact function
 
         time_left -= time_left * trace.fraction
 
+        # cliped to another plane
         if numplanes >= MAX_CLIP_PLANES:
-            mathlib.VectorCopy(vec3_origin, ent.v.velocity)
+            # this shouldn't really happen
+            mathlib.VectorCopy(mathlib.vec3_origin, ent.v.velocity)
             return 3
 
         mathlib.VectorCopy(trace.plane.normal, planes[numplanes])
         numplanes += 1
 
-        for i in range(numplanes):
+        # modify original_velocity so it parallels all of the clip planes
+        i = 0
+        while i < numplanes:
             ClipVelocity(original_velocity, planes[i], new_velocity, 1)
-
-            for j in range(numplanes):
-                if j != i:
-                    if mathlib.DotProduct(new_velocity, planes[j]) < 0:
-                        break
+            j = 0
+            while j < numplanes:
+                if j != i and mathlib.DotProduct(new_velocity, planes[j]) < 0:
+                    break   # not ok
+                j += 1
             if j == numplanes:
                 break
+            i += 1
+
         if i != numplanes:
+            # go along this plane
             mathlib.VectorCopy(new_velocity, ent.v.velocity)
         else:
+            # go along the crease
             if numplanes != 2:
-                mathlib.VectorCopy(vec3_origin, ent.v.velocity)
+                mathlib.VectorCopy(mathlib.vec3_origin, ent.v.velocity)
                 return 7
+            mathlib.CrossProduct(planes[0], planes[1], _dir)
+            d = mathlib.DotProduct(_dir, ent.v.velocity)
+            mathlib.VectorScale(_dir, d, ent.v.velocity)
 
-        mathlib.CrossProduct(planes[0], planes[1], _dir)
-        d = mathlib.DotProduct(_dir, ent.v.velocity)
-        mathlib.VectorScale(_dir, d, ent.v.velocity)
-
+        # if original velocity is against the original velocity, stop dead
+        # to avoid tiny occilations in sloping corners
         if mathlib.DotProduct(ent.v.velocity, primal_velocity) <= 0:
-            mathlib.VectorCopy(vec3_origin, ent.v.velocity)
+            mathlib.VectorCopy(mathlib.vec3_origin, ent.v.velocity)
             return blocked
 
     return blocked
@@ -210,9 +225,9 @@ def SV_AddGravity(ent: progs.edict_t):
     else:
         ent_gravity = 1.0
 
-    sv_gravity = cvar.Cvar_GetCvar('sv_gravity').value
+    sv_gravity = _cv('sv_gravity')
 
-    ent.v.velocity[2] -= ent_gravity * sv_gravity * host_frametime
+    ent.v.velocity[2] -= ent_gravity * sv_gravity * host.host_frametime
 
 def SV_PushEntity(ent: progs.edict_t, push: list[float]) -> world.trace_t:
     trace: world.trace_t = None
@@ -221,7 +236,7 @@ def SV_PushEntity(ent: progs.edict_t, push: list[float]) -> world.trace_t:
     mathlib.VectorAdd(ent.v.origin, push, end)
 
     if ent.v.movetype == server.MOVETYPE_FLYMISSILE:
-        trace = world.SV_Move(ent.v.origin, ent.v.mins, ent.v.maxs, end, world.MOVE_MISSLE, ent)
+        trace = world.SV_Move(ent.v.origin, ent.v.mins, ent.v.maxs, end, world.MOVE_MISSILE, ent)
     elif ent.v.solid == server.SOLID_TRIGGER or ent.v.solid == server.SOLID_NOT:
         trace = world.SV_Move(ent.v.origin, ent.v.mins, ent.v.maxs, end, world.MOVE_NOMONSTERS, ent)
     else:
@@ -237,9 +252,6 @@ def SV_PushEntity(ent: progs.edict_t, push: list[float]) -> world.trace_t:
 
 
 def SV_PushMove ( pusher: progs.edict_t, movetime: float):
-    check: progs.edict_t = None
-    block: progs.edict_t = None
-
     mins:list[float] = [0.0, 0.0, 0.0]
     maxs:list[float] = [0.0, 0.0, 0.0]
     move:list[float] = [0.0, 0.0, 0.0]
@@ -247,7 +259,7 @@ def SV_PushMove ( pusher: progs.edict_t, movetime: float):
     entorig:list[float] = [0.0, 0.0, 0.0]
     pushorig:list[float] = [0.0, 0.0, 0.0]
 
-    if not pusher.v.velocityh[0] and not pusher.v.velocity[1] and not pusher.v.velocity[2]:
+    if not pusher.v.velocity[0] and not pusher.v.velocity[1] and not pusher.v.velocity[2]:
         pusher.v.ltime += movetime
         return
 
@@ -258,79 +270,85 @@ def SV_PushMove ( pusher: progs.edict_t, movetime: float):
 
     mathlib.VectorCopy(pusher.v.origin, pushorig)
 
+    # move the pusher to it's final position
     mathlib.VectorAdd(pusher.v.origin, move, pusher.v.origin)
     pusher.v.ltime += movetime
 
     world.SV_LinkEdict(pusher, False)
 
-    num_edicts = sv_main.sv.num_edicts
-    moved_edict = [None] * num_edicts
-    moved_from = [[0.0, 0.0, 0.0] for _ in range(num_edicts)]
-
-    num_moved = 0
-    check = progs.NEXT_EDICT(sv_main.sv.edicts)
+    # see if any solid entities are inside the final position
+    moved_edict = []
+    moved_from = []
 
     for e in range(1, sv_main.sv.num_edicts):
+        check = sv_main.sv.edicts[e]
+
         if check.free:
             continue
 
-        if check.v.movetype == server.MOVETYPE_PUSH or check.v.movetype == server.MOVETYPE_NONE or check.v.movetype == server.MOVETYPE_NOCLIP:
+        if int(check.v.movetype) in (server.MOVETYPE_PUSH, server.MOVETYPE_NONE, server.MOVETYPE_NOCLIP):
             continue
 
-        if not check.v.flags & server.FL_ONGROUND and progs.PROG_TO_EDICT(check.v.groundentity) == pusher:
+        # if the entity is standing on the pusher, it will definately be moved
+        standing = (int(check.v.flags) & server.FL_ONGROUND) and progs.PROG_TO_EDICT(check.v.groundentity) is pusher
+        if not standing:
             if check.v.absmin[0] >= maxs[0] \
-                or check.v.absmin[1] >= maxs[1]  \
-                or check.absmin[2] >= maxs[2] \
-                or check.v.absmax[0] <= ns[0] \
-                or check.v.absmax[1] <= ns[1] \
-                or check.v.absmax[2] <= mins[2] :
-                    continue
-
-            if not SV_TestEntityPosition(check):
+                or check.v.absmin[1] >= maxs[1] \
+                or check.v.absmin[2] >= maxs[2] \
+                or check.v.absmax[0] <= mins[0] \
+                or check.v.absmax[1] <= mins[1] \
+                or check.v.absmax[2] <= mins[2]:
                 continue
 
-            if check.v.movetype != server.MOVETYPE_WALK:
-                check.v.flags = int(check.v.flags & ~server.FL_ONGROUND)
+            # see if the ent's bbox is inside the pusher's final position
+            if not world.SV_TestEntityPosition(check):
+                continue
 
-            mathlib.VectorCopy(check.v.origin, entorig)
-            mathlib.VectorCopy(check.v.origin, moved_from[num_moved])
-            moved_edict[num_moved] = check
-            num_moved += 1
+        # remove the onground flag for non-players
+        if int(check.v.movetype) != server.MOVETYPE_WALK:
+            check.v.flags = int(check.v.flags) & ~server.FL_ONGROUND
 
-            solid_backup = pusher.v.solid
+        mathlib.VectorCopy(check.v.origin, entorig)
+        moved_from.append(list(check.v.origin))
+        moved_edict.append(check)
 
-            if solid_backup == server.SOLID_BSP or solid_backup == server.SOLID_BBOX or solid_backup == server.SOLID_SLIDEBOX:
-                pusher.v.solid = server.SOLID_NOT
-                SV_PushEntity(check, move)
-                pusher.v.solid = solid_backup
+        # try moving the contacted entity
+        pusher.v.solid = server.SOLID_NOT
+        SV_PushEntity(check, move)
+        pusher.v.solid = server.SOLID_BSP
 
-            block = SV_TestEntityPosition(check)
-            if block:
-                if check.v.mins[0] == check.v.maxs[0]:
-                    continue
-                if check.v.solid == server.SOLID_NOT or check.v.solid == server.SOLID_TRIGGER:
-                    check.v.mins[0] = check.v.mins[1] = 0
-                    mathlib.VectorCopy(check.v.mins, check.v.maxs)
-                    continue
+        # if it is still inside the pusher, block
+        block = world.SV_TestEntityPosition(check)
+        if block:
+            # fail the move
+            if check.v.mins[0] == check.v.maxs[0]:
+                continue
+            if check.v.solid == server.SOLID_NOT or check.v.solid == server.SOLID_TRIGGER:
+                # corpse
+                check.v.mins[0] = check.v.mins[1] = 0
+                mathlib.VectorCopy(check.v.mins, check.v.maxs)
+                continue
 
-                mathlib.VectorCopy(entorig, check.v.origin)
-                world.SV_LinkEdict(check, True)
+            mathlib.VectorCopy(entorig, check.v.origin)
+            world.SV_LinkEdict(check, True)
 
-                mathlib.VectorCopy(pushorig, pusher.v.origin)
-                world.SV_LinkEdict(pusher, False)
-                pusher.v.ltime -= movetime
+            mathlib.VectorCopy(pushorig, pusher.v.origin)
+            world.SV_LinkEdict(pusher, False)
+            pusher.v.ltime -= movetime
 
-                if pusher.v.blocked:
-                    pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(pusher)
-                    pr_edict.pr_global_struct.other = progs.EDICT_TO_PROG(check)
-                    pr_exec.PR_ExecuteProgram(pusher.v.blocked)
+            # if the pusher has a "blocked" function, call it
+            # otherwise, just stay in place until the obstacle is gone
+            if pusher.v.blocked:
+                pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(pusher)
+                pr_edict.pr_global_struct.other = progs.EDICT_TO_PROG(check)
+                pr_exec.PR_ExecuteProgram(pusher.v.blocked)
 
-                for i in range(num_moved):
-                    mathlib.VectorCopy(moved_from[i], moved_edict[i].v.origin)
-                    world.SV_LinkEdict(moved_edict[i], False)
+            # move back any entities we already moved
+            for i in range(len(moved_edict)):
+                mathlib.VectorCopy(moved_from[i], moved_edict[i].v.origin)
+                world.SV_LinkEdict(moved_edict[i], False)
 
-                return
-        check = progs.NEXT_EDICT(check)
+            return
 
 
 def SV_Physics_Pusher(ent: progs.edict_t):
@@ -367,7 +385,7 @@ def SV_CheckStuck ( ent: progs.edict_t ):
         mathlib.VectorCopy(ent.v.origin, ent.v.oldorigin)
         return
 
-    mathlib.VectorCopy(ent, org)
+    mathlib.VectorCopy(ent.v.origin, org)
     mathlib.VectorCopy(ent.v.oldorigin, ent.v.origin)
 
     if not world.SV_TestEntityPosition(ent):
@@ -397,24 +415,24 @@ def SV_CheckWater(ent: progs.edict_t) -> bool:
 
     point[0] = ent.v.origin[0]
     point[1] = ent.v.origin[1]
-    point[2] = ent.v.origin[2]
+    point[2] = ent.v.origin[2] + ent.v.mins[2] + 1
 
     ent.v.waterlevel = 0
-    ent.v.watertype = bspfile.CONTENTS_EMPTY
+    ent.v.watertype = quakedef.CONTENTS_EMPTY
     cont = world.SV_PointContents(point)
 
-    if cont <= bspfile.CONTENTS_WATER:
+    if cont <= quakedef.CONTENTS_WATER:
         ent.v.watertype = cont
         ent.v.waterlevel = 1
 
         point[2] = ent.v.origin[2] + ( ent.v.mins[2] + ent.v.maxs[2]) * 0.5
         cont = world.SV_PointContents(point)
 
-        if cont <= bspfile.CONTENTS_WATER:
+        if cont <= quakedef.CONTENTS_WATER:
             ent.v.waterlevel = 2
             point[2] = ent.v.origin[2] + ent.v.view_ofs[2]
             cont = world.SV_PointContents(point)
-            if cont <= bspfile.CONTENTS_WATER:
+            if cont <= quakedef.CONTENTS_WATER:
                 ent.v.waterlevel = 3
 
     return ent.v.waterlevel > 1
@@ -446,53 +464,34 @@ def SV_WallFriction ( ent: progs.edict_t, trace: world.trace_t ):
 
 def SV_TryUnstick(ent: progs.edict_t, oldvel: list[float]) -> int:
     oldorg: list[float] = [0.0, 0.0, 0.0]
-    dir   : list[float] = [0.0, 0.0, 0.0]
-    steptrace: world.trace_t = None
+    _dir  : list[float] = [0.0, 0.0, 0.0]
+    steptrace = [None]
 
     mathlib.VectorCopy(ent.v.origin, oldorg)
-    mathlib.VectorCopy(mathlib.vec3_origin, dir)
+
+    offsets = ((2, 0), (0, 2), (-2, 0), (0, -2), (2, 2), (-2, 2), (2, -2), (-2, -2))
 
     for i in range(8):
-        match i:
-            case 0:
-                dir[0] = 2
-                dir[1] = 0
-            case 1:
-                dir[0] = 0
-                dir[1] = 2
-            case 2:
-                dir[0] = -2
-                dir[1] = 0
-            case 3:
-                dir[0] = 0
-                dir[1] = -2
-            case 4:
-                dir[0] = 2
-                dir[1] = 2
-            case 5:
-                dir[0] = -2
-                dir[1] = 2
-            case 6:
-                dir[0] = 2
-                dir[1] = -2
-            case 7:
-                dir[0] = -2
-                dir[1] = -2
+        # try pushing a little in an axial direction
+        _dir[0], _dir[1] = offsets[i]
+        _dir[2] = 0
 
-        SV_PushEntity(ent, dir)
+        SV_PushEntity(ent, _dir)
 
+        # retry the original move
         ent.v.velocity[0] = oldvel[0]
         ent.v.velocity[1] = oldvel[1]
         ent.v.velocity[2] = 0
         clip = SV_FlyMove(ent, 0.1, steptrace)
 
-        if math.fabs(oldor[1] - ent.v.origin[1]) > 4 or math.fabs(oldorg[0] - ent.v.origin[0]) > 4:
-            return clip
+        if math.fabs(oldorg[1] - ent.v.origin[1]) > 4 or math.fabs(oldorg[0] - ent.v.origin[0]) > 4:
+            return clip     # stepped to a different place
 
+        # go back to the original pos and try again
         mathlib.VectorCopy(oldorg, ent.v.origin)
 
     mathlib.VectorCopy(mathlib.vec3_origin, ent.v.velocity)
-    return 7
+    return 7    # still not moving
 
 
 def SV_WalkMove(ent: progs.edict_t):
@@ -505,11 +504,11 @@ def SV_WalkMove(ent: progs.edict_t):
     nosteporg  : list[float] = [0.0, 0.0, 0.0]
     nostepvel  : list[float] = [0.0, 0.0, 0.0]
 
-    steptrace: world.trace_t = None
-    downtrace: world.trace_t = None
+    steptrace = [None]
 
-    oldonground = int(ent.v.flags & server.FL_ONGROUND)
-    ent.v.flags = int(ent.v.flags & ~server.FL_ONGROUND)
+    # do a regular slide move unless it looks like you ran into a step
+    oldonground = int(ent.v.flags) & server.FL_ONGROUND
+    ent.v.flags = int(ent.v.flags) & ~server.FL_ONGROUND
 
     mathlib.VectorCopy(ent.v.origin, oldorg)
     mathlib.VectorCopy(ent.v.velocity, oldvel)
@@ -517,54 +516,61 @@ def SV_WalkMove(ent: progs.edict_t):
     clip = SV_FlyMove(ent, host.host_frametime, steptrace)
 
     if not ( clip & 2 ):
-        return
+        return      # move didn't block on a step
 
     if not oldonground and ent.v.waterlevel == 0:
+        return      # don't stair up while jumping
+
+    if int(ent.v.movetype) != server.MOVETYPE_WALK:
+        return      # gibbed by a trigger
+
+    if _cv('sv_nostep'):
         return
 
-    if ent.v.movetype != server.MOVETYPE_WALK:
-        return
-
-    sv_nostep = cvar.Cvar_GetCvar('sv_nostep').value
-    if not sv_nostep:
-        return
-
-    if int(sv_user.sv_player.v.flags & server.FL_WATERJUMP):
+    if int(sv_user.sv_player.v.flags) & server.FL_WATERJUMP:
         return
 
     mathlib.VectorCopy(ent.v.origin, nosteporg)
     mathlib.VectorCopy(ent.v.velocity, nostepvel)
 
-    mathlib.VectorCopy(oldorg, ent.v.origin)
+    # try moving up and forward to go up a step
+    mathlib.VectorCopy(oldorg, ent.v.origin)    # back to start pos
 
-    mathlib.VectorCopy(mathlib.vec3_origin, upmove)
-    mathlib.VectorCopy(mathlib.vec3_origin, downmove)
     upmove[2] = STEPSIZE
     downmove[2] = -STEPSIZE + oldvel[2] * host.host_frametime
 
+    # move up
     SV_PushEntity(ent, upmove)
 
+    # move forward
     ent.v.velocity[0] = oldvel[0]
     ent.v.velocity[1] = oldvel[1]
     ent.v.velocity[2] = 0
     clip = SV_FlyMove(ent, host.host_frametime, steptrace)
 
+    # check for stuckness, possibly due to the limited precision of floats
+    # in the clipping hulls
     if clip:
         if math.fabs(oldorg[1] - ent.v.origin[1]) < 0.03125 and \
             math.fabs(oldorg[0] - ent.v.origin[0]) < 0.03125:
+            # stepping up didn't make any progress
             clip = SV_TryUnstick(ent, oldvel)
 
+    # extra friction based on view angle
     if clip & 2:
-        SV_WallFriction(ent, steptrace)
+        SV_WallFriction(ent, steptrace[0])
 
+    # move down
     downtrace = SV_PushEntity(ent, downmove)
 
     if downtrace.plane.normal[2] > 0.7:
         if ent.v.solid == server.SOLID_BSP:
-            ent.v.flags = int(ent.v.flags | server.FL_ONGROUND)
+            ent.v.flags = int(ent.v.flags) | server.FL_ONGROUND
             ent.v.groundentity = progs.EDICT_TO_PROG(downtrace.ent)
-
     else:
+        # if the push down didn't end up on good ground, use the move without
+        # the step up.  This happens near wall / slope combinations, and can
+        # cause the player to hop up higher on a slope too steep to climb
         mathlib.VectorCopy(nosteporg, ent.v.origin)
         mathlib.VectorCopy(nostepvel, ent.v.velocity)
 
@@ -585,7 +591,7 @@ def SV_Physics_Client(ent: progs.edict_t, num: int):
         case server.MOVETYPE_WALK:
             if not SV_RunThink(ent):
                 return
-            if not SV_CheckWater(ent) and not ( int(ent.v.flags & server.FL_WATERJUMP)):
+            if not SV_CheckWater(ent) and not ( int(ent.v.flags) & server.FL_WATERJUMP):
                 SV_AddGravity(ent)
             SV_CheckStuck(ent)
             SV_WalkMove(ent)
@@ -627,15 +633,15 @@ def SV_CheckWaterTransition(ent: progs.edict_t):
         ent.v.waterlevel = 1
         return
 
-    if cont <= bspfile.CONTENTS_WATER:
-        if ent.v.watertype == bspfile.CONTENTS_EMPTY:
+    if cont <= quakedef.CONTENTS_WATER:
+        if ent.v.watertype == quakedef.CONTENTS_EMPTY:
             sv_main.SV_StartSound(ent, 0, 'misc/h2ohit1.wav', 255, 1)
         ent.v.watertype = cont
         ent.v.waterlevel = 1
     else:
-        if ent.v.watertype != bspfile.CONTENTS_EMPTY:
+        if ent.v.watertype != quakedef.CONTENTS_EMPTY:
             sv_main.SV_StartSound(ent, 0, 'misc/h2ohit1.wav', 255, 1)
-        ent.v.watertype = bspfile.CONTENTS_EMPTY
+        ent.v.watertype = quakedef.CONTENTS_EMPTY
         ent.v.waterlevel = cont
 
 def SV_Physics_Toss(ent: progs.edict_t):
@@ -655,7 +661,7 @@ def SV_Physics_Toss(ent: progs.edict_t):
 
     mathlib.VectorMA(ent.v.angles, host.host_frametime, ent.v.avelocity, ent.v.angles)
 
-    mathlib.VectorScal(ent.v.velocity, host.host_frametime, move)
+    mathlib.VectorScale(ent.v.velocity, host.host_frametime, move)
     trace = SV_PushEntity(ent, move)
 
     if trace.fraction == 1:
@@ -685,7 +691,7 @@ def SV_Physics_Step(ent: progs.edict_t):
 
     hitsound: bool = False
 
-    sv_gravity = cvar.Cvar_GetCvar('sv_gravity').value
+    sv_gravity = _cv('sv_gravity')
 
     if not int(ent.v.flags) & ( server.FL_ONGROUND | server.FL_FLY | server.FL_SWIM ):
         if ent.v.velocity[2] < sv_gravity * -0.1:
@@ -707,75 +713,60 @@ def SV_Physics_Step(ent: progs.edict_t):
 
 
 def SV_Physics():
-    pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(sv_main.sv.edicts)
-    pr_edict.pr_global_struct.other = progs.EDICT_TO_PROG(sv_main.sv.edicts)
+    # let the progs know that a new frame has started
+    pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(sv_main.sv.edicts[0])
+    pr_edict.pr_global_struct.other = progs.EDICT_TO_PROG(sv_main.sv.edicts[0])
     pr_edict.pr_global_struct.time = sv_main.sv.time
 
     pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.StartFrame)
 
-    ent: progs.edict_t = sv_main.sv.edicts
+    sv_freezenonclients = _cv('sv_freezenonclients')
 
-    sv_freezenonclients = cvar.Cvar_GetCvar('sv_freezenonclients').value
-
-    entity_cap = 0
     if sv_freezenonclients:
         entity_cap = sv_main.svs.maxclients + 1
     else:
         entity_cap = sv_main.sv.num_edicts
 
+    # treat each object in turn
     for i in range(entity_cap):
+        ent = sv_main.sv.edicts[i]
+
         if ent.free:
             continue
 
         if pr_edict.pr_global_struct.force_retouch:
-            world.SV_LinkEdict(ent, True)
+            world.SV_LinkEdict(ent, True)   # force retouch even for stationary
+
+        mt = int(ent.v.movetype)
 
         if i > 0 and i <= sv_main.svs.maxclients:
             SV_Physics_Client(ent, i)
-        elif (ent.v.movetype == server.MOVETYPE_PUSH):
+        elif mt == server.MOVETYPE_PUSH:
             SV_Physics_Pusher(ent)
-        elif ent.v.movetype == server.MOVETYPE_NONE:
+        elif mt == server.MOVETYPE_NONE:
             SV_Physics_None(ent)
-        elif ent.v.movetype == server.MOVETYPE_NOCLIP:
+        elif mt == server.MOVETYPE_NOCLIP:
             SV_Physics_Noclip(ent)
-        elif ent.v.movetype == server.MOVETYPE_TOSS or \
-            ent.v.movetype == server.MOVETYPE_GIB or \
-            ent.v.movetype == server.MOVETYPE_BOUNCE or \
-            ent.v.movetype == server.MOVETYPE_FLY or \
-            ent.v.movetype == server.MOVETYPE_FLYMISSILE:
+        elif mt == server.MOVETYPE_STEP:
+            SV_Physics_Step(ent)
+        elif mt in (server.MOVETYPE_TOSS, server.MOVETYPE_GIB, server.MOVETYPE_BOUNCE,
+                    server.MOVETYPE_FLY, server.MOVETYPE_FLYMISSILE):
             SV_Physics_Toss(ent)
         else:
-            sys_sdl_unix.Sys_Error('SV_Physics: bad movetype {ent.v.movetype}')
+            sys_sdl_unix.Sys_Error(f'SV_Physics: bad movetype {mt}')
 
+        # (QuakeSpasm) hint for entity interpolation: does this entity think at a steady interval?
         ent.sendinterval = False
-
+        oldframe = getattr(ent, 'oldframe', ent.v.frame)
+        oldthinktime = getattr(ent, 'oldthinktime', 0.0)
         if not ent.free and ent.v.nextthink > sv_main.sv.time and \
-            ( ent.v.movetype == server.MOVETYPE_STEP or ent.v.movetype == server.MOVETYPE_WALK or ent.v.frame != ent.oldframe):
-            j = mathlib.Q_rint(ent.v.nextthink - ent.oldthinktime) * 255
+            (mt == server.MOVETYPE_STEP or mt == server.MOVETYPE_WALK or ent.v.frame != oldframe):
+            j = int(round((ent.v.nextthink - oldthinktime) * 255))
             if j >= 0 and j < 256 and j != 25 and j != 26:
                 ent.sendinterval = True
 
-        if pr_edict.pr_global_struct.force_retouch:
-            pr_edict.pr_global_struct.force_retouch -= 1
+    if pr_edict.pr_global_struct.force_retouch:
+        pr_edict.pr_global_struct.force_retouch -= 1
 
-        if not sv_freezenonclients:
-            sv_main.sv.time += host.host_frametime
-
-        ent = progs.NEXT_EDICT(ent)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
+    if not sv_freezenonclients:
+        sv_main.sv.time += host.host_frametime

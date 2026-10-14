@@ -13,7 +13,6 @@ import cl_parse
 import cl_tent  # temporary entities
 import common
 import console
-import gl_model
 import gl_rmain
 import gl_screen
 import host
@@ -28,16 +27,14 @@ import render
 import snd_dma
 import sv_main
 
+# import gl_model
 
-class cactive_t(Enum):
-    ca_dedicated    = 0
-    ca_disconnected = 1
-    ca_connected    = 2
+cactive_t = quakedef.cactive_t  # single shared enum; a private copy never compared equal to quakedef's
 
 cls = quakedef.client_static_t()
 cl  = quakedef.client_state_t()
 
-cl_static_entities: list[quakedef.entity_t] = [None for _ in range(quakedef.MAX_STATIC_ENTITIES)]
+cl_static_entities: list[render.entity_t] = [None for _ in range(quakedef.MAX_STATIC_ENTITIES)]
 cl_lightstyle : list[quakedef.lightstyle_t] = [None for _ in range(quakedef.MAX_LIGHTSTYLES)]
 cl_dlights    : list[quakedef.dlight_t]     = [None for _ in range(quakedef.MAX_DLIGHTS)]
 
@@ -48,32 +45,68 @@ cl_numvisedicts = 0
 cl_visedicts: list[quakedef.entity_t] = [None] * quakedef.MAX_VISEDICTS
 
 
+def _fix_client_state():
+    """Make sure the fixed-size arrays that C declares (mtime[2], mvelocity[2][3], ...)
+    exist with the right shape, whatever client_state_t's constructor produced."""
+    def vec3():
+        return [0.0, 0.0, 0.0]
+
+    def need_list(name, n, factory):
+        v = getattr(cl, name, None)
+        if not isinstance(v, list) or len(v) < n:
+            setattr(cl, name, [factory() for _ in range(n)])
+
+    need_list('mtime', 2, float)
+    need_list('mvelocity', 2, vec3)
+    need_list('mviewangles', 2, vec3)
+    need_list('viewangles', 3, float)
+    need_list('velocity', 3, float)
+    need_list('punchangle', 3, float)
+    need_list('stats', quakedef.MAX_CL_STATS, int)
+    need_list('item_gettime', 32, float)
+
+
+_fix_client_state()
+
+
 def CL_ClearState():
     global cl, cl_dlights, cl_lightstyle
-    global cl_max_edicts, cl_entities
+    global cl_max_edicts, cl_entities, cl_static_entities
 
     if not sv_main.sv.active:
         host.Host_ClearMemory()
 
     cl = quakedef.client_state_t()
+    _fix_client_state()
 
-    cls.message = bytearray()
+    # C: SZ_Clear(&cls.message). Replacing it with a bytearray destroyed the sizebuf.
+    common.SZ_Clear(cls.message)
 
-    cl_dlights    = [quakedef.dlight_t() for _ in range(quakedef.MAX_STATIC_ENTITIES)]
+    cl_dlights    = [quakedef.dlight_t() for _ in range(quakedef.MAX_DLIGHTS)]
     cl_lightstyle = [quakedef.lightstyle_t() for _ in range(quakedef.MAX_LIGHTSTYLES)]
     cl_tent.cl_temp_entities = [quakedef.entity_t() for _ in range(quakedef.MAX_TEMP_ENTITIES)]
     cl_tent.cl_beams         = [quakedef.beam_t() for _ in range(quakedef.MAX_BEAMS)]
 
-    max_edicts = cvar.Cvar_GetCvar('max_edicts').value
+    import cvar
+    max_edicts = int(cvar.Cvar_GetCvar('max_edicts').value)
 
-    cl_max_edicts = common.CLAMP(quakedef.MIN_EDICTS, max_edicts, quakedef.MAX_EDICTS)
-    cl_entities = [quakedef.entity_t() for _ in range(cl_max_edicts)]
+    cl_max_edicts = int(common.CLAMP(quakedef.MIN_EDICTS, max_edicts, quakedef.MAX_EDICTS))
+    cl_entities = [render.entity_t() for _ in range(cl_max_edicts)]
+    cl_static_entities = [render.entity_t() for _ in range(quakedef.MAX_STATIC_ENTITIES)]
 
 
 def CL_Init():
     global _cmd, cvar
     import _cmd
     import cvar
+
+    # C: SZ_Alloc(&cls.message, 1024)
+    if not isinstance(cls.message, common.sizebuf_s):
+        cls.message = common.sizebuf_s()
+    common.SZ_Alloc(cls.message, 1024)
+
+    # registers +forward/-forward, +attack, +jump, impulse, +mlook ... (C: CL_InitInput in CL_Init)
+    cl_input.CL_InitInput()
 
     cl_name       = {'name': "_cl_name",      'value': "player", 'flags': cvar.CVAR_ARCHIVE}
     cl_color      = {'name': "_cl_color",     'value': "0",      'flags': cvar.CVAR_ARCHIVE}
@@ -157,19 +190,21 @@ def CL_Disconnect():
     snd_dma.S_StopAllSounds(True)
 
     if cl_main.cls.demoplayback:
-        cl_main.CL_StopPlayback()
+        cl_demo.CL_StopPlayback()
     elif cls.state == cactive_t.ca_connected:
         if cls.demorecording:
-            cl_main.CL_Stop_f()
+            stop = globals().get('CL_Stop_f') or getattr(cl_demo, 'CL_Stop_f', None)
+            if stop:
+                stop()
 
         console.Con_DPrintf('sending clc_disconnect\n')
         common.SZ_Clear(cls.message)
-        common.MSG_WriteByte(cl_main.cls.clc_disconnect)
-        common.NET_SendUnreliableMessage(cl_main.cls.netcon, cl_main.cls.message)
-        common.SZ_Clear(cl_main.cls.message)
-        net_main.Net_Close(cls.netcon)
+        common.MSG_WriteByte(cls.message, protocol.clc_disconnect)
+        net_main.NET_SendUnreliableMessage(cls.netcon, cls.message)
+        common.SZ_Clear(cls.message)
+        net_main.NET_Close(cls.netcon)
 
-        cl_main.cls.state = cl_main.cactive_t.ca_disconnected
+        cls.state = cactive_t.ca_disconnected
         if sv_main.sv.active:
             host.Host_ShutdownServer(False)
 
@@ -177,7 +212,7 @@ def CL_Disconnect():
     cls.timedemo = False
     cl.intermission = 0
 
-    #cl_demo.CL_ClearSignons()
+    cls.signon = 0
 
 
 def CL_EstablishConnection(_host: str):
@@ -194,7 +229,7 @@ def CL_EstablishConnection(_host: str):
     if not cls.netcon:
         host.Host_Error('CL_Connect: connect failed')
 
-    console.Con_DPrintf(f'CL_EstablishConnection: connect to {_host}')
+    console.Con_DPrintf(f'CL_EstablishConnection: connect to {_host}\n')
 
     cls.demonum = -1
     cls.state =  quakedef.cactive_t.ca_connected
@@ -202,7 +237,7 @@ def CL_EstablishConnection(_host: str):
     common.MSG_WriteByte(cls.message, protocol.clc_nop)
 
 def CL_SignonReply():
-    console.Con_DPrintf('CL_SignonReply: {cls.signon}')
+    console.Con_DPrintf(f'CL_SignonReply: {cls.signon}\n')
 
     match cls.signon:
         case 1:
@@ -210,9 +245,9 @@ def CL_SignonReply():
             common.MSG_WriteString(cls.message, 'prespawn')
         case 2:
             cl_name  = cvar.Cvar_GetCvar('_cl_name').string
-            cl_color = cvar.Cvar_GetCvar('_cl_color').value
+            cl_color = int(cvar.Cvar_GetCvar('_cl_color').value)
             common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
-            common.MSG_WriteString(cls.messasge, f'name "{cl_name}"\n')
+            common.MSG_WriteString(cls.message, f'name "{cl_name}"\n')
 
             common.MSG_WriteByte(cls.message, protocol.clc_stringcmd)
             common.MSG_WriteString(cls.message, f'color {cl_color>>4} {cl_color & 15}\n')
@@ -248,7 +283,7 @@ def CL_PrintEntities_f():
         return
 
     for i, ent in enumerate(cl_entities):
-        console.Con_Printf(f'{i:%3}')
+        console.Con_Printf(f'{i:3d}')
         if not ent.model:
             console.Con_Printf('EMPTY')
             continue
@@ -256,7 +291,7 @@ def CL_PrintEntities_f():
         # Format model name (safely handling None), frame, origin vector, and angles vector
         model_name = ent.model.name if ent.model else "NONE"
 
-        Con_Printf(
+        console.Con_Printf(
             f"{model_name}:{ent.frame:2d}  ("
             f"{ent.origin[0]:5.1f},{ent.origin[1]:5.1f},{ent.origin[2]:5.1f}) ["
             f"{ent.angles[0]:5.1f} {ent.angles[1]:5.1f} {ent.angles[2]:5.1f}]\n"
@@ -322,7 +357,7 @@ def CL_LerpPoint() -> float:
     frac = ( cl.time - cl.mtime[1] ) / f
 
     if frac < 0:
-        if frac < 0.01:
+        if frac < -0.01:
             cl.time = cl.mtime[1]
         frac = 0
     elif frac > 1:
@@ -376,7 +411,7 @@ def CL_RelinkEntities():
             continue
 
 
-        mathlib.VectorCopy(ent.origin, oldorg)
+        oldorg = list(ent.origin)
 
         if ent.forcelink:
             mathlib.VectorCopy(ent.msg_origins[0], ent.origin)
@@ -514,21 +549,22 @@ def CL_ReadFromServer():
     cl_tent.CL_UpdateTEnts()
 
     if cl_numvisedicts > 256 and host.dev_peakstats.visedicts <= 256:
-        Con_DWarning(f"{cl_numvisedicts:d} visedicts exceeds standard limit of 256 (max = {quakedef.MAX_VISEDICTS:d}).\n")
+        console.Con_DWarning(f"{cl_numvisedicts:d} visedicts exceeds standard limit of 256 (max = {quakedef.MAX_VISEDICTS:d}).\n")
 
     host.dev_stats.visedicts = cl_numvisedicts
-    dev_peakstats.visedicts = max(cl_numvisedicts, dev_peakstats.visedicts)
+    host.dev_peakstats.visedicts = max(cl_numvisedicts, host.dev_peakstats.visedicts)
 
-    if num_temp_entities > 64 and host.dev_peakstats.tempents <= 64:
-        Con_DWarning(f"{cl_tent.num_temp_entities:d} tempentities exceeds standard limit of 64 (max = {quakedef.MAX_TEMP_ENTITIES:d}).\n")
+    ntemp = getattr(cl_tent, 'num_temp_entities', 0)
+    if ntemp > 64 and host.dev_peakstats.tempents <= 64:
+        console.Con_DWarning(f"{ntemp:d} tempentities exceeds standard limit of 64 (max = {quakedef.MAX_TEMP_ENTITIES:d}).\n")
 
-    host.dev_stats.tempents = cl_tent.num_temp_entities
-    host.dev_peakstats.tempents = max(cl_tent.num_temp_entities, host.dev_peakstats.tempents)
+    host.dev_stats.tempents = ntemp
+    host.dev_peakstats.tempents = max(ntemp, host.dev_peakstats.tempents)
 
     num_beams = sum(1 for b in cl_tent.cl_beams if b.model and b.endtime >= cl.time)
 
     if num_beams > 24 and host.dev_peakstats.beams <= 24:
-        Con_DWarning(f"{num_beams:d} beams exceeded standard limit of 24 (max = {quakedef.MAX_BEAMS:d}).\n")
+        console.Con_DWarning(f"{num_beams:d} beams exceeded standard limit of 24 (max = {quakedef.MAX_BEAMS:d}).\n")
 
     host.dev_stats.beams = num_beams
     host.dev_peakstats.beams = max(num_beams, host.dev_peakstats.beams)
@@ -536,22 +572,22 @@ def CL_ReadFromServer():
     num_dlights = sum(1 for l in cl_dlights if l.die >= cl.time and l.radius)
 
     if num_dlights > 32 and host.dev_peakstats.dlights <= 32:
-        Con_DWarning(f"{num_dlights:d} dlights exceeded standard limit of 32 (max = {quakedef.MAX_DLIGHTS:d}).\n")
+        console.Con_DWarning(f"{num_dlights:d} dlights exceeded standard limit of 32 (max = {quakedef.MAX_DLIGHTS:d}).\n")
 
-    dev_stats.dlights = num_dlights
-    dev_peakstats.dlights = max(num_dlights, host.dev_peakstats.dlights)
+    host.dev_stats.dlights = num_dlights
+    host.dev_peakstats.dlights = max(num_dlights, host.dev_peakstats.dlights)
 
     return 0
 
 
 def CL_SendCmd():
+    ucmd_cls = getattr(protocol, 'usercmd_t', None) or getattr(quakedef, 'usercmd_t', None) or getattr(cl_input, 'usercmd_t', None)
+    cmd = ucmd_cls() if ucmd_cls else None
 
-    cmd: protocol.usercmd_t = None
-
-    if cl_main.cls.state != quakedef.cactive_t.ca_connected:
+    if cls.state != quakedef.cactive_t.ca_connected:
         return
 
-    if cl_main.cls.signon == quakedef.SIGNONS:
+    if cls.signon == quakedef.SIGNONS:
         cl_input.CL_BaseMove(cmd)
 
         in_sdl.IN_Move(cmd)

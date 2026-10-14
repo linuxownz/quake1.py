@@ -1,11 +1,11 @@
-#crc.py 
+#crc.py
 
 import array
 
 CRC_INIT_VALUE = 0xffff
 CRC_XOR_VALUE  = 0x0000
 
-crctable = array.array('H', [ 
+crctable = array.array('H', [
     0x0000, 0x1021, 0x2042, 0x3063, 0x4084, 0x50a5, 0x60c6, 0x70e7,
     0x8108, 0x9129, 0xa14a, 0xb16b, 0xc18c, 0xd1ad, 0xe1ce, 0xf1ef,
     0x1231, 0x0210, 0x3273, 0x2252, 0x52b5, 0x4294, 0x72f7, 0x62d6,
@@ -44,7 +44,9 @@ def CRC_Init() -> int:
     return CRC_INIT_VALUE
 
 def CRC_ProcessByte(crcvalue, data):
-    return (crcvalue << 8 ) ^ crctable[ ( crcvalue >> 8) ^ data ] 
+    crcvalue &= 0xFFFF
+    data &= 0xFF
+    return (crcvalue << 8 ) ^ crctable[ ( crcvalue >> 8) ^ data ]
 
 def CRC_Value(crcvalue):
     return crcvalue ^ CRC_XOR_VALUE
@@ -58,7 +60,7 @@ def CRC_Block(start: bytes, count):
         # 2. XOR it with the current data byte (*start++)
         # 3. Use the result as an index into the lookup table
         table_index = ((_crc >> 8) & 0xFF) ^ byte
-    
+
         # Shift the CRC left by 8 bits (crc << 8)
         # XOR the shifted CRC with the value from the table
         _crc = ((_crc << 8) & 0xFFFF) ^ crctable[table_index]

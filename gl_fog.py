@@ -211,7 +211,7 @@ def Fog_EnableGFog():
     if Fog_GetDensity() > 0:
         gl.glEnable(gl.GL_FOG)
 
-def Fog_DisbleGFog():
+def Fog_DisableGFog():
     if Fog_GetDensity() > 0:
         gl.glDisable(gl.GL_FOG)
 

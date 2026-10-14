@@ -43,6 +43,14 @@ noclip_anglehack: bool = False
 current_skill: int = 0
 
 
+def _client_index(client) -> int:
+    """C: host_client - svs.clients (pointer subtraction). Identity based."""
+    for i, c in enumerate(sv_main.svs.clients):
+        if c is client:
+            return i
+    return -1
+
+
 def FileList_Add(name, _list: filelist_item_t, path_id) -> filelist_item_t:
     item = _list
 
@@ -245,17 +253,17 @@ def Host_God_f():
 
     match _cmd.Cmd_Arvc():
         case 1:
-            sv_user.sv_player.v.flags = int(sv_user.sv_player.v.flags) ^ quakedef.FL_GODMODE
-            if int(sv_user.sv_player.v.flags) & quakedef.FL_GODMODE:
+            host.host_client.edict.v.flags = int(host.host_client.edict.v.flags) ^ quakedef.FL_GODMODE
+            if int(host.host_client.edict.v.flags) & quakedef.FL_GODMODE:
                 host.SV_ClientPrintf('godmode ON\n')
             else:
                 host.SV_ClientPrintf('godmode OFF')
         case 2:
             if _cmd.Cmd_Argv(1) == 1:
-                sv_user.sv_player.v.flags = sv_user.sv_player.v.flags | quakedef.FL_GODMODE
+                host.host_client.edict.v.flags = host.host_client.edict.v.flags | quakedef.FL_GODMODE
                 host.SV_ClientPrintf('godmode ON\n')
             else:
-                sv_user.sv_player.v.flags = sv_user.sv_player.v.flags & ~quakedef.FL_GODMODE
+                host.host_client.edict.v.flags = host.host_client.edict.v.flags & ~quakedef.FL_GODMODE
                 host.SV_ClientPrintf('godmode OFF\n')
         case _:
             console.Con_Printf('god [value] : toggle god mode 0=off, 1=on\n')
@@ -271,17 +279,17 @@ def Host_Notarget_f():
 
     match _cmd.Cmd_Arvc():
         case 1:
-            sv_user.sv_player.v.flags = int(sv_user.sv_player.v.flags) ^ quakedef.FL_NOTARGET
-            if int(sv_user.sv_player.v.flags) & quakedef.FL_NOTARGET:
+            host.host_client.edict.v.flags = int(host.host_client.edict.v.flags) ^ quakedef.FL_NOTARGET
+            if int(host.host_client.edict.v.flags) & quakedef.FL_NOTARGET:
                 host.SV_ClientPrintf('notarget ON\n')
             else:
                 host.SV_ClientPrintf('notarget OFF')
         case 2:
             if _cmd.Cmd_Argv(1) == 1:
-                sv_user.sv_player.v.flags = sv_user.sv_player.v.flags | quakedef.FL_NOTARGET
+                host.host_client.edict.v.flags = host.host_client.edict.v.flags | quakedef.FL_NOTARGET
                 host.SV_ClientPrintf('notarget ON\n')
             else:
-                sv_user.sv_player.v.flags = sv_user.sv_player.v.flags & ~quakedef.FL_NOTARGET
+                host.host_client.edict.v.flags = host.host_client.edict.v.flags & ~quakedef.FL_NOTARGET
                 host.SV_ClientPrintf('notarget OFF\n')
         case _:
             console.Con_Printf('notarget [value] : toggle notarget mode 0=off, 1=on\n')
@@ -296,18 +304,18 @@ def Host_Fly_f():
 
     match (_cmd.Cmd_Argc()):
         case 1:
-            if sv_user.sv_player.v.movetype != quakedef.MOVETYPE_FLY:
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_FLY
+            if host.host_client.edict.v.movetype != quakedef.MOVETYPE_FLY:
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_FLY
                 host.SV_ClientPrintf('flymode ON\n')
             else:
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_WALK
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_WALK
                 host.SV_ClientPrintf('flymode OFF\n')
         case 2:
             if _cmd.Cmd_Argv(1):
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_FLY
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_FLY
                 host.SV_ClientPrintf('flymode ON\n')
             else:
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_WALK
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_WALK
                 host.SV_ClientPrintf('flymode OFF\n')
         case _:
             console.Con_Printf('fly [value] : toggle fly mode. values 0=off, 1=on\n')
@@ -350,8 +358,8 @@ def Host_Map_f():
         return
 
     if cl_main.cls.state != cl_main.cactive_t.ca_dedicated:
-        for i in range (common.Cmd_Argc()):
-            cl_main.cls.spawnparms += common.Cmd_Argv(i)
+        for i in range (_cmd.Cmd_Argc()):
+            cl_main.cls.spawnparms += _cmd.Cmd_Argv(i)
         _cmd.Cmd_ExecuteString ('connect local', _cmd.cmd_source_t.src_command)
 
 
@@ -443,7 +451,7 @@ def Host_Name_f():
             _cmd.Cmd_ForwardToServer()
         return
 
-    if host.host_client.name and host.host_client.name == 'unconnected':  # noqa: SIM102
+    if host.host_client.name and host.host_client.name != 'unconnected':  # noqa: SIM102
         if host.host_client.name != newName:
             console.Con_Printf(f'{host.host_client.name} renamed to {newName}')
 
@@ -451,7 +459,7 @@ def Host_Name_f():
     host.host_client.edict.v.netname = pr_edict.PR_SetEngineString(host.host_client.name)
 
     common.MSG_WriteByte(sv_main.sv.reliable_datagram, protocol.svc_updatename)
-    common.MSG_WriteByte(sv_main.sv.reliable_datagram, host.host_client - sv_main.svs.clients) # TODO how to do this???
+    common.MSG_WriteByte(sv_main.sv.reliable_datagram, _client_index(host.host_client))
     common.MSG_WriteString(sv_main.sv.reliable_datagram, host.host_client.name)
 
 
@@ -462,7 +470,7 @@ def Host_Say(teamonly: bool):
 
     if _cmd.cmd_source == _cmd.cmd_source_t.src_command:
         if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
-            _cmd.Cmd_ForwardToServer_f()
+            _cmd.Cmd_ForwardToServer()
             return
         fromServer = True
         teamonly = False
@@ -527,23 +535,23 @@ def Host_Noclip_f():
 
     match _cmd.Cmd_Argc():
         case 1:
-            if sv_user.sv_player.v.movetype != quakedef.MOVETYPE_NOCLIP:
+            if host.host_client.edict.v.movetype != quakedef.MOVETYPE_NOCLIP:
                 noclip_anglehack = True
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_NOCLIP
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_NOCLIP
                 host.SV_ClientPrintf('noclip ON\n')
 
             else:
                 noclip_anglehack = False
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_WALK
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_WALK
                 host.SV_ClientPrintf('noclip OFF\n')
         case 2:
             if _cmd.Cmd_Argv(1):
                 noclip_anglehack = True
-                sv_user.sv_player.v.movetype = quakedef.MOVETYPE_NOCLIP
+                host.host_client.edict.v.movetype = quakedef.MOVETYPE_NOCLIP
                 host.SV_ClientPrintf('noclip ON\n')
             else:
                 noclip_anglehack = False
-                sv_user.sv_player.v.movetyhpe = quakedef.MOVETYPE_WALK
+                host.host_client.edict.v.movetyhpe = quakedef.MOVETYPE_WALK
                 host.SV_ClientPrintf('noclip OFF\n')
         case _:
             console.Con_Printf('noclip [0/1]')
@@ -551,14 +559,14 @@ def Host_Noclip_f():
 def Host_SetPos_f():
     global noclip_anglehack
     if _cmd.cmd_source == _cmd.cmd_source_t.src_command:
-        _cmd.Cmd_ForwardToServer_f()
+        _cmd.Cmd_ForwardToServer()
         return
 
     if pr_edict.pr_global_struct.deathmatch:
         return
 
     if _cmd.Cmd_Argv() != 7 and _cmd.Cmd_Argv() != 4:
-        v = sv_user.sv_player.v
+        v = host.host_client.edict.v
 
         host.SV_ClientPrintf("usage:\n")
         host.SV_ClientPrintf("   setpos <x> <y> <z>\n")
@@ -569,26 +577,26 @@ def Host_SetPos_f():
             f"{int(v.v_angle[0])} {int(v.v_angle[1])} {int(v.v_angle[2])}\n"
         )
 
-    if sv_user.sv_player.v.movetype != quakedef.MOVETYPE_NOCLIP:
+    if host.host_client.edict.v.movetype != quakedef.MOVETYPE_NOCLIP:
         noclip_anglehack = True
-        sv_user.sv_player.v.movetype = quakedef.MOVETYPE_NOCLIP
+        host.host_client.edict.v.movetype = quakedef.MOVETYPE_NOCLIP
         host.SV_ClientPrintf('noclip ON')
 
-    sv_user.sv_player.v.velocity[0] = 0
-    sv_user.sv_player.v.velocity[1] = 0
-    sv_user.sv_player.v.velocity[2] = 0
+    host.host_client.edict.v.velocity[0] = 0
+    host.host_client.edict.v.velocity[1] = 0
+    host.host_client.edict.v.velocity[2] = 0
 
-    sv_user.sv_player.v.origin[0] = float(_cmd.Cmd_Argv(1))
-    sv_user.sv_player.v.origin[1] = float(_cmd.Cmd_Argv(2))
-    sv_user.sv_player.v.origin[2] = float(_cmd.Cmd_Argv(3))
+    host.host_client.edict.v.origin[0] = float(_cmd.Cmd_Argv(1))
+    host.host_client.edict.v.origin[1] = float(_cmd.Cmd_Argv(2))
+    host.host_client.edict.v.origin[2] = float(_cmd.Cmd_Argv(3))
 
     if _cmd.Cmd_Argv() == 7:
-        sv_user.sv_player.v.angles[0] = float(_cmd.Cmd_Argv(4))
-        sv_user.sv_player.v.angles[1] = float(_cmd.Cmd_Argv(5))
-        sv_user.sv_player.v.angles[2] = float(_cmd.Cmd_Argv(6))
-        sv_user.sv_player.v.fixangle = 1
+        host.host_client.edict.v.angles[0] = float(_cmd.Cmd_Argv(4))
+        host.host_client.edict.v.angles[1] = float(_cmd.Cmd_Argv(5))
+        host.host_client.edict.v.angles[2] = float(_cmd.Cmd_Argv(6))
+        host.host_client.edict.v.fixangle = 1
 
-    world.SV_LinkEdict(sv_user.sv_player, False)
+    world.SV_LinkEdict(host.host_client.edict, False)
 
 
 def Host_Say_f():
@@ -663,7 +671,7 @@ def Host_Color_f():
     host.host_client.edict.v.team = bottom + 1
 
     common.MSG_WriteByte(sv_main.sv.reliable_datagram, protocol.svc_updatecolors)
-    client_index = server.svs.clients.index(host.host_client) & 0xff
+    client_index = _client_index(host.host_client) & 0xff
     common.MSG_WriteByte(sv_main.sv.reliable_datagram, client_index)
     common.MSG_WriteByte(sv_main.sv.reliable_datagram, host.host_client.colors)
 
@@ -672,12 +680,12 @@ def Host_Kill_f():
         _cmd.Cmd_ForwardToServer()
         return
 
-    if sv_user.sv_player.v.health <= 0:
+    if host.host_client.edict.v.health <= 0:
         host.SV_ClientPrintf('cant suicide -- already dead')
         return
 
     pr_edict.pr_global_struct.time = sv_main.sv.time
-    pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(sv_user.sv_player)
+    pr_edict.pr_global_struct.self = pr_edict.EDICT_TO_PROG(host.host_client.edict)
     pr_edict.PR_ExecuteProgram(pr_edict.pr_global_struct.ClientKill)
 
 # supposed to be defined in host_cmd.py
@@ -697,9 +705,9 @@ def Host_Pause_f():
         sv_main.sv.paused ^= 1;
 
         if sv_main.sv.paused:
-            host.SV_BroadcastPrintf(f'{pr_edict.PR_GetString(sv_user.sv_player.v.netname)} paused the game')
+            host.SV_BroadcastPrintf(f'{pr_edict.PR_GetString(host.host_client.edict.v.netname)} paused the game')
         else:
-            host.SV_BroadcastPrintf(f'{pr_edict.PR_GetString(sv_user.sv_player.v.netname)} unpaused the game')
+            host.SV_BroadcastPrintf(f'{pr_edict.PR_GetString(host.host_client.edict.v.netname)} unpaused the game')
 
         common.MSG_WriteByte(sv_main.sv.reliable_datagram, protocol.svc_setpause)
         common.MSG_WriteByte(sv_main.sv.reliable_datagram, sv_main.sv.paused)
@@ -715,7 +723,7 @@ def Host_Spawn_f():
     if sv_main.sv.loadgame:
         sv_main.sv.paused = False
     else:
-        ent:progs.edict_t = host.host_client.edict
+        ent = host.host_client.edict
         ent.v.colormap = pr_edict.NUM_FOR_EDICT(ent)
         ent.v.team = ( host.host_client.colors & 15) + 1
         ent.v.netname = pr_edict.PR_SetEngineString(host.host_client.name)
@@ -725,7 +733,7 @@ def Host_Spawn_f():
             setattr(pr_edict.pr_global_struct, f"parm{i + 1}", host.host_client.spawn_parms[i])
 
         pr_edict.pr_global_struct.time = sv_main.sv.time
-        pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(sv_user.sv_player)
+        pr_edict.pr_global_struct.self = pr_edict.EDICT_TO_PROG(host.host_client.edict)
         pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.ClientConnect)
 
         if sys_sdl_unix.Sys_DoubleTime() - net_main.NET_QSocketGetTime(host.host_client.netconnection) <= sv_main.sv.time:
@@ -738,7 +746,8 @@ def Host_Spawn_f():
     common.MSG_WriteByte(host.host_client.message, protocol.svc_time)
     common.MSG_WriteFloat(host.host_client.message, sv_main.sv.time)
 
-    for client in sv_main.svs.clients:
+    for i in range(sv_main.svs.maxclients):
+        client = sv_main.svs.clients[i]
         common.MSG_WriteByte (host.host_client.message, protocol.svc_updatename)
         common.MSG_WriteByte (host.host_client.message, i)
         common.MSG_WriteString (host.host_client.message, client.name)
@@ -770,7 +779,7 @@ def Host_Spawn_f():
     common.MSG_WriteByte (host.host_client.message, quakedef.STAT_MONSTERS)
     common.MSG_WriteLong (host.host_client.message, pr_edict.pr_global_struct.killed_monsters)
 
-    client_num = sv_main.svs.clients.index(host.host_client)
+    client_num = _client_index(host.host_client)
     ent = pr_edict.EDICT_NUM(1 + client_num)
 
     common.MSG_WriteByte(host.host_client.message, protocol.svc_setangle)
@@ -780,11 +789,11 @@ def Host_Spawn_f():
 
     common.MSG_WriteAngle(host.host_client.message, 0, sv_main.sv.protocolflags)
 
-    sv_main.SV_WriteClientdataToMessage(sv_user.sv_player, host.host_client.message)
+    sv_main.SV_WriteClientdataToMessage(host.host_client.edict, host.host_client.message)
 
     common.MSG_WriteByte(host.host_client.message, protocol.svc_signonnum)
     common.MSG_WriteByte(host.host_client.message, 3)
-    host.host_client.sendsignon = quakedef.PRESPAWN_FLUSH
+    host.host_client.sendsignon = server.sendsignon_e.PRESPAWN_FLUSH
 
 
 
@@ -1109,114 +1118,114 @@ def Host_Give_f():
             if common.hipnotic:
                 if t[0] == '6':
                     if t[1] == 'a':
-                        sv_user.sv_player.v.items = sv_user.sv_player.v.items | quakedef.HIT_PROXIMITY_GUN
+                        host.host_client.edict.v.items = host.host_client.edict.v.items | quakedef.HIT_PROXIMITY_GUN
                     else:
-                        sv_user.sv_player.v.items = sv_user.sv_player.v.items | quakedef.IT_GRENADE_LAUNCHER
+                        host.host_client.edict.v.items = host.host_client.edict.v.items | quakedef.IT_GRENADE_LAUNCHER
                 elif t[0] == '9':
-                    sv_user.sv_player.v.items |= quakedef.HIT_LASER_CANNON
+                    host.host_client.edict.v.items |= quakedef.HIT_LASER_CANNON
                 elif t[0] == '0':
-                    sv_user.sv_player.v.items |= quakedef.HIT_MJOLNIR
+                    host.host_client.edict.v.items |= quakedef.HIT_MJOLNIR
                 elif t[0] == '2':
-                    sv_user.sv_player.v.items = sv_user.sv_player.v.items | ( quakedef.IT_SHOTGUN << (int(t[0]) - 2))
+                    host.host_client.edict.v.items = host.host_client.edict.v.items | ( quakedef.IT_SHOTGUN << (int(t[0]) - 2))
 
             else:
                 if t[0] >= '2':
-                    sv_user.sv_player.v.items = sv_user.sv_player.v.items | ( quakedef.IT_SHOTGUN << (int(t[0]) - 2))
+                    host.host_client.edict.v.items = host.host_client.edict.v.items | ( quakedef.IT_SHOTGUN << (int(t[0]) - 2))
         case 's':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_shells1')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_shells1')
                 if val:
                     val.float = v
 
-            sv_user.sv_player.v.ammo_shells1 = v
+            host.host_client.edict.v.ammo_shells1 = v
         case 'n':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_nails1')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_nails1')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon <= quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_nails = v
+                    if host.host_client.edict.v.weapon <= quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_nails = v
 
             else:
-                sv_user.sv_player.v.ammo_nails = v
+                host.host_client.edict.v.ammo_nails = v
 
         case 'l':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_lava_nails')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_lava_nails')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon > quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_nails = v
+                    if host.host_client.edict.v.weapon > quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_nails = v
         case 'r':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_rockets')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_rockets')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon <= quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_rockets = v
+                    if host.host_client.edict.v.weapon <= quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_rockets = v
             else:
-                sv_user.sv_player.v.ammo_rockets = v
+                host.host_client.edict.v.ammo_rockets = v
         case 'm':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_multi_rockets')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_multi_rockets')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon > quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_rockets = v
+                    if host.host_client.edict.v.weapon > quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_rockets = v
         case 'h':
-            sv_user.sv_player.v.health = v
+            host.host_client.edict.v.health = v
 
         case 'c':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_cells')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_cells')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon <= quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_cells = v
+                    if host.host_client.edict.v.weapon <= quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_cells = v
             else:
-                sv_user.sv_player.v.ammo_cells = v
+                host.host_client.edict.v.ammo_cells = v
 
         case 'p':
             if common.rogue:
-                val = pr_edict.GetEdictFieldValue(sv_user.sv_player, 'ammo_plasma')
+                val = pr_edict.GetEdictFieldValue(host.host_client.edict, 'ammo_plasma')
                 if val:
                     val.float = v
-                    if sv_user.sv_player.v.weapon > quakedef.IT_LIGHTNING:
-                        sv_user.sv_player.v.ammo_cells = v
+                    if host.host_client.edict.v.weapon > quakedef.IT_LIGHTNING:
+                        host.host_client.edict.v.ammo_cells = v
 
         case 'a':
             if v > 150:
-                sv_user.sv_player.v.armortype = 0.8
-                sv_user.sv_player.v.armorvalue = v
-                sv_user.sv_player.v.items = sv_user.sv_player.v.items - int(sv_user.sv_player.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR3
+                host.host_client.edict.v.armortype = 0.8
+                host.host_client.edict.v.armorvalue = v
+                host.host_client.edict.v.items = host.host_client.edict.v.items - int(host.host_client.edict.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR3
             if v > 100:
-                sv_user.sv_player.v.armortype = 0.6
-                sv_user.sv_player.v.armorvalue = v
-                sv_user.sv_player.v.items = sv_user.sv_player.v.items - int(sv_user.sv_player.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR2
+                host.host_client.edict.v.armortype = 0.6
+                host.host_client.edict.v.armorvalue = v
+                host.host_client.edict.v.items = host.host_client.edict.v.items - int(host.host_client.edict.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR2
             if v > 0:
-                sv_user.sv_player.v.armortype = 0.3
-                sv_user.sv_player.v.armorvalue = v
-                sv_user.sv_player.v.items = sv_user.sv_player.v.items - int(sv_user.sv_player.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR1
+                host.host_client.edict.v.armortype = 0.3
+                host.host_client.edict.v.armorvalue = v
+                host.host_client.edict.v.items = host.host_client.edict.v.items - int(host.host_client.edict.v.items & int(quakedef.IT_ARMOR1 | quakedef.IT_ARMOR2 | quakedef.IT_ARMOR3)) + quakedef.IT_ARMOR1
 
 
-    match sv_user.sv_player.v.weapon:
+    match host.host_client.edict.v.weapon:
         case quakedef.IT_SHOTGUN | quakedef.IT_SUPER_SHOTGUN:
-            sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_shells
+            host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_shells
         case quakedef.IT_NAILGUN | quakedef.IT_SUPER_NAILGUN | quakedef.RIT_LAVA_SUPER_NAILGUN:
-            sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_nails
+            host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_nails
         case quakedef.IT_GRENADE_LAUNCHER | quakedef.IT_ROCKET_LAUNCHER | quakedef.RIT_MULTI_GRENADE | quakedef.RIT_MULTI_ROCKET:
-            sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_rockets
+            host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_rockets
         case quakedef.IT_LIGHTNING | quakedef.HIT_LASER_CANNON | quakedef.HIT_MJOLNIR:
-            sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_cells
+            host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_cells
         case quakedef.RIT_LAVA_NAILGUN:
             if common.rogue:
-                sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_nails
+                host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_nails
 
         case quakedef.RIT_PLASMA_GUN:
             if common.rogue:
-                sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_cells
+                host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_cells
             if common.hipnotic:
-                sv_user.sv_player.v.currentammo = sv_user.sv_player.v.ammo_rockets
+                host.host_client.edict.v.currentammo = host.host_client.edict.v.ammo_rockets
 
 
 def FindViewThing() -> progs.edict_t:

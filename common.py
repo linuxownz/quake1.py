@@ -16,7 +16,9 @@ import cvar
 import host
 import net_main
 import protocol
+import quakedef
 import sys_sdl_unix
+import zone
 
 standard_quake = True
 safemode = False
@@ -27,6 +29,13 @@ fitzmode = False
 FS_ENT_NONE      = 0
 FS_ENT_FILE      = 1
 FS_ENT_DIRECTORY = 2
+
+LOADFILE_ZONE     = 0
+LOADFILE_HUNK     = 1
+LOADFILE_TEMPHUNK = 2
+LOADFILE_CACHE    = 3
+LOADFILE_STACK    = 4
+LOADFILE_MALLOC   = 5
 
 registered = {'name': 'registered', 'value': '1', 'flags': cvar.CVAR_ROM}
 cmdline    = {'name': 'cmdline',    'value':  '', 'flags': cvar.CVAR_ROM}
@@ -76,25 +85,25 @@ class cpe_mode(Enum):
     CPE_NOTRUNC = 0
     CPE_ALLOWTRUNC = 1
 
-class link_t:
-    def __init__(self):
-        self.prev: link_t = None
-        self.next: link_t = None
+#class link_t:
+#    def __init__(self):
+#        self.prev: link_t = None
+#        self.next: link_t = None
 
-def ClearLink(l: link_t):
+def ClearLink(l: quakedef.link_t):
     l.prev = l.next = l
 
-def RemoveLink(l: link_t):
+def RemoveLink(l: quakedef.link_t):
     l.next.prev = l.prev
     l.prev.next = l.next
 
-def InsertLinkBefore(l: link_t, before: link_t):
+def InsertLinkBefore(l: quakedef.link_t, before: quakedef.link_t):
     l.next = before
     l.prev = before.prev
     l.prev.next = l
     l.next.prev = l
 
-def InsertLinkAfter(l:link_t, after: link_t):
+def InsertLinkAfter(l:quakedef.link_t, after: quakedef.link_t):
     l.next = after.next
     l.prev = after
     l.prev.next = l
@@ -182,18 +191,22 @@ def FloatNoSwap(f):
     return f
 
 def MSG_WriteChar(sb: sizebuf_s, c: int):
+    c = int(c)
     index = SZ_GetSpace(sb, 1)
     sb.data[index:index+1] = bytes([c & 0xff])
 
 def MSG_WriteByte(sb:sizebuf_s, c: int):
+    c = int(c)
     index = SZ_GetSpace(sb, 1)
     sb.data[index:index+1] = bytes([c & 0xff])
 
 def MSG_WriteShort(sb:sizebuf_s, c: int):
+    c = int(c)
     index = SZ_GetSpace(sb, 2)
     sb.data[index:index+2] = bytes([c & 0xff, (c >> 8) & 0xff])
 
 def MSG_WriteLong(sb:sizebuf_s, c: int):
+    c = int(c)
     index = SZ_GetSpace(sb, 4)
     sb.data[index:index+4] = bytes([c & 0xff, (c >> 8) & 0xff, (c>>16) & 0xff, (c>>24) & 0xff])
 
@@ -206,7 +219,7 @@ def MSG_WriteString(sb: sizebuf_s, s: str):
     if s is None or s == "":
         SZ_Write(sb, b'\x00', 1)
     else:
-        data_bytes = s.encode('ascii') + b'\x00'
+        data_bytes = s.encode('latin-1', errors='replace') + b'\x00'
         SZ_Write(sb, data_bytes, len(data_bytes))
 
 def MSG_WriteCoord16(sb:sizebuf_s, f:float):
@@ -397,6 +410,13 @@ def SZ_Clear(buf: sizebuf_s):
 def SZ_GetSpace(buf: sizebuf_s, length: int):
     if buf.cursize + length > buf.maxsize:
         if not buf.allowoverflow:
+            import traceback
+
+            print(
+                f'SZ_GetSpace: cursize={buf.cursize} length={length} '
+                f'maxsize={buf.maxsize} len(data)={len(buf.data)}; written by:'
+            )
+            traceback.print_stack(limit=6)
             host.Host_Error('SZ_GetSpace: overflow without allowoverflow set')
 
         if length > buf.maxsize:
@@ -415,9 +435,12 @@ def SZ_Write(buf: sizebuf_s, data, length: int):
     buf.data[start_index : start_index + length] = data[:length]
 
 def SZ_Print(buf: sizebuf_s, string: str):
-    data_bytes = (string + '\0').encode('ascii')
+    data_bytes = (string + '\0').encode('latin-1', errors='replace')
     length = len(data_bytes)
     SZ_Write(buf, data_bytes, length)
+
+def LOC_GetString(key):
+    return key
 
 def COM_InitArgv():
     global safemode
@@ -561,61 +584,102 @@ class dpackheader_t:
         self.dirofs = dirofs
         self.dirlen = dirlen
 
-def COM_FileBase(path):
+def COM_FileBase(path) -> str:
     """ take 'somedir/otherdir/filename.ext', write only 'filename' to the output """
     return os.path.basename(path).split('.')[0]
 
-def COM_LoadFile(path):
-    # Unpack the 4th variable locally
-    handle, filelen, _, is_pak = COM_OpenFile(path)
+
+loadcache: quakedef.cache_user_t = None
+loadsize: int = 0
+loadbuf: bytes = None
+
+def LoadFileToString(usehunk) -> str:
+    if usehunk == LOADFILE_ZONE:
+        return 'LOADFILE_ZONE'
+    if usehunk == LOADFILE_HUNK:
+        return 'LOADFILE_HUNK'
+    if usehunk == LOADFILE_TEMPHUNK:
+        return 'LOADFILE_TEMPHUNK'
+    if usehunk == LOADFILE_CACHE:
+        return 'LOADFILE_CACHE'
+    if usehunk == LOADFILE_STACK:
+        return 'LOADFILE_STACK'
+    if usehunk == LOADFILE_MALLOC:
+        return 'LOADFILE_MALLOC'
+    return 'UNKNOWN LOADFILE_...'
+
+def COM_LoadFile(path:str, usehunk:int, wantpathid: bool) -> bytearray:
+    ffr = COM_OpenFile(path)
+    buf: bytearray = None
+
+    handle  = ffr.handle
+    filelen = ffr.filesize
+    is_pak  = ffr.is_pak
+    path_id = ffr.path_id
 
     if handle is None or handle == -1:
         return None
 
-    data = sys_sdl_unix.Sys_FileRead(handle, filelen)
+    base = COM_FileBase(path)
 
-    # Use the LOCAL is_pak variable
-    if not is_pak:
-        sys_sdl_unix.Sys_FileClose(handle)
+    if usehunk == LOADFILE_HUNK:
+        buf = zone.Hunk_AllocName(filelen + 1, base)
+    elif usehunk == LOADFILE_TEMPHUNK:
+        buf = zone.Hunk_TempAlloc(filelen + 1)
+    elif usehunk == LOADFILE_ZONE:
+        buf = zone.Z_Malloc(filelen + 1)
+    elif usehunk == LOADFILE_CACHE:
+        buf = zone.Cache_Alloc(loadcache, filelen + 1, base)
+    elif usehunk == LOADFILE_STACK:
+        if filelen < loadsize:
+            buf = loadbuf
+        else:
+            buf = zone.Hunk_TempAlloc(filelen + 1)
+    elif usehunk == LOADFILE_MALLOC:
+        buf = bytearray(filelen + 1)
+    else:
+        sys_sdl_unix.Sys_Error('COM_LoadFile: bad usehunk')
 
-    return data
+    if not buf:
+        sys_sdl_unix.Sys_Error(f'COM_LoadFile: not enough space for {path}')
 
-def COM_LoadMallocFile(filename):
-    h, size, _, is_pak = COM_FindFile(filename)
-    if h is None or size <= 0:
-        return None
+    buf[filelen] = 0
 
-    # Allocate from the DYNAMIC/FREEABLE Zone
-    import zone
-    buf = zone.Z_Malloc(size)
+    nread = sys_sdl_unix.Sys_FileRead(handle, buf, filelen)
 
-    # Read the data into our managed memory
-    data = sys_sdl_unix.Sys_FileRead(h, size)
-    buf[:size] = data
+    COM_CloseFile(handle)
 
-    # If it's a loose file, close it so we don't leak handles
-    if not is_pak:
-        sys_sdl_unix.Sys_FileClose(h)
+    if usehunk != LOADFILE_STACK and nread != filelen + 1 and nread != filelen:
+        sys_sdl_unix.Sys_Error(f'COM_LoadFile: Error reading {path} filesizes dont match {nread} vs {filelen + 1} for {LoadFileToString(usehunk)}')
 
+    if isinstance(buf, memoryview):
+        buf = bytearray(buf)
     return buf
 
-def COM_LoadHunkFile(filename) -> tuple[bytes, int]:
-    h, size, path_id, is_pak = COM_FindFile(filename)
-    if h is None or size <= 0:
-        return None
 
-    # Allocate from PERMANENT Hunk space
-    import zone
-    buf = zone.Hunk_AllocName(size, filename)
+def COM_LoadMallocFile(filename, wantpathid: bool) -> bytearray:
+    return COM_LoadFile(filename, LOADFILE_MALLOC, wantpathid)
 
-    data = sys_sdl_unix.Sys_FileRead(h, size)
-    buf[:size] = data
+def COM_LoadHunkFile(filename, wantpathid: bool) -> bytearray:
+    return COM_LoadFile(filename, LOADFILE_HUNK, wantpathid)
 
-    if not is_pak:
-        sys_sdl_unix.Sys_FileClose(h)
+def COM_LoadZoneFile(filename, wantpathid: bool) -> bytearray:
+    return COM_LoadFile(filename, LOADFILE_ZONE, wantpathid)
 
-    return buf, path_id
+def COM_LoadTempFile(filename, wantpathid: bool) -> bytearray:
+    return COM_LoadFile(filename, LOADFILE_TEMPHUNK, wantpathid)
 
+def COM_LoadCacheFile(filename, cu:quakedef.cache_user_t, wantpathid: bool):
+    global loadcache
+    loadcache = cu
+    COM_LoadFile(filename, LOADFILE_CACHE, wantpathid)
+
+def COM_LoadStackFile(path, buffer, bufsize, wantpathid) -> bytearray:
+    global loadsize, loadbuf
+    global loadbuf
+    loadbuf = buffer
+    loadsize = bufsize
+    return COM_LoadFile(path, LOADFILE_STACK, wantpathid)
 
 def COM_LoadPackFile(packfile) -> pack_t:
     global com_modified
@@ -628,7 +692,12 @@ def COM_LoadPackFile(packfile) -> pack_t:
     PAK_HEADER_FORMAT = '<4sII'
     PAK_ENTRY_FORMAT  = '<56sII'
 
-    header_data = sys_sdl_unix.Sys_FileRead(handle, struct.calcsize(PAK_HEADER_FORMAT))
+    sizeof_header = struct.calcsize(PAK_HEADER_FORMAT)
+    header_data = bytearray(sizeof_header)
+
+    header_len = sys_sdl_unix.Sys_FileRead(handle, header_data, sizeof_header)
+    if header_len != sizeof_header:
+        sys_sdl_unix.Sys_Error(f'{packfile} is not a packfile')
 
     magic, dirofs, dirlen = struct.unpack(PAK_HEADER_FORMAT, header_data)
 
@@ -652,8 +721,9 @@ def COM_LoadPackFile(packfile) -> pack_t:
     if numpackfiles > 2048:
         sys_sdl_unix.Sys_Error(f'packfile {packfile} has too many files {numpackfiles} > 2048')
 
-    if numpackfiles != 339:
-        sys_sdl_unix.Sys_Printf("Warning: packfile has been modified, count mismatch.  count != 339")
+    # the 339-file check only applies to id1/pak0.pak (pak1 etc. legitimately differ)
+    if os.path.basename(packfile).lower() == 'pak0.pak' and numpackfiles != 339:
+        sys_sdl_unix.Sys_Printf(f"Warning: packfile has been modified, count mismatch.  count({numpackfiles}) != 339\n")
         com_modified = True
 
     sys_sdl_unix.Sys_FileSeek(handle, dirofs)
@@ -664,19 +734,13 @@ def COM_LoadPackFile(packfile) -> pack_t:
 
     newfiles = []
     for _ in range(num_entries):
-        entry_data = sys_sdl_unix.Sys_FileRead(handle,struct.calcsize(PAK_ENTRY_FORMAT))
+        entry_data = bytearray(struct.calcsize(PAK_ENTRY_FORMAT))
+        entry_size = sys_sdl_unix.Sys_FileRead(handle,entry_data, struct.calcsize(PAK_ENTRY_FORMAT))
         name_bytes, file_offset, file_size = struct.unpack(PAK_ENTRY_FORMAT, entry_data)
 
-        try:
-            name = name_bytes.strip(b'\x00').decode('ascii')
-        except UnicodeDecodeError:
-            name = name_bytes.split(b'\x00A')[0]
-            if name == b'progs.dat':
-                name = name.decode('ascii')
-            else:
-                raise FileNotFoundError
-
-        print(f"File: {name}, Offset: {file_offset}, Size: {file_size}")
+        # The name is a NUL-terminated C string inside a fixed 56-byte field. Anything after
+        # the first NUL is leftover garbage (id's pak0 has some, e.g. after "progs.dat").
+        name = name_bytes.split(b'\x00', 1)[0].decode('latin-1')
 
         newfiles.append(packfile_t(name, file_offset, file_size))
 
@@ -832,13 +896,24 @@ def COM_AddGameDirectory(base, dir):
 
 def COM_CheckRegistered():
     # Unpack 4 values
-    handle, _, _, is_pak = COM_OpenFile('gfx/pop.lmp')
+    ffr = COM_OpenFile('gfx/pop.lmp')
+
+    handle = ffr.handle
+    is_pak = ffr.is_pak
+    length = ffr.filesize
 
     if handle == -1 or handle is None:
         cvar.Cvar_SetROM('registered', '0')
         return
 
-    data = sys_sdl_unix.Sys_FileRead(handle, 256)
+    if length != 256:
+        sys_sdl_unix.Sys_Error('pop.lmp is corrupt')
+
+    data = bytearray(length)
+    nread = sys_sdl_unix.Sys_FileRead(handle, data, length)
+
+    if nread != length:
+        sys_sdl_unix.Sys_Error('failed to read pop.lmp')
 
     # Use the local flag
     if not is_pak:
@@ -895,7 +970,8 @@ def COM_InitFilesytem():
         gamename = ''
         for index, item in enumerate(sys.argv):
             if item == '-game':
-                gamename = sys.argv[item+1]
+                if index + 1 < len(sys.argv):
+                    gamename = sys.argv[index + 1]
 
         if gamename and gamename != '-rogue' and gamename != 'rogue' and gamename != '-hipnotic' and gamename != 'hipnotic':
                 COM_AddGameDirectory(com_basedir, gamename)
@@ -1037,26 +1113,71 @@ LittleLong  = LongNoSwap
 BigFloat    = FloatSwap
 LittleFloat = FloatNoSwap
 
-def COM_FindFile(filename) -> (io.FileIO, int, int, bool): # Added bool
+
+class FindFileResult:
+    def __init__(self, filename):
+        self.filename = filename
+        self.handle: int = None
+        self.file: io.FileIO = None
+        self.path_id = -1
+        self.filesize = -1
+        self.is_pak = False
+
+# returns handle, io.FileIO, path_id, filesize, ispak
+def COM_FindFile(filename, wanthandle, wantfileio, wantpathid) -> FindFileResult:
+    global com_filesize
+
+    handle:  int = -1
+    path_id: int = -1
+
+    ffr = FindFileResult(filename)
+
+    if wantfileio and wanthandle:
+        sys_sdl_unix.Sys_Error('COM_FindFile: both handle and file set')
 
     search = com_searchpaths
     while search:
         if search.pack:
             pak = search.pack
+            ffr.is_pak = True
             for i in range(pak.numfiles):
                 if filename.lower() == pak.files[i].name.lower():
                     # Localize the logic
-                    com_filesize = pak.files[i].filelen
-                    path_id = search.path_id
-                    handle = pak.handle
-                    sys_sdl_unix.Sys_FileSeek(handle, pak.files[i].filepos)
-                    return (handle, com_filesize, path_id, True) # Return True for PAK
+                    ffr.filesize = com_filesize = pak.files[i].filelen
+                    if wantpathid:
+                        ffr.path_id = search.path_id
+                    if wanthandle:
+                        ffr.handle = pak.handle
+                        print(f'pack {pak.filename} file handle{pak.handle}')
+                        sys_sdl_unix.Sys_FileSeek(ffr.handle, pak.files[i].filepos)
+                        return ffr
+                    elif wantfileio:
+                        ffr.file = file = open(pak.filename, 'rb')
+                        if file:
+                            file.seek(pak.files[i].filepos, 0) # SEEK_SET
+                        return ffr
+                    else:
+                        return ffr
         else:
             netpath = f'{search.filename}/{filename}'
-            if os.path.isfile(netpath):
-                path_id = search.path_id
+            if not os.path.isfile(netpath):
+                search = search.next
+                continue
+            if wantpathid:
+                ffr.path_id = path_id = search.path_id
+            if wanthandle:
                 handle, length = sys_sdl_unix.Sys_FileOpenRead(netpath)
-                return (handle, length, path_id, False) # Return False for loose file
+                ffr.handle = handle
+                ffr.filesize = length
+                ffr.path_id = path_id
+                return ffr
+            elif wantfileio:
+                ffr.file = open(netpath, 'rb')
+                com_filesize = ffr.filesize = COM_filelength(ffr.file)
+                return ffr
+            else:
+                com_filesize = ffr.filesize = os.path.getsize(netpath)
+                return ffr
 
         search = search.next
 
@@ -1064,23 +1185,22 @@ def COM_FindFile(filename) -> (io.FileIO, int, int, bool): # Added bool
     if not filename.lower().endswith(extensions):
         console.Con_DPrintf(f"FindFile: can't find {filename}\n")
     else:
-        console.Con_DPrintf2(f"FindFile: can't find {filename}\n")
+        console.Con_DPrintf(f"FindFile: can't find {filename}\n")
 
-    return (None, 0, 0, False)
+    return ffr
 
 
-def COM_FileIOFromHandle(handle) -> io.FileIO:
+def COM_FileIOFromHandleToBeRemoved(handle) -> io.FileIO:
     import sys_sdl_unix
     return sys_sdl_unix.sys_handles[handle]
 
 def COM_FileExists(filename, path_id) -> bool:
-    _, size, _, _ = COM_FindFile(filename)
-    return size >= 0
+    ffr = COM_FindFile(filename, False, False, False)
+    return ffr.filesize >= 0
 
 
-def COM_OpenFile(filename):
-    # wants handle, path_id
-    return COM_FindFile(filename)
+def COM_OpenFile(filename) -> FindFileResult:
+    return COM_FindFile(filename, True, False, True)
 
 def COM_CloseFile(handle):
     search = com_searchpaths
@@ -1088,15 +1208,16 @@ def COM_CloseFile(handle):
     while search:
         if search.pack and search.pack.handle == handle:
             return # dont really close a pack file
+        search = search.next
 
     sys_sdl_unix.Sys_FileClose(handle)
 
-def COM_FOpenFile(filename) -> (io.FileIO, int, int, bool):
-    return COM_FindFile(filename)
+def COM_FOpenFile(filename) -> FindFileResult:
+    return COM_FindFile(filename, False, True, True)
 
 def COM_FileGetExtension(file:str):
     if '.' in file:
-        return file.rsplit('.')[1]
+        return file.rsplit('.', 1)[1]
     return ''
 
 def COM_AddExtension(name, ext):
@@ -1117,6 +1238,8 @@ def COM_ParseEx(data: str, mode: cpe_mode = cpe_mode.CPE_ALLOWTRUNC) -> str | No
 
     if not data:
         return None
+
+    data = str(data)
 
     pos = 0
     length = len(data)
@@ -1164,7 +1287,7 @@ def COM_ParseEx(data: str, mode: cpe_mode = cpe_mode.CPE_ALLOWTRUNC) -> str | No
         return data[pos:]
 
     # 3. Handle single punctuation characters
-    if data[pos] in ('{', '}', '(', ')', "'", ':'):
+    if data[pos] in ('{', '}', '(', ')', "'"): #, ':'):
         com_token = data[pos]
         return data[pos + 1:]
 

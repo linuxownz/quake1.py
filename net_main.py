@@ -249,7 +249,7 @@ def Slist_Poll():
     slistLocal = True
 
 def NET_Connect(host: str):
-    global slistSilent
+    global slistSilent, net_driverlevel
 
     num_drivers = net_bsd.net_numdrivers
 
@@ -356,12 +356,12 @@ def NET_GetMessage(sock: net_defs.qsocket_t) -> int:
 
     ret = net_bsd.net_drivers[sock.driver].QGetMessage(sock)
 
-    if ret == 0 and not IS_LOOP_DRIVER(sock.driver):
+    if ret == 0 and not IS_LOOP_DRIVER(sock.driver):  # noqa: SIM102
         if net_time - sock.lastMessageTime > net_messagetimeout:
             NET_Close(sock)
             return -1
 
-    if ret > 0:
+    if ret > 0:  # noqa: SIM102
         if not IS_LOOP_DRIVER(sock.driver):
             sock.lastMessageTime = net_time
             if ret == 1:
@@ -639,11 +639,30 @@ def SchedulePollProcedure( proc: net_defs.PollProcedure, timeOffset):
     proc.next = pp
     prev.next =  proc
 
-def NET_SendMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
+def NET_SendMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s) -> int:
+    global messagesSent
+
+    if not sock:
+        return -1
+
     if sock.disconnected:
-        return
-    # Hand off to the driver (e.g., Datagram_SendMessage in net_dgrm.py)
-    net_bsd.net_drivers[sock.driver].SendMessage(sock, data)
+        console.Con_Printf('NET_SendMessage: disconnected socket\n')
+        return -1
+
+    SetNetTime()
+
+    drv = net_bsd.net_drivers[sock.driver]
+    # C name is QSendMessage (matches QGetMessage used by NET_GetMessage)
+    fn = getattr(drv, 'QSendMessage', None) or getattr(drv, 'SendMessage', None)
+    if fn is None:
+        cands = [n for n in dir(drv) if 'send' in n.lower() and not n.startswith('_')]
+        raise AttributeError(f"net_driver_t has no QSendMessage/SendMessage; send-like fields: {cands}")
+
+    r = fn(sock, data)
+    if r == 1 and not IS_LOOP_DRIVER(sock.driver):
+        messagesSent += 1
+
+    return r
 
 # def NET_SendUnreliableMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
 #     if sock.disconnected:

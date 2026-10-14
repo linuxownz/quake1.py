@@ -54,7 +54,7 @@ def AddLightBlend(r: float, g: float, b: float, a2: float):
 
     a2 = a2/a
 
-    view.v_blend[0] = view.v_blend[1] * (1-a2) + r * a2
+    view.v_blend[0] = view.v_blend[0] * (1-a2) + r * a2
     view.v_blend[1] = view.v_blend[1] * (1-a2) + g * a2
     view.v_blend[2] = view.v_blend[2] * (1-a2) + b * a2
 
@@ -200,11 +200,10 @@ def R_MarkLights(light, num, node):
             bit_index = num >> 5
             bit_flag = 1 << (num & 31)
 
-            if surf.dlightframe != gl_rmain.r_dlightframecount:
-                surf.dlightbits[bit_index] = bit_flag
-                surf.dlightframe = gl_rmain.r_dlightframecount
-            else:
-                surf.dlightbits[bit_index] |= bit_flag
+            if surf.dlightframe != r_dlightframecount:
+                surf.dlightbits = [0, 0]
+                surf.dlightframe = r_dlightframecount
+            surf.dlightbits[bit_index] |= bit_flag
 
     # 3. Recurse down both child branches
     if node.children[0].contents >= 0:
@@ -226,7 +225,7 @@ def R_PushDlights():
         l = cl_main.cl_dlights[i]
         if l.die < cl_main.cl.time or not l.radius:
             continue
-        R_MarkLights(l, i, cl_main.cl.worldmodel.nodes)
+        R_MarkLights(l, i, cl_main.cl.worldmodel.nodes[0])
         #R_MarkLights(l, 1 << i, cl_main.cl.worldmodel.nodes)
 
 
@@ -277,9 +276,9 @@ def RecursiveLightPoint(color, node, rayorg, start, end, maxdist):
         return True
 
     # 4. Check surfaces on current node for ray impact
-    gl_rmain.lightspot[0] = mid[0]
-    gl_rmain.lightspot[1] = mid[1]
-    gl_rmain.lightspot[2] = mid[2]
+    lightspot[0] = mid[0]
+    lightspot[1] = mid[1]
+    lightspot[2] = mid[2]
 
     surfaces = cl_main.cl.worldmodel.surfaces
     first_surf_idx = node.firstsurface
@@ -317,7 +316,7 @@ def RecursiveLightPoint(color, node, rayorg, start, end, maxdist):
         mathlib.VectorSubtract(end, rayorg, raydelta)
         dist = (sfront / (sfront - sback)) * mathlib.VectorLength(raydelta)
 
-        if not surf.samples:
+        if surf.samples is None:
             nearby = 8.0
             dist += nearby
             maxdist[0] = min(maxdist[0], dist)
@@ -334,6 +333,10 @@ def RecursiveLightPoint(color, node, rayorg, start, end, maxdist):
             sample_offset = ((dt >> 4) * w + (ds >> 4)) * 3
             sample_stride = w * h * 3
 
+            # surf.samples is an integer offset into worldmodel.lightdata
+            lightdata = cl_main.cl.worldmodel.lightdata
+            base = surf.samples
+
             r00 = g00 = b00 = 0
             r01 = g01 = b01 = 0
             r10 = g10 = b10 = 0
@@ -343,29 +346,35 @@ def RecursiveLightPoint(color, node, rayorg, start, end, maxdist):
                 if surf.styles[maps] == 255:
                     break
 
-                scale = gl_rmain.d_lightstylevalue[surf.styles[maps]] / 256.0
+                scale = int(gl_rmain.d_lightstylevalue[surf.styles[maps]])
                 lm_ptr = sample_offset + (maps * sample_stride)
 
-                r00 += surf.samples[lm_ptr + 0] * scale
-                g00 += surf.samples[lm_ptr + 1] * scale
-                b00 += surf.samples[lm_ptr + 2] * scale
+                r00 += lightdata[base + lm_ptr + 0] * scale
+                g00 += lightdata[base + lm_ptr + 1] * scale
+                b00 += lightdata[base + lm_ptr + 2] * scale
 
-                r01 += surf.samples[lm_ptr + 3] * scale
-                g01 += surf.samples[lm_ptr + 4] * scale
-                b01 += surf.samples[lm_ptr + 5] * scale
+                r01 += lightdata[base + lm_ptr + 3] * scale
+                g01 += lightdata[base + lm_ptr + 4] * scale
+                b01 += lightdata[base + lm_ptr + 5] * scale
 
-                r10 += surf.samples[lm_ptr + line3 + 0] * scale
-                g10 += surf.samples[lm_ptr + line3 + 1] * scale
-                b10 += surf.samples[lm_ptr + line3 + 2] * scale
+                r10 += lightdata[base + lm_ptr + line3 + 0] * scale
+                g10 += lightdata[base + lm_ptr + line3 + 1] * scale
+                b10 += lightdata[base + lm_ptr + line3 + 2] * scale
 
-                r11 += surf.samples[lm_ptr + line3 + 3] * scale
-                g11 += surf.samples[lm_ptr + line3 + 4] * scale
-                b11 += surf.samples[lm_ptr + line3 + 5] * scale
+                r11 += lightdata[base + lm_ptr + line3 + 3] * scale
+                g11 += lightdata[base + lm_ptr + line3 + 4] * scale
+                b11 += lightdata[base + lm_ptr + line3 + 5] * scale
 
-            # Bilinear sampling math matching fixed-point C bit-shift logic
-            color[0] += float(int(((((((r11 - r10) * dsfrac) >> 4) + r10) - ((((r01 - r00) * dsfrac) >> 4) + r00)) * dtfrac) >> 4) + ((((r01 - r00) * dsfrac) >> 4) + r00))
-            color[1] += float(int(((((((g11 - g10) * dsfrac) >> 4) + g10) - ((((g01 - g00) * dsfrac) >> 4) + g00)) * dtfrac) >> 4) + ((((g01 - g00) * dsfrac) >> 4) + g00))
-            color[2] += float(int(((((((b11 - b10) * dsfrac) >> 4) + b10) - ((((b01 - b00) * dsfrac) >> 4) + b00)) * dtfrac) >> 4) + ((((b01 - b00) * dsfrac) >> 4) + b00))
+            # Bilinear sampling with integer shifts (as in C); the style scale is
+            # an integer (~256 = 1.0), so divide by 256 once at the end.
+            def _bilerp(v00, v01, v10, v11):
+                top = (((v01 - v00) * dsfrac) >> 4) + v00
+                bot = (((v11 - v10) * dsfrac) >> 4) + v10
+                return (((bot - top) * dtfrac) >> 4) + top
+
+            color[0] += _bilerp(r00, r01, r10, r11) / 256.0
+            color[1] += _bilerp(g00, g01, g10, g11) / 256.0
+            color[2] += _bilerp(b00, b01, b10, b11) / 256.0
 
         return True
 
@@ -376,7 +385,7 @@ def RecursiveLightPoint(color, node, rayorg, start, end, maxdist):
 
 def R_LightPoint(p: list[float]) -> int:
     end: list[float] = [0, 0, 0]
-    maxdist: float = 8192
+    maxdist: float = 8192.0
 
     if not cl_main.cl.worldmodel.lightdata:
         lightcolor[0] = lightcolor[1] = lightcolor[2] = 255
@@ -387,6 +396,7 @@ def R_LightPoint(p: list[float]) -> int:
     end[2] = p[2] - maxdist
 
     lightcolor[0] = lightcolor[1] = lightcolor[2] = 0
-    RecursiveLightPoint(lightcolor, cl_main.cl.worldmodel.nodes, p, p, end, maxdist)
+    # maxdist is a float* in C, so pass a one-element list; nodes[0] is the root node
+    RecursiveLightPoint(lightcolor, cl_main.cl.worldmodel.nodes[0], p, p, end, [maxdist])
 
     return (lightcolor[0] + lightcolor[1] + lightcolor[2]) * (1.0 / 3.0)

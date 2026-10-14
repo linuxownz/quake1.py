@@ -27,7 +27,7 @@ def R_GetEfrag():
         return ef
     else:
         # Allocate a batch of efrag_t nodes and link them into free_efrags
-        new_efrags = [efrag_t() for _ in range(EXTRA_EFRAGS)]
+        new_efrags = [render.efrag_t() for _ in range(EXTRA_EFRAGS)]
 
         for i in range(EXTRA_EFRAGS - 1):
             new_efrags[i].leafnext = new_efrags[i + 1]
@@ -61,7 +61,7 @@ def R_SplitEntityOnNode(node: quakedef.mnode_t):
         return
 
     splitplane = node.plane
-    sides = mathlib.BOX_ON_PLANE_SIDE(r_emins, r_emaxs, splitplane)
+    sides = mathlib.BoxOnPlaneSide(r_emins, r_emaxs, splitplane)
 
     if sides == 3:  # noqa: SIM102
         if not r_pefragtopnode:
@@ -92,7 +92,7 @@ def R_AddEfrags(ent: render.entity_t):
     r_pefragtopnode = None
 
     entmodel: quakedef.qmodel_t = ent.model
-    scalefactor = protocol.ENTALPHA_DECODE(ent.scale)
+    scalefactor = protocol.ENTSCALE_DECODE(ent.scale)
 
     if scalefactor != 1.0:
         mathlib.VectorMA(ent.origin, scalefactor, entmodel.mins, r_emins)
@@ -101,7 +101,7 @@ def R_AddEfrags(ent: render.entity_t):
         mathlib.VectorAdd(ent.origin, entmodel.mins, r_emins)
         mathlib.VectorAdd(ent.origin, entmodel.maxs, r_emaxs)
 
-    R_SplitEntityOnNode(cl_main.cl.worldmodel.nodes)
+    R_SplitEntityOnNode(cl_main.cl.worldmodel.nodes[0])
 
     ent.topnode = r_pefragtopnode
 

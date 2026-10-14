@@ -110,7 +110,7 @@ def CL_ParseTEnt():
 
             r_part.R_RunParticleEffect(pos, mathlib.vec3_origin, 0, 10)
 
-            if random.rand() < 0.8:
+            if random.random() < 0.8:
                 snd_dma.S_StartSound(-1, 0, cl_sfx_tink1, pos, 1, 1)
             else:
                 rnd =  random.randrange(4)

@@ -5,7 +5,6 @@ import struct
 from dataclasses import dataclass
 
 import net_defs
-import quakedef
 
 #NET_HEADERSIZE      (2 * sizeof(unsigned int))
 SIZEOFUNSIGNEDINT = struct.calcsize('I')

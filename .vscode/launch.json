@@ -10,9 +10,14 @@
             "request": "launch",
             "program": "main_sdl.py",
             "console": "integratedTerminal",
+            "env" : [
+                "PYTHONFAULTHANDLER", "1"
+            ],
             "args" : [
                 "-basedir",
                 "/home/campbell/quake1",
+                "+developer",
+                "2"
             ]
         },
 

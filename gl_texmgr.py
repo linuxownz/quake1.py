@@ -122,16 +122,21 @@ def TexMgr_LoadPalette():
     global d_8to24table_fbright_fence, d_8to24table_nobright
     global d_8to24table_nobright_fence
 
-    handle, length, path_id, is_pak = common.COM_FOpenFile('gfx/palette.lmp')
+    #handle, length, path_id, is_pak = common.COM_FOpenFile('gfx/palette.lmp')
+    ffr = common.COM_FOpenFile('gfx/palette.lmp')
 
-    f = common.COM_FileIOFromHandle(handle)
+    handle = ffr.handle
+    is_pak = ffr.is_pak
 
-    if f is None:
-        sys_sdl_unix.Sys_Error('couldnt load gfx/palette.lmp')
+    mark = zone.Hunk_LowMark()
+    pal = zone.Hunk_Alloc(768)
 
-    pal = f.read(768)
+    assert(ffr.file)
+    if ffr.file.readinto(pal) != 768:
+        sys_sdl_unix.Sys_Error('failed to read palette')
+
     if not is_pak:
-        f.close()
+        ffr.file.close()
 
     assert(len(pal) == 768)
 
@@ -526,16 +531,13 @@ def TexMgr_LoadImage8(glt: gltexture_t, data: bytearray, usepal):
         for i in range(glt.width * glt.height):
             if data[i] == 255:
                 break
-        if i == glt.width * glt.height:
-            glt.flags -= TEXPREF_ALPHA
+        else:
+            glt.flags &= ~TEXPREF_ALPHA
 
     if not usepal:
         # NEW: Check specifically for the console font flag
         if glt.flags & TEXPREF_CONCHARS:
             usepal = d_8to24table_conchars
-        elif glt.flags & TEXPREF_FULLBRIGHT:
-            # ... existing fullbright logic ...
-            usepal = d_8to24table_fbright
         elif glt.flags & TEXPREF_FULLBRIGHT:
             if glt.flags & TEXPREF_ALPHA:
                 usepal = d_8to24table_fbright_fence
@@ -738,8 +740,10 @@ def TexMgr_SetFilterModes(glt: gltexture_t):
         OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MIN_FILTER, glmodes[glmode_idx].minfilter)
         OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAX_ANISOTROPY, gl_texture_anisotropy)
     else:
+        # no mipmaps uploaded for this texture: a mipmap min filter would make it
+        # incomplete (samples as white / disabled), so use the mag filter for both (as C does)
         OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MAG_FILTER, glmodes[glmode_idx].magfilter)
-        OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MIN_FILTER, glmodes[glmode_idx].minfilter)
+        OpenGL.GL.glTexParameterf(OpenGL.GL.GL_TEXTURE_2D, OpenGL.GL.GL_TEXTURE_MIN_FILTER, glmodes[glmode_idx].magfilter)
 
 
 
@@ -1119,7 +1123,7 @@ def TexMgr_LoadImage8(
         "shot1sid" in glt.name
         and glt.width == 32
         and glt.height == 32
-        and common.CRC_Block(data_buf, 1024) == 65393
+        and crc.CRC_Block(data_buf, 1024) == 65393
     ):
         # Copy 32 pixels (32 bytes) from bottom row (row 31) to top row
         data_buf[:32] = data_buf[32 * 31 : 32 * 31 + 32]

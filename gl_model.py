@@ -9,8 +9,10 @@ from typing import Optional, Union
 import bspfile
 import common
 import crc
+import cvar
 import gl_mesh
 import gl_texmgr
+import gl_warp
 import host
 import mathlib
 import modelgen
@@ -171,19 +173,41 @@ def Mod_SetTextureChain(model):
 
 # --- System Management ---
 
-def Mod_LoadModel( mod: quakedef.qmodel_t, crash: bool) -> quakedef.qmodel_t | None:
+def Mod_LoadModel(mod: quakedef.qmodel_t, crash: bool) -> quakedef.qmodel_t | None:
     global loadname, loadmodel
 
     # 1. Early exit if model is already loaded in memory
     if not mod.needload:
-        return mod
+        if mod.type == quakedef.modtype_t.mod_alias:
+            if zone.Cache_Check(mod.cache):
+                return mod
+        else:
+            return mod
 
-    # 2. Load model binary file from disk/PAK
-    buf = common.COM_LoadStackFile(mod.name)
+    # --- QUAKESPASM INLINE SUBMODEL CHECK (*1, *2, etc.) ---
+    if mod.name and mod.name.startswith('*'):
+        if loadmodel is None:
+            host.Host_Error(f"Mod_LoadModel: submodel {mod.name} loaded with no world")
+
+        sub_idx = int(mod.name[1:])
+        if sub_idx < 0 or sub_idx >= loadmodel.numsubmodels:
+            if crash:
+                host.Host_Error(f"Mod_LoadModel: bad submodel number {mod.name}")
+            return None
+
+        # QuakeSpasm equivalent: *mod = loadmodel->submodels[sub_idx]
+        # Copy the pre-parsed submodel object/dictionary into this slot
+        sub = loadmodel.submodels[sub_idx]
+        mod.__dict__.update(sub.__dict__)
+        mod.needload = False
+        return mod
+    # --------------------------------------------------------
+
+    buf = bytearray(1024)
+    buf = common.COM_LoadStackFile(mod.name, buf, 1024, True)
     if not buf or len(buf) < 4:
         if crash:
             host.Host_Error(f"Mod_LoadModel: {mod.name} not found")
-
         # C parity: Reset slot on non-fatal load failure (memset(mod, 0, sizeof(*mod)))
         mod.name = ""
         mod.needload = True
@@ -208,9 +232,13 @@ def Mod_LoadModel( mod: quakedef.qmodel_t, crash: bool) -> quakedef.qmodel_t | N
 
     return mod
 
-def Mod_ForName(name: str):
+
+
+
+
+def Mod_ForName(name: str, crash: bool = False):
     mod = Mod_FindName(name)
-    return Mod_LoadModel(mod, True)
+    return Mod_LoadModel(mod, crash)
 
 def Mod_LoadWadFiles(mod: quakedef.qmodel_t) -> wad.wad_t | None:
     if not cvar.Cvar_GetCvar("external_textures").value:
@@ -324,150 +352,178 @@ def Mod_CheckFullbrightsValve(name: str, pixels: bytearray, count: int) -> bool:
         return Mod_CheckFullbrights(pixels, count)
     return False
 
-
 def Mod_LoadTextures(lump: quakedef.lump_t) -> None:
-    """Parses the texture lump of a BSP brush model, sets up animations, sky textures,
-    fullbright layers, and external WAD fallbacks.
-
-    C equivalent:
-    void Mod_LoadTextures (lump_t *l) in gl_model.c
-    """
-    global loadmodel
+    """Quakespasm C-parity port for Mod_LoadTextures in gl_model.c"""
+    global loadmodel, mod_base
 
     if not lump.filelen:
         loadmodel.numtextures = 0
+        loadmodel.textures = []
         return
 
-    buf = lump.data
-    if len(buf) < 4:
+    lump_start = lump.fileofs
+
+    if lump.filelen < 4:
         sys_sdl_unix.Sys_Error("Mod_LoadTextures: funny lump size")
 
-    # 1. Parse header (numtextures + offsets)
-    numtextures = struct.unpack("<I", buf[:4])[0]
-    loadmodel.numtextures = numtextures
-    loadmodel.textures = [None] * numtextures
+    # dmiptexlump_t header
+    nummiptex = struct.unpack_from("<i", mod_base, lump_start)[0]
 
-    # Load external WAD file chain for worldspawn
-    wads = Mod_LoadWadFiles(loadmodel)
+    if nummiptex < 0:
+        sys_sdl_unix.Sys_Error("Mod_LoadTextures: nummiptex < 0")
 
-    # 2. Parse each texture entry
-    for i in range(numtextures):
-        offset = struct.unpack("<i", buf[4 + i * 4 : 8 + i * 4])[0]
+    loadmodel.numtextures = nummiptex
+    loadmodel.textures = [None] * nummiptex
 
-        if offset < 0:
+    # Parse each miptex in the lump
+    for i in range(nummiptex):
+        dataofs_ptr = lump_start + 4 + (i * 4)
+
+        # Quakespasm bounds check
+        if dataofs_ptr + 4 > lump_start + lump.filelen:
+            sys_sdl_unix.Sys_Error("Mod_LoadTextures: bad lump size")
+
+        dataofs = struct.unpack_from("<i", mod_base, dataofs_ptr)[0]
+
+        if dataofs == -1:
             continue
 
-        if offset + 40 > len(buf):  # sizeof(miptex_t) == 40
+        tx_ofs = lump_start + dataofs
+
+        # Bounds check texture offset inside lump
+        if tx_ofs < lump_start or tx_ofs + 40 > lump_start + lump.filelen:
             sys_sdl_unix.Sys_Error("Mod_LoadTextures: bad texture offset")
 
-        # Extract miptex header
-        raw_name = buf[offset : offset + 16].split(b"\x00", 1)[0].decode("ascii", errors="ignore")
-        width, height = struct.unpack("<II", buf[offset + 16 : offset + 24])
-        offsets = struct.unpack("<IIII", buf[offset + 24 : offset + 40])
+        # Unpack Quakespasm miptex_t / texture_t
+        # char name[16], unsigned width, height, offsets[4]
+        name_raw, width, height, o0, o1, o2, o3 = struct.unpack_from(
+            "<16sIIIIII", mod_base, tx_ofs
+        )
 
-        tx = None
-        out_pal = [False]
-        out_pixels = [None]
+        if (width & 15) or (height & 15):
+            sys_sdl_unix.Sys_Error(f"Texture {name_raw!r} is not 16 aligned")
 
-        # 3. Check for external WAD texture lookup
-        if offsets[0] == 0:
-            tx = Mod_LoadWadTexture(loadmodel, wads, raw_name, out_pal, out_pixels)
-            if not tx:
-                tx = Mod_LoadWadTexture(loadmodel, wads, "notexture", out_pal, out_pixels)
-            if not tx:
-                continue
-            loadmodel.textures[i] = tx
-        else:
-            # Validate 16-pixel alignment
-            if (width & 15) or (height & 15):
-                sys_sdl_unix.Sys_Error(f"Mod_LoadTextures: {raw_name} size ({width}x{height}) bad")
+        tx = quakedef.texture_t()
+        tx.name = name_raw.decode("latin-1").split("\x00", 1)[0]
+        tx.width = width
+        tx.height = height
+        tx.offsets = [o0, o1, o2, o3]
 
-            num_pixels = width * height
-            total_pixels = num_pixels + (num_pixels // 4) + (num_pixels // 16) + (num_pixels // 64)
+        # mip 0 pixels immediately follow the 40-byte miptex_t header
+        pix_ofs = tx_ofs + 40
+        pix_count = width * height
+        pixel_data = bytes(mod_base[pix_ofs : pix_ofs + pix_count])
 
-            if offset + offsets[0] + total_pixels > len(buf):
-                sys_sdl_unix.Sys_Error("Mod_LoadTextures: bad texture length")
+        # Quakespasm specific runtime field initializations
+        tx.gl_texturenum = 0
+        tx.fullbright_gl_texturenum = 0
+        tx.flat_gl_texturenum = 0
+        tx.anim_total = 0
+        tx.anim_min = 0
+        tx.anim_max = 0
+        tx.anim_next = None
+        tx.alternate_anims = None
 
-            tx = quakedef.texture_t()
-            tx.name = raw_name
-            tx.width = width
-            tx.height = height
+        loadmodel.textures[i] = tx
 
-            for m in range(4):
-                tx.offsets[m] = offsets[m]
+        # Texture upload (C: Mod_LoadTextures, johnfitz section)
+        if not sys_sdl_unix.isDedicated:
+            if tx.name.lower().startswith("sky"):
+                # sky textures are not uploaded here: Sky_LoadTexture lives in the sky module (not ported/seen yet)
+                pass
+            elif tx.name.startswith("*"):
+                # warping texture
+                texturename = f"{loadmodel.name}:{tx.name}"
+                tx.gltexture = gl_texmgr.TexMgr_LoadImage(
+                    loadmodel, texturename, tx.width, tx.height,
+                    gl_texmgr.srcformat.SRC_INDEXED, pixel_data, loadmodel.name, pix_ofs,
+                    gl_texmgr.TEXPREF_NOBRIGHT | gl_texmgr.TEXPREF_NOPICMIP)
 
-            pixels = bytearray(buf[offset + offsets[0] : offset + offsets[0] + total_pixels])
-            out_pixels[0] = pixels
-
-            # Special Sky Texture setup
-            if raw_name.startswith("sky"):
-                R_InitSky(tx, pixels)
+                wsize = gl_warp.gl_warpimagesize or 128
+                tx.warpimage = gl_texmgr.TexMgr_LoadImage(
+                    loadmodel, f"{texturename}_warp", wsize, wsize,
+                    gl_texmgr.srcformat.SRC_RGBA, bytes(wsize * wsize * 4), "", 0,
+                    gl_texmgr.TEXPREF_NOBRIGHT | gl_texmgr.TEXPREF_NOPICMIP | gl_texmgr.TEXPREF_WARPIMAGE)
+                tx.update_warp = True
             else:
-                tx.gl_texturenum = gl_texmgr.TexMgr_LoadTexture(
-                    loadmodel,
-                    tx.name,
-                    tx.width,
-                    tx.height,
-                    pixels,
-                    gl_texmgr.SRC_PALETTE,
-                    gl_texmgr.TEX_MIPMAP,
-                )
+                # regular texture
+                extraflags = gl_texmgr.TEXPREF_ALPHA if tx.name.startswith("{") else 0
+                texturename = f"{loadmodel.name}:{tx.name}"
 
-            loadmodel.textures[i] = tx
+                if Mod_CheckFullbrights(pixel_data, pix_count):
+                    tx.gltexture = gl_texmgr.TexMgr_LoadImage(
+                        loadmodel, texturename, tx.width, tx.height,
+                        gl_texmgr.srcformat.SRC_INDEXED, pixel_data, loadmodel.name, pix_ofs,
+                        gl_texmgr.TEXPREF_MIPMAP | gl_texmgr.TEXPREF_NOBRIGHT | extraflags)
+                    tx.fullbright = gl_texmgr.TexMgr_LoadImage(
+                        loadmodel, f"{loadmodel.name}:{tx.name}_glow", tx.width, tx.height,
+                        gl_texmgr.srcformat.SRC_INDEXED, pixel_data, loadmodel.name, pix_ofs,
+                        gl_texmgr.TEXPREF_MIPMAP | gl_texmgr.TEXPREF_FULLBRIGHT | extraflags)
+                else:
+                    tx.gltexture = gl_texmgr.TexMgr_LoadImage(
+                        loadmodel, texturename, tx.width, tx.height,
+                        gl_texmgr.srcformat.SRC_INDEXED, pixel_data, loadmodel.name, pix_ofs,
+                        gl_texmgr.TEXPREF_MIPMAP | extraflags)
 
-        # 4. Handle Fullbright Mask Texture (if present)
-        if out_pixels[0] and gl_texmgr.TexMgr_HasFullbrights(out_pixels[0], width * height):
-            tx.fullbright = gl_texmgr.TexMgr_LoadTexture(
-                loadmodel,
-                f"{tx.name}_fb",
-                tx.width,
-                tx.height,
-                out_pixels[0],
-                gl_texmgr.SRC_FULLBRIGHT,
-                gl_texmgr.TEX_MIPMAP,
-            )
-
-    # 5. Link Sequence Animations (anim_total & anim_next chains)
-    for i in range(numtextures):
+    # Quakespasm Animation Sequence Chaining (+0..+9, +a..+j)
+    for i in range(nummiptex):
         tx = loadmodel.textures[i]
-        if not tx or not tx.name:
+        if not tx or not tx.name.startswith("+"):
             continue
 
-        # Check for sequence sequence markers +0..+9 / +a..+j
-        if tx.name[0] != "+":
-            continue
+        if tx.anim_next is not None:
+            continue  # Already processed in a chain
 
-        if tx.anim_next:
-            continue  # Already linked into a chain
+        anims = [None] * 10
+        altanims = [None] * 10
+        max_frame = 0
+        altmax_frame = 0
 
-        anim_count = 0
-        anim_chain = [None] * 10
-
-        # Build animation chain list
-        for j in range(numtextures):
+        for j in range(nummiptex):
             tx2 = loadmodel.textures[j]
-            if not tx2 or not tx2.name:
+            if not tx2 or not tx2.name.startswith("+"):
                 continue
 
-            if tx2.name[0] == "+" and tx2.name[2:] == tx.name[2:]:
-                num = ord(tx2.name[1]) - ord("0")
-                if 0 <= num <= 9:
-                    anim_chain[num] = tx2
-                    if num >= anim_count:
-                        anim_count = num + 1
+            # Compare suffix name (everything after +X)
+            if tx2.name[2:] != tx.name[2:]:
+                continue
 
-        # Link circular anim_next pointers
-        for j in range(anim_count):
-            if not anim_chain[j]:
-                sys_sdl_unix.Sys_Error(f"Missing frame in sequence {tx.name}")
+            c = tx2.name[1]
+            if "0" <= c <= "9":
+                num = ord(c) - ord("0")
+                if num < 10:
+                    anims[num] = tx2
+                    if num > max_frame:
+                        max_frame = num
+            elif "a" <= c <= "j":
+                num = ord(c) - ord("a")
+                if num < 10:
+                    altanims[num] = tx2
+                    if num > altmax_frame:
+                        altmax_frame = num
 
-            anim_chain[j].anim_total = anim_count
-            anim_chain[j].anim_next = anim_chain[(j + 1) % anim_count]
+        # Link primary anims
+        for j in range(max_frame + 1):
+            if not anims[j]:
+                sys_sdl_unix.Sys_Error(f"Missing frame {j} of {tx.name}")
+            anims[j].anim_total = max_frame + 1
+            anims[j].anim_min = j
+            anims[j].anim_max = max_frame + 1
+            anims[j].anim_next = anims[(j + 1) % (max_frame + 1)]
 
-    # Clean up WAD list
-    if wads:
-        wad.W_CleanupWadList(wads)
+            if altmax_frame > 0:
+                anims[j].alternate_anims = altanims[0]
 
+        # Link alternate anims
+        if altmax_frame > 0:
+            for j in range(altmax_frame + 1):
+                if not altanims[j]:
+                    sys_sdl_unix.Sys_Error(f"Missing frame {j} of {tx.name}")
+                altanims[j].anim_total = altmax_frame + 1
+                altanims[j].anim_min = j
+                altanims[j].anim_max = altmax_frame + 1
+                altanims[j].anim_next = altanims[(j + 1) % (altmax_frame + 1)]
+                altanims[j].alternate_anims = anims[0]
 
 
 # Magic header "QLIT" in 32-bit little-endian integer format (0x54494C51)
@@ -475,58 +531,43 @@ IDLITHEADER = 0x54494C51  # b'QLIT'
 LIT_VERSION = 1
 
 
-def Mod_LoadLitFile(mod: quakedef.qmodel_t) -> bool:
-    """Attempts to locate and parse an external .lit colored lightmap file for the model.
-
-    C equivalent:
-    qboolean Mod_LoadLitFile (qmodel_t *mod) in gl_model.c
-    """
-    # Build .lit filename path (e.g., "maps/e1m1.bsp" -> "maps/e1m1.lit")
-    litname = common.COM_SkipPath(mod.name)
-    litname = f"maps/{litname}"
-    litname = common.COM_StripExtension(litname) + ".lit"
-
-    # Load file from disk / PAK archive
-    buf = common.COM_LoadStackFile(litname)
-    if not buf or len(buf) < 8:  # Header must at least contain Magic (4B) + Version (4B)
-        return False
-
-    # Extract 32-bit magic header and version
-    magic, version = struct.unpack("<II", buf[:8])
-
-    # Validate "QLIT" magic header and version 1 spec
-    if magic != IDLITHEADER:
-        console.Con_Printf(f"{litname} is not a QLIT file\n")
-        return False
-
-    if version != LIT_VERSION:
-        console.Con_Printf(f"{litname} has unknown version {version}\n")
-        return False
-
-    # Allocate lightmap RGB buffer (3 bytes per sample)
-    mod.lightdata = bytearray(buf[8:])
-    return True
-
-
 def Mod_LoadLighting(lump: quakedef.lump_t) -> None:
-    """Parses and allocates the lightmap sample array from the BSP lighting lump or .lit override.
+    """QuakeSpasm Mod_LoadLighting: lightdata is always RGB (3 bytes/texel)."""
+    global loadmodel, mod_base
 
-    C equivalent:
-    void Mod_LoadLighting (lump_t *l) in gl_model.c
-    """
-    global loadmodel
+    loadmodel.lightdata = None
 
-    # 1. Check for external .lit file (QLIT header validation performed inside)
-    if Mod_LoadLitFile(loadmodel):
-        return
-
-    # 2. If BSP lightmap lump is empty, initialize null lighting
     if not lump.filelen:
-        loadmodel.lightdata = None
         return
 
-    # 3. Allocate and copy monochrome BSP lightmap sample data
-    loadmodel.lightdata = bytearray(lump.data[: lump.filelen])
+    # Valve (v30) BSPs already carry RGB lighting in the lump
+    if getattr(loadmodel, "bspversion", None) == BSPVERSION_VALVE:
+        loadmodel.lightdata = bytearray(
+            mod_base[lump.fileofs : lump.fileofs + lump.filelen]
+        )
+        return
+
+    # External .lit file (QLIT header: 4 byte ident, 4 byte version, then RGB)
+    map_base = loadmodel.name.rsplit(".", 1)[0]
+    lit_data = common.COM_LoadHunkFile(f"{map_base}.lit", False)
+    if lit_data and len(lit_data) > 8:
+        ident, version = struct.unpack_from("<ii", lit_data, 0)
+        if ident == IDLITHEADER and version == LIT_VERSION:
+            rgb = bytearray(lit_data[8:])
+            if len(rgb) >= lump.filelen * 3:
+                loadmodel.lightdata = rgb
+                return
+            console.Con_Warning(f"{map_base}.lit has wrong size, ignoring\n")
+        else:
+            console.Con_Warning(f"{map_base}.lit has unknown header/version, ignoring\n")
+
+    # Internal mono lump: expand each byte to R=G=B
+    mono = bytes(mod_base[lump.fileofs : lump.fileofs + lump.filelen])
+    rgb = bytearray(len(mono) * 3)
+    rgb[0::3] = mono
+    rgb[1::3] = mono
+    rgb[2::3] = mono
+    loadmodel.lightdata = rgb
 
 def Mod_FindName(name: str) -> quakedef.qmodel_t:
     global mod_known, mod_numknown
@@ -573,27 +614,32 @@ def Mod_LoadEntities(l: quakedef.lump_t) -> None:
     _crc: int = 0
 
     # 1. Check if external .ent file loading is enabled via cvar
-    if cvar.Cvar_VariableValue("external_ents"):
+    if False and cvar.Cvar_VariableValue("external_ents"):  # TODO remove False after fix
         mark = zone.Hunk_LowMark()
 
         if l.filelen > 0:
-            # Calculate CRC of the internal BSP entity lump (excluding trailing null if present)
-            _crc = crc.CRC_Block(mod_base[l.fileofs : l.fileofs + l.filelen - 1])
+            # Calculate CRC of the internal BSP entity lump (excluding trailing null byte if present)
+            end_offset = l.fileofs + max(0, l.filelen - 1)
+            data_slice = mod_base[l.fileofs : end_offset]
+            _crc = crc.CRC_Block(data_slice, len(data_slice))
 
         basemapname = common.COM_StripExtension(loadmodel.name)
         entfilename = f"{basemapname}@{_crc:04x}.ent"
 
         console.Con_DPrintf(f"trying to load {entfilename}\n")
-        ents, path_id = common.COM_LoadHunkFile(entfilename)
 
-        if ents:
-            # Reject external entity file if it comes from a lower-priority PAK/directory
-            if path_id < loadmodel.path_id:
-                zone.Hunk_FreeToLowMark(mark)
-            else:
-                loadmodel.entities = ents
-                console.Con_DPrintf(f"Loaded external entity file {entfilename}\n")
-                return
+        # Safely handle COM_LoadHunkFile return value
+        res = common.COM_LoadHunkFile(entfilename, True)
+        if res is not None:
+            ents, path_id = res
+            if ents:
+                # Reject external entity file if it comes from a lower-priority PAK/directory
+                if path_id < getattr(loadmodel, 'path_id', 0):
+                    zone.Hunk_FreeToLowMark(mark)
+                else:
+                    loadmodel.entities = ents
+                    console.Con_DPrintf(f"Loaded external entity file {entfilename}\n")
+                    return
 
     # 2. Fallback to internal BSP entity lump if no valid external .ent file was loaded
     if not l.filelen:
@@ -601,8 +647,6 @@ def Mod_LoadEntities(l: quakedef.lump_t) -> None:
         return
 
     # Allocate hunk memory or copy bytearray slice for internal entities
-    # C parity: loadmodel->entities = Hunk_AllocName (l->filelen, "entities");
-    #          memcpy (loadmodel->entities, mod_base + l->fileofs, l->filelen);
     loadmodel.entities = bytearray(mod_base[l.fileofs : l.fileofs + l.filelen])
 
 
@@ -629,7 +673,7 @@ def Mod_LoadVertexes(l: quakedef.lump_t) -> None:
     # 2. Allocate mvertex_t runtime structures array on the model
     # C parity: out = Hunk_AllocName(count * sizeof(*out), loadname);
     loadmodel.numvertexes = count
-    loadmodel.vertexes = [quakedef.mvertex_t() for _ in range(count)]
+    loadmodel.vertexes = [quakedef.mvertex_t([0., 0., 0.]) for _ in range(count)]
 
     # 3. Parse and unpack binary float triples (<3f = LittleEndian Float x 3)
     offset = l.fileofs
@@ -915,17 +959,17 @@ DLFACE_SIZE = 56  # sizeof(dlface_t): BSP2 extended face
 
 MAXLIGHTMAPS = 4
 
-# Surface flags
-SURF_PLANEBACK = 2
-SURF_DRAWSKY = 4
-SURF_DRAWTURB = 8
-SURF_DRAWTILED = 16
-SURF_DRAWWATER = 32
-SURF_DRAWLAVA = 64
-SURF_DRAWSLIME = 128
-SURF_DRAWTELE = 256
-SURF_DRAWFENCE = 512
-SURF_NOTEXTURE = 1024
+# Surface flags (single source of truth: quakedef)
+SURF_PLANEBACK = quakedef.SURF_PLANEBACK
+SURF_DRAWSKY = quakedef.SURF_DRAWSKY
+SURF_DRAWTURB = quakedef.SURF_DRAWTURB
+SURF_DRAWTILED = quakedef.SURF_DRAWTILED
+SURF_DRAWWATER = quakedef.SURF_DRAWWATER
+SURF_DRAWLAVA = quakedef.SURF_DRAWLAVA
+SURF_DRAWSLIME = quakedef.SURF_DRAWSLIME
+SURF_DRAWTELE = quakedef.SURF_DRAWTELE
+SURF_DRAWFENCE = quakedef.SURF_DRAWFENCE
+SURF_NOTEXTURE = quakedef.SURF_NOTEXTURE
 
 # BSP Version constants
 BSPVERSION_QUAKE64 = 30
@@ -1064,7 +1108,7 @@ def Mod_LoadFaces(l: quakedef.lump_t, bsp2: bool) -> None:
 
             if out.flags & SURF_DRAWTILED:
                 Mod_PolyForUnlitSurface(out)
-                gl_rsurf.GL_SubdivideSurface(out)
+                gl_warp.GL_SubdivideSurface(out)
 
         # 3. Fence textures
         elif tex_name and tex_name[0] == "{":
@@ -1079,18 +1123,26 @@ def Mod_LoadFaces(l: quakedef.lump_t, bsp2: bool) -> None:
                 Mod_PolyForUnlitSurface(out)
 
 
-
-def Mod_SetParent( node: Union[quakedef.mnode_t, quakedef.mleaf_t], parent: quakedef.mnode_t) -> None:
-    node.parent = parent
-
-    # Contents < 0 indicates a leaf node (e.g. CONTENTS_EMPTY, CONTENTS_SOLID, CONTENTS_WATER)
-    # Leaf nodes do not have child branches.
-    if node.contents < 0:
+def Mod_SetParent(
+    node: quakedef.mnode_t | quakedef.mleaf_t,
+    parent: quakedef.mnode_t | None
+) -> None:
+    """Recursively assigns parent pointers through the BSP node tree down to leaves."""
+    if node is None:
         return
 
-    # Recursively assign parent pointers to left (0) and right (1) sub-trees/leaves
-    Mod_SetParent(node.children[0], node)
-    Mod_SetParent(node.children[1], node)
+    node.parent = parent
+
+    # Leaf nodes (mleaf_t) do not have child branches
+    if isinstance(node, quakedef.mleaf_t):
+        return
+
+    # Process child sub-trees/leaves
+    if hasattr(node, "children"):
+        if node.children[0]:
+            Mod_SetParent(node.children[0], node)
+        if node.children[1]:
+            Mod_SetParent(node.children[1], node)
 
 
 def Mod_LoadNodes_S(l: quakedef.lump_t) -> None:
@@ -1141,12 +1193,12 @@ def Mod_LoadNodes_S(l: quakedef.lump_t) -> None:
         out = loadmodel.nodes[i]
 
         # Populate bounding box (minmaxs array: [min_x, min_y, min_z, max_x, max_y, max_z])
-        out.minmaxs[0] = float(min_x)
-        out.minmaxs[1] = float(min_y)
-        out.minmaxs[2] = float(min_z)
-        out.minmaxs[3] = float(max_x)
-        out.minmaxs[4] = float(max_y)
-        out.minmaxs[5] = float(max_z)
+        out.mins[0] = float(min_x)
+        out.mins[1] = float(min_y)
+        out.mins[2] = float(min_z)
+        out.maxs[0] = float(max_x)
+        out.maxs[1] = float(max_y)
+        out.maxs[2] = float(max_z)
 
         # Plane pointer reference
         out.plane = loadmodel.planes[planenum]
@@ -1196,23 +1248,7 @@ def Mod_TouchModel(name: str) -> quakedef.qmodel_t:
     return mod
 
 
-def Mod_ForName(name):
-    # Check cache first (optional for now)
 
-    # Load the raw data
-    import common
-    buffer = common.COM_LoadHunkFile(name)
-    if not buffer:
-        return None
-
-    mod = quakedef.qmodel_t()
-    mod.name = name
-
-    # Identify if it's a BSP (The 'Brush' model)
-    if name.endswith('.bsp'):
-        Mod_LoadBrushModel(mod, buffer)
-
-    return mod
 
 def Mod_PointInLeaf(p, model):
     """
@@ -1246,56 +1282,57 @@ def Mod_PointInLeaf(p, model):
             # Point is "behind" or on the plane
             node = node.children[1]
 
-def Mod_DecompressVis(in_bytes: bytes | bytearray, in_offset: int, model: quakedef.qmodel_t) -> bytearray:
+def Mod_DecompressVis(in_bytes, model: quakedef.qmodel_t) -> bytearray:
+    """C: byte *Mod_DecompressVis (byte *in, qmodel_t *model)
+
+    in_bytes is the compressed PVS for one leaf, starting at that leaf's visofs
+    (a view onto model.visdata), or None for 'no vis data: everything visible'.
+    """
     global mod_decompressed, mod_decompressed_capacity
 
-    numvisbytes = (model.numleafs + 7) >> 3
+    row = (model.numleafs + 7) >> 3
 
-    # Dynamic reallocation matching FitzQuake's capacity checks
-    if numvisbytes > mod_decompressed_capacity:
-        mod_decompressed_capacity = numvisbytes
-        mod_decompressed = bytearray(mod_decompressed_capacity)
+    if row > mod_decompressed_capacity:
+        mod_decompressed_capacity = row
+        mod_decompressed = bytearray(row)
 
-    # Clear destination memory range for this decompression run
-    for i in range(numvisbytes):
-        mod_decompressed[i] = 0
-
-    # If no compressed vis data offset, default to all leaves visible (0xFF)
-    if not in_bytes or in_offset <= 0:
-        for i in range(numvisbytes):
+    if not in_bytes:
+        for i in range(row):
             mod_decompressed[i] = 0xFF
         return mod_decompressed
 
-    out_idx = 0
-    in_idx = in_offset
-    in_len = len(in_bytes)
+    out = 0
+    pos = 0
+    n = len(in_bytes)
 
-    while out_idx < numvisbytes:
-        if in_idx >= in_len:
+    while out < row:
+        if pos >= n:
+            # truncated data: treat the remainder as not visible
+            for i in range(out, row):
+                mod_decompressed[i] = 0
             break
 
-        current_byte = in_bytes[in_idx]
-        in_idx += 1
+        c = in_bytes[pos]
+        if c:
+            mod_decompressed[out] = c
+            out += 1
+            pos += 1
+            continue
 
-        if current_byte != 0:
-            mod_decompressed[out_idx] = current_byte
-            out_idx += 1
-        else:
-            # Zero-run encoding byte
-            if in_idx >= in_len:
-                break
-            count = in_bytes[in_idx]
-            in_idx += 1
-
-            while count > 0 and out_idx < numvisbytes:
-                mod_decompressed[out_idx] = 0
-                out_idx += 1
-                count -= 1
+        # zero run: next byte is the run length
+        run = in_bytes[pos + 1] if pos + 1 < n else 0
+        pos += 2
+        while run and out < row:
+            mod_decompressed[out] = 0
+            out += 1
+            run -= 1
 
     return mod_decompressed
 
+
 def Mod_LeafPVS(leaf: quakedef.mleaf_t, model: quakedef.qmodel_t) -> bytearray:
-    if leaf == model.leafs:
+    # C: if (leaf == model->leafs) -- leaf 0 is the shared "solid" leaf
+    if leaf is model.leafs[0]:
         return Mod_NoVisPVS(model)
     return Mod_DecompressVis(leaf.compressed_vis, model)
 
@@ -1525,7 +1562,7 @@ def Mod_LoadNodes(l:quakedef.lump_t, bsp2: int):
     else:
         Mod_LoadNodes_S(l)
 
-    Mod_SetParent(loadmodel.nodes, None)
+    Mod_SetParent(loadmodel.nodes[0], None)
 
 
 def Mod_ProcessLeafs_S(l: quakedef.lump_t) -> None:
@@ -1603,7 +1640,7 @@ def Mod_ProcessLeafs_S(l: quakedef.lump_t) -> None:
         if visofs == -1:
             out.compressed_vis = None
         else:
-            out.compressed_vis = loadmodel.visdata[visofs:]
+            out.compressed_vis = (memoryview(loadmodel.visdata)[visofs:] if loadmodel.visdata else None)  # zero-copy view, like C's pointer
 
         out.efrags = None
 
@@ -1685,7 +1722,7 @@ def Mod_LoadLeafs_S(l: quakedef.lump_t) -> None:
             out.compressed_vis = None
         else:
             # Memory view/slice into loadmodel.visdata
-            out.compressed_vis = loadmodel.visdata[visofs:]
+            out.compressed_vis = (memoryview(loadmodel.visdata)[visofs:] if loadmodel.visdata else None)  # zero-copy view, like C's pointer
 
         # Entity fragments initialized to None
         out.efrags = None
@@ -1771,7 +1808,7 @@ def Mod_ProcessLeafs_L1(l: quakedef.lump_t) -> None:
         if visofs == -1:
             out.compressed_vis = None
         else:
-            out.compressed_vis = loadmodel.visdata[visofs:]
+            out.compressed_vis = (memoryview(loadmodel.visdata)[visofs:] if loadmodel.visdata else None)  # zero-copy view, like C's pointer
 
         # Entity fragments initialized to None
         out.efrags = None
@@ -1855,7 +1892,7 @@ def Mod_ProcessLeafs_L2(l: quakedef.lump_t) -> None:
         if visofs == -1:
             out.compressed_vis = None
         else:
-            out.compressed_vis = loadmodel.visdata[visofs:]
+            out.compressed_vis = (memoryview(loadmodel.visdata)[visofs:] if loadmodel.visdata else None)  # zero-copy view, like C's pointer
 
         # Entity fragments initialized to None
         out.efrags = None
@@ -2137,7 +2174,16 @@ def Mod_LoadPlanes(l: quakedef.lump_t) -> None:
     count = l.filelen // DPLANE_SIZE
 
     # Allocate mplane_t array
-    out_planes = [quakedef.mplane_t() for _ in range(count)]
+
+    out_planes = [
+        quakedef.mplane_t(
+            normal=[0.0, 0.0, 0.0],
+            dist=0.0,
+            _type=0,
+            signbits=0,
+        )
+        for _ in range(count)
+    ]
 
     loadmodel.planes = out_planes
     loadmodel.numplanes = count
@@ -2240,7 +2286,7 @@ def Mod_LoadSubmodels(l: quakedef.lump_t) -> None:
         out.numfaces = numfaces
 
         # Calculate bounding sphere radius
-        out.radius = mathlib.RadiusFromBounds(out.mins, out.maxs)
+        out.radius = RadiusFromBounds(out.mins, out.maxs)
 
         offset += DMODEL_SIZE
 
@@ -2438,9 +2484,7 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
     # Populate lump tables (offset, length)
     header.lumps = []
     for i in range(HEADER_LUMPS):
-        lump = quakedef.lump_t()
-        lump.fileofs = header_ints[1 + i * 2]
-        lump.filelen = header_ints[2 + i * 2]
+        lump = quakedef.lump_t( fileofs = header_ints[1 + i * 2], filelen = header_ints[2 + i * 2] )
         header.lumps.append(lump)
 
     # Load geometry, topology, material, and visibility lumps
@@ -2459,9 +2503,9 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
     vis_loaded = False
     if (
         mod.bspversion == BSPVERSION
-        and getattr(external_vis, "value", 0)
-        and sv.modelname[0]
-        and common.q_strcasecmp(loadname, sv.name) == 0
+        and cvar.Cvar_GetCvar('external_vis').value
+        and sv_main.sv.modelname[0]
+        and loadname.lower() == sv_main.sv.name.lower() == 0
     ):
 
         console.Con_DPrintf("trying to open external vis file\n")
@@ -2517,14 +2561,14 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
         mod.mins = list(bm.mins)
 
         # Calculate rotation and yaw bounding boxes
-        radius = mathlib.RadiusFromBounds(mod.mins, mod.maxs)
+        radius = RadiusFromBounds(mod.mins, mod.maxs)
         mod.rmaxs = [radius, radius, radius]
         mod.ymaxs = [radius, radius, radius]
         mod.rmins = [-radius, -radius, -radius]
         mod.ymins = [-radius, -radius, -radius]
 
         # Correct physics culling boxes for non-world submodels
-        if i > 0 or mod.name != sv.modelname:
+        if i > 0 or mod.name != sv_main.sv.modelname:
             mod.clipmaxs = list(mod.maxs)
             mod.clipmins = list(mod.mins)
 
@@ -2535,26 +2579,16 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
             sub_name = f"*{i + 1}"
             sub_model = Mod_FindName(sub_name)
 
-            # Deep copy attributes from current mod state to sub_model instance
-            sub_model.type = mod.type
-            sub_model.numframes = mod.numframes
-            sub_model.submodels = mod.submodels
-            sub_model.numsubmodels = mod.numsubmodels
-            sub_model.planes = mod.planes
-            sub_model.numplanes = mod.numplanes
-            sub_model.leafs = mod.leafs
-            sub_model.numleafs = mod.numleafs
-            sub_model.vertexes = mod.vertexes
-            sub_model.numvertexes = mod.numvertexes
-            sub_model.nodes = mod.nodes
-            sub_model.numnodes = mod.numnodes
-            sub_model.clipnodes = mod.clipnodes
-            sub_model.numclipnodes = mod.numclipnodes
-            sub_model.faces = mod.faces
-            sub_model.numfaces = mod.numfaces
-            sub_model.surfaces = mod.surfaces
-            sub_model.numsurfaces = mod.numsurfaces
-            sub_model.hulls = copy.deepcopy(mod.hulls)
+            # C: *mod = *loadmodel  (struct copy). Copy every attribute, but give the
+            # submodel its OWN hull_t objects: the clipnodes/planes they point at stay
+            # shared, but firstclipnode/lastclipnode are rewritten per submodel on the
+            # next loop iteration and must not leak back into the world model's hulls.
+            import copy
+            for k, v in vars(mod).items():
+                if k not in ("name", "hulls"):
+                    setattr(sub_model, k, v)
+            sub_model.hulls = [copy.copy(h) for h in mod.hulls]
+            sub_model.needload = False
 
             sub_model.name = sub_name
             mod = sub_model
@@ -2605,8 +2639,8 @@ def Mod_LoadAliasFrame( pin_offset: int, frame: quakedef.maliasframedesc_t) -> i
     frame.numposes = 1
 
     # Byte values (no endian conversion required)
-    frame.bboxmin.v = [min_x, min_y, min_z]
-    frame.bboxmax.v = [max_x, max_y, max_z]
+    frame.bboxmin = [min_x, min_y, min_z]
+    frame.bboxmax = [max_x, max_y, max_z]
 
     # Vertex payload offset immediately following daliasframe_t
     verts_offset = pin_offset + DALIASFRAME_SIZE
@@ -2652,8 +2686,8 @@ def Mod_LoadAliasGroup( pin_offset: int, frame: quakedef.maliasframedesc_t) -> i
     frame.numposes = numframes
 
     # Bounding box coordinates are single uint8 byte values
-    frame.bboxmin.v = [min_x, min_y, min_z]
-    frame.bboxmax.v = [max_x, max_y, max_z]
+    frame.bboxmin = [min_x, min_y, min_z]
+    frame.bboxmax = [max_x, max_y, max_z]
 
     # Advance to daliasinterval_t array following daliasgroup_t
     pin_intervals_offset = pin_offset + DALIASGROUP_SIZE
@@ -2725,7 +2759,7 @@ def Mod_FloodFillSkin(skin: bytearray, skinwidth: int, skinheight: int) -> None:
     if filledcolor == -1:
         filledcolor = 0
         for i in range(256):
-            if quakedef.d_8to24table[i] == (255 << 0):  # Alpha == 1.0 (0xFF000000)
+            if gl_texmgr.d_8to24table[i] == (255 << 0):  # Alpha == 1.0 (0xFF000000)
                 filledcolor = i
                 break
 
@@ -2780,12 +2814,15 @@ def Mod_FloodFillSkin(skin: bytearray, skinwidth: int, skinheight: int) -> None:
 # Constants
 ALIAS_SKIN_SINGLE = 0
 MAX_SKINS = 32
-MF_HOLEY = 0x20
-TEXPREF_PAD = 0x01
-TEXPREF_ALPHA = 0x02
-TEXPREF_NOBRIGHT = 0x04
-TEXPREF_FULLBRIGHT = 0x08
-SRC_INDEXED = 0
+MF_HOLEY = quakedef.MF_HOLEY
+# must match gl_texmgr (gl_texmgr imports this module, so the values are repeated here)
+TEXPREF_MIPMAP     = 0x0001
+TEXPREF_ALPHA      = 0x0008
+TEXPREF_PAD        = 0x0010
+TEXPREF_NOPICMIP   = 0x0080
+TEXPREF_FULLBRIGHT = 0x0100
+TEXPREF_NOBRIGHT   = 0x0200
+TEXPREF_WARPIMAGE  = 0x0800
 
 
 def Mod_LoadAllSkins(numskins: int, pin_offset: int) -> int:
@@ -2802,6 +2839,7 @@ def Mod_LoadAllSkins(numskins: int, pin_offset: int) -> int:
     static void *Mod_LoadAllSkins (int numskins, daliasskintype_t *pskintype) in gl_model.c
     """
     global pheader, loadmodel, loadname, mod_base
+    SRC_INDEXED = gl_texmgr.srcformat.SRC_INDEXED
 
     if numskins < 1 or numskins > MAX_SKINS:
         sys_sdl_unix.Sys_Error(f"Mod_LoadAliasModel: Invalid # of skins: {numskins}")
@@ -2830,19 +2868,18 @@ def Mod_LoadAllSkins(numskins: int, pin_offset: int) -> int:
             mod_base[skin_bytes_offset : skin_bytes_offset + size] = skin_pixels
 
             # Allocate texels buffer and bind offset relative to pheader
-            texels = quakedef.Hunk_AllocName(size, loadname)
+            texels = zone.Hunk_AllocName(size, loadname)
             pheader.texels[i] = (
                 texels - pheader.offset if hasattr(pheader, "offset") else 0
             )
-            quakedef.memcpy(
-                texels, mod_base[skin_bytes_offset : skin_bytes_offset + size], size
-            )
+
+            texels[0:size] = mod_base[skin_bytes_offset : skin_bytes_offset + size]
 
             name = f"{loadmodel.name}:frame{i}"
             offset = skin_bytes_offset
 
             # Handle fullbright masks
-            if quakedef.Mod_CheckFullbrights(
+            if Mod_CheckFullbrights(
                 mod_base[skin_bytes_offset : skin_bytes_offset + size], size
             ):
                 pheader.gltextures[i][0] = gl_texmgr.TexMgr_LoadImage(
@@ -2915,20 +2952,16 @@ def Mod_LoadAllSkins(numskins: int, pin_offset: int) -> int:
                 mod_base[skin_bytes_offset : skin_bytes_offset + size] = skin_pixels
 
                 if j == 0:
-                    texels = quakedef.Hunk_AllocName(size, loadname)
+                    texels = zone.Hunk_AllocName(size, loadname)
                     pheader.texels[i] = (
                         texels - pheader.offset if hasattr(pheader, "offset") else 0
                     )
-                    quakedef.memcpy(
-                        texels,
-                        mod_base[skin_bytes_offset : skin_bytes_offset + size],
-                        size,
-                    )
+                    texels[:size] = mod_base[skin_bytes_offset : skin_bytes_offset + size]
 
                 name = f"{loadmodel.name}:frame{i}_{j}"
                 offset = skin_bytes_offset
 
-                if quakedef.Mod_CheckFullbrights(
+                if Mod_CheckFullbrights(
                     mod_base[skin_bytes_offset : skin_bytes_offset + size], size
                 ):
                     pheader.gltextures[i][j & 3] = gl_texmgr.TexMgr_LoadImage(
@@ -3025,12 +3058,12 @@ def Mod_CalcAliasBounds(a: quakedef.aliashdr_t) -> None:
 
             # Track maximum squared 2D radius (XY plane)
             dist_2d = vx * vx + vy * vy
-            if yawradius < dist_2d:
+            if yawradius < dist_2d:  # noqa: PLR1730
                 yawradius = dist_2d
 
             # Track maximum squared 3D radius (XYZ sphere)
             dist_3d = dist_2d + vz * vz
-            if radius < dist_3d:
+            if radius < dist_3d:  # noqa: PLR1730
                 radius = dist_3d
 
     # Full 3D rotation bounding box (used when entity has non-zero pitch or roll)
@@ -3111,7 +3144,7 @@ def Mod_LoadAliasModel(mod: quakedef.qmodel_t, buffer: bytes) -> None:
     """
     global pheader, mod_base, posenum, loadname, stverts, triangles
 
-    start = quakedef.Hunk_LowMark()
+    start = zone.Hunk_LowMark()
     mod_base = buffer
 
     # Unpack mdl_t binary header (84 bytes)
@@ -3131,7 +3164,7 @@ def Mod_LoadAliasModel(mod: quakedef.qmodel_t, buffer: bytes) -> None:
         synctype,
         flags,
         size_val
-    ) = struct.unpack("<2i9f7ii1f", buffer[:MDL_HEADER_SIZE])
+    ) = struct.unpack("<2i10f8i1f", buffer[:MDL_HEADER_SIZE])
 
     if version != ALIAS_VERSION:
         sys_sdl_unix.Sys_Error(
@@ -3187,7 +3220,7 @@ def Mod_LoadAliasModel(mod: quakedef.qmodel_t, buffer: bytes) -> None:
 
     # 1. Load Skins
     curr_offset = MDL_HEADER_SIZE
-    curr_offset = quakedef.Mod_LoadAllSkins(pheader.numskins, curr_offset)
+    curr_offset = Mod_LoadAllSkins(pheader.numskins, curr_offset)
 
     # 2. Load Base (S, T) Texture Coordinates
     for i in range(pheader.numverts):
@@ -3217,35 +3250,29 @@ def Mod_LoadAliasModel(mod: quakedef.qmodel_t, buffer: bytes) -> None:
         curr_offset += DALIASFRAMETYPE_SIZE
 
         if frame_type == ALIAS_SINGLE:
-            curr_offset = quakedef.Mod_LoadAliasFrame(
+            curr_offset = Mod_LoadAliasFrame(
                 curr_offset, pheader.frames[i]
             )
         else:
-            curr_offset = quakedef.Mod_LoadAliasGroup(
+            curr_offset = Mod_LoadAliasGroup(
                 curr_offset, pheader.frames[i]
             )
 
     pheader.numposes = posenum
-    mod.type = mod_alias
+    mod.type = quakedef.modtype_t.mod_alias
 
     # Apply engine flags & bounds
-    quakedef.Mod_SetExtraFlags(mod)
-    quakedef.Mod_CalcAliasBounds(pheader)
+    Mod_SetExtraFlags(mod)
+    Mod_CalcAliasBounds(pheader)
 
     # Build GPU display lists
-    quakedef.GL_MakeAliasModelDisplayLists(mod, pheader)
+    gl_mesh.GL_MakeAliasModelDisplayLists(mod, pheader)
 
-    # Finalize Hunk memory and store model header in cache
-    end = quakedef.Hunk_LowMark()
-    total = end - start
-
-    quakedef.Cache_Alloc(mod.cache, total, loadname)
-    if not mod.cache.data:
-        return
-
-    # Native Python buffer copy replaces C memcpy
-    mod.cache.data[:total] = buffer[:total]
-    quakedef.Hunk_FreeToLowMark(start)
+    # C copies the hunk (header + pose data) into the cache with memcpy.
+    # Here the header is a Python object, so the cache just holds it directly
+    # (same as the sprite loader does with psprite).
+    mod.cache.data = pheader
+    zone.Hunk_FreeToLowMark(start)
 
 
 # Binary Structure Sizes (in bytes)
@@ -3474,7 +3501,7 @@ def Mod_LoadSpriteModel(mod: quakedef.qmodel_t, buffer: bytes) -> None:
         frame_ref: typing.List[typing.Optional[quakedef.mspriteframe_t]] = [None]
 
         if frametype == SPR_SINGLE:
-            curr_offset = quakedef.Mod_LoadSpriteFrame(
+            curr_offset = Mod_LoadSpriteFrame(
                 curr_offset, frame_ref, i
             )
         else:

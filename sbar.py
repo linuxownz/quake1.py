@@ -10,9 +10,9 @@ import gl_draw
 import gl_screen
 import gl_vidsdl
 import host
+import menu
 import protocol
 import quakedef
-#import screen
 import wad
 
 sb_updates : int = 0
@@ -109,9 +109,9 @@ def Sbar_DrawScrollString(x, y, width, string):
 
     Sbar_DrawString(x - ofs, y, string)
 
-    Sbar_DrawCharacter (x - ofs + l - 32, y, '/')
-    Sbar_DrawCharacter (x - ofs + l - 24, y, '/')
-    Sbar_DrawCharacter (x - ofs + l - 16, y, '/')
+    Sbar_DrawCharacter (x - ofs + l - 32, y, ord('/'))
+    Sbar_DrawCharacter (x - ofs + l - 24, y, ord('/'))
+    Sbar_DrawCharacter (x - ofs + l - 16, y, ord('/'))
     Sbar_DrawString (x - ofs + l, y, string);
 
     gl.glDisable (gl.GL_SCISSOR_TEST);
@@ -119,23 +119,42 @@ def Sbar_DrawScrollString(x, y, width, string):
 
 def Sbar_DrawNum(x, y, num, digits, color):
     num = min(999, num)
-    l = str(num)
-    for char in l:
-        c = ord(char)
-        if c == ord('-'):
-            c = 10
-        else:
-            c -= ord('0')
+    l = str(int(num))
 
-        Sbar_DrawPic(x, y, sb_nums[color][c])
+    if len(l) > digits:
+        l = l[len(l) - digits:]
+    if len(l) < digits:
+        x += (digits - len(l)) * 24
+
+    for char in l:
+        if char == '-':
+            c = STAT_MINUS
+        else:
+            c = ord(char) - ord('0')
+
+        Sbar_DrawPic(x, y, sb_nums[int(color)][c])
         x += 24
 
-def Sbar_SortFrags():
-    raise NotImplementedError
+def Sbar_SortFrags() -> None:
+    """
+    Populates client.fragsort with active client indices sorted descending
+    by frags, updating client.scoreboardlines.
+    """
+    # Filter active client indices and sort descending by frags
+    active_indices = sorted(
+        (i for i in range(cl_main.cl.maxclients) if cl_main.cl.scores[i].name),
+        key=lambda i: cl_main.cl.scores[i].frags,
+        reverse=True,
+    )
+
+    # Update global scoreboard state
+    cl_main.scoreboardlines = len(active_indices)
+    cl_main.fragsort[: cl_main.scoreboardlines] = active_indices
+
 
 def Sbar_ColorForMap(m):
     # return m < 128 ? m + 8 : m + 8 ?????????????
-    return m + 8
+    return ( m + 8 ) & 0xff
 
 def Sbar_SoloScoreboard():
     string = 'Kills: %i/%i' % (cl_main.cl.stats[quakedef.STAT_MONSTERS], cl_main.cl.stats[quakedef.STAT_TOTALMONSTERS])
@@ -143,7 +162,7 @@ def Sbar_SoloScoreboard():
     Sbar_DrawString(8, 12, string)
 
     string = 'Secrets: %i/%i' % (cl_main.cl.stats[quakedef.STAT_SECRETS], cl_main.cl.stats[quakedef.STAT_TOTALSECRETS])
-    right = 312 - len(str) * 8
+    right = 312 - len(string) * 8
     Sbar_DrawString(right, 12, string)
 
     if not common.fitzmode:
@@ -180,6 +199,233 @@ def Sbar_DrawScoreboard():
     if cl_main.cl.gametype == protocol.GAME_DEATHMATCH:
         Sbar_DeathmatchOverlay()
 
+
+def Sbar_DrawInventory():
+    global sb_updates
+    scr_sbaralpha = cvar.Cvar_GetCvar('scr_sbaralpha').value
+
+    if common.rogue:
+        if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] >= quakedef.RIT_LAVA_NAILGUN:
+            Sbar_DrawPicAlpha (0, -24, rsb_invbar[0], scr_sbaralpha)
+        else:
+            Sbar_DrawPicAlpha (0, -24, rsb_invbar[1], scr_sbaralpha)
+
+    for i in range(7):
+        if cl_main.cl.items & ( quakedef.IT_SHOTGUN << i ):
+            time = cl_main.cl.item_gettime[i]
+            flashon = int((cl_main.cl.time - time) * 10)
+            if flashon >= 10:
+                if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] == ( quakedef.IT_SHOTGUN << i):
+                    flashon = 1
+                else:
+                    flashon = 0
+            else:
+                flashon = (flashon % 5) + 2
+
+            Sbar_DrawPic(i * 24, -16, sb_weapons[flashon][i])
+
+            if flashon > 1:
+                sb_updates = 0
+
+    if common.hipnotic:
+        grenadeflashing = 0
+
+        for i in range(4):
+            if cl_main.cl.items & ( 1 << hipweapons[i] ):
+                time = cl_main.cl.item_gettime[hipweapons[i]]
+                flashon = int((cl_main.cl.time - time) * 10)
+                if flashon >= 10:
+                    if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] == ( 1 << hipweapons[i]):
+                        flashon = 1
+                    else:
+                        flashon = 0
+                else:
+                    flashon = (flashon % 5) + 2
+
+                if i == 2:
+                    if cl_main.cl.items & quakedef.HIT_PROXIMITY_GUN:  # noqa: SIM102
+                        if flashon:
+                            grenadeflashing = 1
+                            Sbar_DrawPic(96, -16, hsb_weapons[flashon][2])
+                elif i == 3:
+                    if cl_main.cl.items & ( quakedef.IT_SHOTGUN << 4):
+                        if flashon and not grenadeflashing:
+                            Sbar_DrawPic (96, -16, hsb_weapons[flashon][3])
+                        elif not grenadeflashing:
+                            Sbar_DrawPic (96, -16, hsb_weapons[0][3])
+                    else:
+                        Sbar_DrawPic (96, -16, hsb_weapons[flashon][4])
+                else:
+                    Sbar_DrawPic (176 + (i*24), -16, hsb_weapons[flashon][i])
+
+                if flashon > 1:
+                    sb_updates = 0
+
+    if common.rogue:  # noqa: SIM102
+        if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] >= quakedef.RIT_LAVA_NAILGUN:
+            for i in range(5):
+                if cl_main.cl.stats[quakedef.STAT_ACTIVEWEAPON] == (quakedef.RIT_LAVA_NAILGUN << i):
+                    Sbar_DrawPic ((i+2)*24, -16, rsb_weapons[i])
+
+
+    for i in range(4):
+        val = cl_main.cl.stats[quakedef.STAT_SHELLS + i]
+        val = 0 if val < 0 else min(999, val)
+        num = f'{val:3d}'   # C: sprintf (num, "%3i", val) -- space padded
+
+        if num[0] != ' ':
+            Sbar_DrawCharacter ( (6*i+1)*8 + 2, -24, 18 + ord(num[0]) - ord('0'))
+        if num[1] != ' ':
+            Sbar_DrawCharacter ( (6*i+2)*8 + 2, -24, 18 + ord(num[1]) - ord('0'))
+        if num[2] != ' ':
+            Sbar_DrawCharacter ( (6*i+3)*8 + 2, -24, 18 + ord(num[2]) - ord('0'))
+
+    flashon = 0
+
+    for i in range(6):
+        if cl_main.cl.items & ( 1 << ( 17 + i )):
+            time = cl_main.cl.item_gettime[17+i]
+            if time and time < cl_main.cl.time - 2 and flashon:
+                sb_updates = 0
+            else:
+                if not common.hipnotic or i > 1:
+                    Sbar_DrawPic (192 + i*16, -16, sb_items[i])
+
+            if time and  time > cl_main.cl.time - 2:
+                sb_updates = 0
+
+    if common.hipnotic:
+        for i in range(2):
+            if cl_main.cl.items & (1<<(24+i)):
+                time = cl_main.cl.item_gettime[24 + i]
+                if time and time > cl_main.cl.time - 2 and flashon:
+                    sb_updates = 0
+                else:
+                    Sbar_DrawPic (288 + i*16, -16, hsb_items[i])
+
+                if time and time > cl_main.cl.time - 2:
+                    sb_updates = 0
+
+    if common.rogue:
+        for i in range(2):
+            if cl_main.cl.items & (1<<(29+i)):
+                time = cl_main.cl.item_gettime[29+i]
+                if time and time > cl_main.cl.time - 2 and flashon:
+                    sb_updates = 0
+                else:
+                    Sbar_DrawPic (288 + i*16, -16, rsb_items[i])
+                if time and time > cl_main.cl.time - 2:
+                    sb_updates = 0
+
+    else:
+        for i in range(4):
+            if cl_main.cl.items & (1<<(28+i)):
+                time = cl_main.cl.item_gettime[28+i]
+                if time and time > cl_main.cl.time - 2 and flashon:
+                    sb_updates = 0
+                else:
+                    Sbar_DrawPic (320-32 + i*8, -16, sb_sigil[i])
+
+                if time and time > cl_main.cl.time - 2:
+                    sb_updates = 0
+
+def Sbar_DrawFrags():
+    Sbar_SortFrags()
+
+    numscores = min(scoreboardlines, 4)
+
+    x = 184
+    for i in range(numscores):
+        s = cl_main.cl.scores[fragsort[i]]
+        if not s.name:
+            continue
+
+        color = s.colors & 0xf0
+        color = Sbar_ColorForMap (color)
+        gl_draw.Draw_Fill (x + 10, 1, 28, 4, color, 1)
+
+        color = (s.colors & 15)<<4
+        color = Sbar_ColorForMap (color)
+        gl_draw.Draw_Fill (x + 10, 5, 28, 3, color, 1)
+
+        num = f'{s.frags:3d}'
+        Sbar_DrawCharacter (x + 12, -24, ord(num[0]))
+        Sbar_DrawCharacter (x + 20, -24, ord(num[1]))
+        Sbar_DrawCharacter (x + 28, -24, ord(num[2]))
+
+        if fragsort[i] == cl_main.cl.viewentity - 1:
+            Sbar_DrawCharacter (x + 6, -24, 16)
+            Sbar_DrawCharacter (x + 32, -24, 17)
+
+        x += 32
+
+def Sbar_DrawFace():
+    global sb_updates
+    teamplay = cvar.Cvar_GetCvar('teamplay').value
+
+    if common.rogue and (cl_main.cl.maxclients != 1) and teamplay >3 and teamplay < 7:
+        s = cl_main.cl.scores[cl_main.cl.viewentity - 1]
+        top = s.colors & 0xf0
+        bottom = (s.colors & 15 ) << 4
+        top = Sbar_ColorForMap(top)
+        bottom = Sbar_ColorForMap(bottom)
+
+        if cl_main.cl.gametype == protocol.GAME_DEATHMATCH:
+            xofs = 113
+        else:
+            xofs = ((gl_vidsdl._vid.width - 320)>>1) + 113
+
+        Sbar_DrawPic (112, 0, rsb_teambord)
+        gl_draw.Draw_Fill (xofs,24+3, 22, 9, top, 1)
+        gl_draw.Draw_Fill (xofs,24+12, 22, 9, bottom, 1)
+
+        f = s.frags
+        num = f'{f:3d}'
+
+        if top == 8:
+            if num[0] != ' ':
+                Sbar_DrawCharacter(113, 3, 18 + ord(num[0]) - ord('0'))
+            if num[1] != ' ':
+                Sbar_DrawCharacter(120, 3, 18 + ord(num[1]) - ord('0'))
+            if num[2] != ' ':
+                Sbar_DrawCharacter(127, 3, 18 + ord(num[2]) - ord('0'))
+        else:
+            Sbar_DrawCharacter (113, 3, ord(num[0]))
+            Sbar_DrawCharacter (120, 3, ord(num[1]))
+            Sbar_DrawCharacter (127, 3, ord(num[2]))
+        return
+
+    if cl_main.cl.items & (quakedef.IT_INVISIBILITY | quakedef.IT_INVULNERABILITY) == (quakedef.IT_INVISIBILITY | quakedef.IT_INVULNERABILITY):
+        Sbar_DrawPic (112, 0, sb_face_invis_invuln)
+        return
+    if cl_main.cl.items & quakedef.IT_QUAD:
+        Sbar_DrawPic (112, 0, sb_face_quad )
+        return
+    if cl_main.cl.items & quakedef.IT_INVISIBILITY:
+        Sbar_DrawPic (112, 0, sb_face_invis )
+        return
+    if cl_main.cl.items & quakedef.IT_INVULNERABILITY:
+        Sbar_DrawPic (112, 0, sb_face_invuln)
+        return
+
+    if cl_main.cl.stats[quakedef.STAT_HEALTH] >= 100:
+        f = 4
+    else:
+        f = cl_main.cl.stats[quakedef.STAT_HEALTH] // 20
+
+    if f < 0:
+        f = 0
+
+    if cl_main.cl.time <=cl_main.cl.faceanumtime:
+        anim = 1
+        sb_updates = 0
+    else:
+        anim = 0
+
+    Sbar_DrawPic (112, 0, sb_faces[f][anim])
+
+
+
 def Sbar_Draw():
     global sb_updates
 
@@ -190,10 +436,10 @@ def Sbar_Draw():
         return
 
     gl_clear = int(cvar.Cvar_GetCvar('gl_clear').value)
-    vid_gamma = int(cvar.Cvar_GetCvar('vid_gamma').value)
+    vid_gamma = int(cvar.Cvar_GetCvar('gamma').value)
     scr_sbaralpha = int(cvar.Cvar_GetCvar('scr_sbaralpha').value)
     scr_sbarscale = int(cvar.Cvar_GetCvar('scr_sbarscale').value)
-    scr_viewsize = int(cvar.Cvar_GetCvar('scr_viewsize').value)
+    scr_viewsize = int(cvar.Cvar_GetCvar('viewsize').value)
 
     if sb_updates >= gl_vidsdl._vid.numpages and gl_clear and scr_sbaralpha >= 1 \
         and not(gl_vidsdl.gl_glsl_gamma_able and vid_gamma != 1):
@@ -201,7 +447,7 @@ def Sbar_Draw():
 
     sb_updates += 1
 
-    gl_draw.GL_SetCanvas(screen.canvastype.CANVAS_DEFAULT)
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_DEFAULT)
 
     w = common.CLAMP(320.0, scr_sbarscale * 320.0, gl_screen.glwidth)
 
@@ -212,9 +458,9 @@ def Sbar_Draw():
             gl_draw.Draw_TileClear(w, gl_screen.glheight - sb_lines, gl_screen.glwidth - w, sb_lines)
         else:
             gl_draw.Draw_TileClear(0, gl_screen.glheight - sb_lines, (gl_screen.glwidth - w)/2, sb_lines)
-            gl_draw.Draw_TileClear ((glwidth - w) / 2.0 + w, glheight - sb_lines, (glwidth - w) / 2.0, sb_lines)
+            gl_draw.Draw_TileClear ((gl_screen.glwidth - w) / 2.0 + w, gl_screen.glheight - sb_lines, (gl_screen.glwidth - w) / 2.0, sb_lines)
 
-    gl_draw.GL_SetCanvas(screen.canvastype.CANVAS_SBAR)
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_SBAR)
 
     if scr_viewsize < 110 :
         Sbar_DrawInventory()
@@ -241,56 +487,56 @@ def Sbar_Draw():
         else:
             if common.rogue:
                 Sbar_DrawNum(24, 0, cl_main.cl.stats[quakedef.STAT_ARMOR], 3, cl_main.cl.stats[quakedef.STAT_ARMOR] <= 25)
-                if (cl.items & RIT_ARMOR3):
+                if (cl_main.cl.items & quakedef.RIT_ARMOR3):
                     Sbar_DrawPic (0, 0, sb_armor[2])
-                elif (cl.items & RIT_ARMOR2):
+                elif (cl_main.cl.items & quakedef.RIT_ARMOR2):
                     Sbar_DrawPic (0, 0, sb_armor[1])
-                elif (cl.items & RIT_ARMOR1):
+                elif (cl_main.cl.items & quakedef.RIT_ARMOR1):
                     Sbar_DrawPic (0, 0, sb_armor[0])
 
             else:
-                Sbar_DrawNum (24, 0, cl.stats[STAT_ARMOR], 3 , cl.stats[STAT_ARMOR] <= 25)
-                if (cl.items & IT_ARMOR3):
+                Sbar_DrawNum (24, 0, cl_main.cl.stats[quakedef.STAT_ARMOR], 3 , cl_main.cl.stats[quakedef.STAT_ARMOR] <= 25)
+                if (cl_main.cl.items & quakedef.IT_ARMOR3):
                     Sbar_DrawPic (0, 0, sb_armor[2])
-                elif (cl.items & IT_ARMOR2):
+                elif (cl_main.cl.items & quakedef.IT_ARMOR2):
                     Sbar_DrawPic (0, 0, sb_armor[1])
-                elif (cl.items & IT_ARMOR1):
+                elif (cl_main.cl.items & quakedef.IT_ARMOR1):
                     Sbar_DrawPic (0, 0, sb_armor[0])
 
         Sbar_DrawFace()
 
-        Sbar_DrawNum (136, 0, cl.stats[STAT_HEALTH], 3 , cl.stats[STAT_HEALTH] <= 25)
+        Sbar_DrawNum (136, 0, cl_main.cl.stats[quakedef.STAT_HEALTH], 3 , cl_main.cl.stats[quakedef.STAT_HEALTH] <= 25)
 
-        if (rogue):
-            if (cl.items & RIT_SHELLS):
+        if (common.rogue):
+            if (cl_main.cl.items & quakedef.RIT_SHELLS):
                 Sbar_DrawPic (224, 0, sb_ammo[0])
-            elif (cl.items & RIT_NAILS):
+            elif (cl_main.cl.items & quakedef.RIT_NAILS):
                 Sbar_DrawPic (224, 0, sb_ammo[1])
-            elif (cl.items & RIT_ROCKETS):
+            elif (cl_main.cl.items & quakedef.RIT_ROCKETS):
                 Sbar_DrawPic (224, 0, sb_ammo[2])
-            elif (cl.items & RIT_CELLS):
+            elif (cl_main.cl.items & quakedef.RIT_CELLS):
                 Sbar_DrawPic (224, 0, sb_ammo[3])
-            elif (cl.items & RIT_LAVA_NAILS):
+            elif (cl_main.cl.items & quakedef.RIT_LAVA_NAILS):
                 Sbar_DrawPic (224, 0, rsb_ammo[0])
-            elif (cl.items & RIT_PLASMA_AMMO):
+            elif (cl_main.cl.items & quakedef.RIT_PLASMA_AMMO):
                 Sbar_DrawPic (224, 0, rsb_ammo[1])
-            elif (cl.items & RIT_MULTI_ROCKETS):
+            elif (cl_main.cl.items & quakedef.RIT_MULTI_ROCKETS):
                 Sbar_DrawPic (224, 0, rsb_ammo[2])
 
         else:
-            if (cl.items & IT_SHELLS):
+            if (cl_main.cl.items & quakedef.IT_SHELLS):
                 Sbar_DrawPic (224, 0, sb_ammo[0])
-            elif (cl.items & IT_NAILS):
+            elif (cl_main.cl.items & quakedef.IT_NAILS):
                 Sbar_DrawPic (224, 0, sb_ammo[1])
-            elif (cl.items & IT_ROCKETS):
+            elif (cl_main.cl.items & quakedef.IT_ROCKETS):
                 Sbar_DrawPic (224, 0, sb_ammo[2])
-            elif (cl.items & IT_CELLS):
+            elif (cl_main.cl.items & quakedef.IT_CELLS):
                 Sbar_DrawPic (224, 0, sb_ammo[3])
 
 
-        Sbar_DrawNum (248, 0, cl.stats[STAT_AMMO], 3, cl.stats[STAT_AMMO] <= 10)
+        Sbar_DrawNum (248, 0, cl_main.cl.stats[quakedef.STAT_AMMO], 3, cl_main.cl.stats[quakedef.STAT_AMMO] <= 10)
 
-        if (cl.gametype == GAME_DEATHMATCH):
+        if (cl_main.cl.gametype == protocol.GAME_DEATHMATCH):
             Sbar_MiniDeathmatchOverlay ()
 
 
@@ -425,9 +671,195 @@ def Sbar_LoadPics():
 def Sbar_Init():
     global hipweapons
 
-    hipweapons = [quakedef.HIT_LASER_CANNON, quakedef.HIT_MJOLNIR_BIT, 4, quakedef.HIT_PROXIMITY_GUN_BIT]
+    hipweapons = [quakedef.HIT_LASER_CANNON_BIT, quakedef.HIT_MJOLNIR_BIT, 4, quakedef.HIT_PROXIMITY_GUN_BIT]
     _cmd.Cmd_AddCommand('+showscores', Sbar_ShowScores)
     _cmd.Cmd_AddCommand('-showscores', Sbar_DontShowScores)
 
     Sbar_LoadPics()
 
+def Sbar_IntermissionNumber(x, y, num, digits, color):
+    num_str = str(num)
+
+    for char in num_str:
+        if char == "-":
+            frame = STAT_MINUS
+        else:
+            frame = int(char)
+
+        gl_draw.Draw_Pic(x, y, sb_nums[color][frame])
+        x += 24
+
+
+def Sbar_IntermissionPicForChar(c: int, color) -> wad.qpic_t:
+    char = chr(c) if isinstance(c, int) else c
+
+    if char.isdigit():
+        return sb_nums[color][int(char)]
+    if char == "/":
+        return sb_slash
+    if char == ":":
+        return sb_colon
+    if char == "-":
+        return sb_nums[color][STAT_MINUS]
+
+    return None
+
+def Sbar_IntermissionTextWidth(_str: str, color) -> int:
+    len = 0
+    for char in _str:
+        pic: wad.qpic_t = Sbar_IntermissionPicForChar(char, color)
+        len += pic.width if pic else 24
+    return len
+
+def Sbar_IntermissionText(x, y, _str: str, color):
+    for char in _str:
+        pic: wad.qpic_t = Sbar_IntermissionPicForChar(char, color)
+        if not pic:
+            continue
+        gl_draw.Draw_Pic(x, y, pic)
+        x += pic.width if pic else 24
+
+def Sbar_DeathmatchOverlay():
+
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_MENU)
+
+    pic = gl_draw.Draw_CachePic('gfx/ranking.lmp')
+    menu.M_DrawPic((320-pic.width)/2, 8, pic)
+
+    Sbar_SortFrags()
+
+    l = scoreboardlines
+
+    x = 80
+    y = 40
+
+    for i in range(l):
+        k = fragsort[i]
+        s = cl_main.cl.scores[k]
+        if not s.name:
+            continue
+
+        top = s.colors & 0xf0
+        bottom = (s.colors & 15)<<4
+        top = Sbar_ColorForMap (top)
+        bottom = Sbar_ColorForMap (bottom)
+
+        gl_draw.Draw_Fill ( x, y, 40, 4, top, 1)
+        gl_draw.Draw_Fill ( x, y+4, 40, 4, bottom, 1)
+
+        f = s.frags
+        num = f'{f:3d}'
+
+        gl_draw.Draw_Character ( x+8 , y,  ord(num[0]));
+        gl_draw.Draw_Character ( x+16 , y, ord(num[1]))
+        gl_draw.Draw_Character ( x+24 , y, ord(num[2]))
+
+        if k == cl_main.cl.viewentity - 1:
+            gl_draw.Draw_Character( x - 8, y, 12)
+
+        menu.M_Print(x+64, y, s.name)
+
+        y += 10
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_SBAR)
+
+
+
+def Sbar_MiniDeathmatchOverlay():
+    scr_sbarscale = cvar.Cvar_GetCvar('scr_sbarscale').value
+    scr_viewsize  = cvar.Cvar_GetCvar('viewsize').value
+
+
+    scale = common.CLAMP(1.0, scr_sbarscale, gl_screen.glwidth / 320.)
+
+    if gl_screen.glwidth / scale < 512 or scr_viewsize >= 120:
+        return
+
+
+    Sbar_SortFrags()
+
+    numlines = 3 if scr_viewsize >= 110 else 6
+
+    for i in range(scoreboardlines):
+        if fragsort[i] == cl_main.cl.viewentity - 1:
+            break
+
+    if i == scoreboardlines:
+        i = 0
+    else:
+        i = i - numlines / 2
+
+    if i > scoreboardlines - numlines:
+        i = scoreboardlines - numlines
+
+    if i < 0:
+        i = 0
+
+    x = 324
+    y = 24 if scr_viewsize >= 110 else 0
+
+    for i in range(scoreboardlines):
+        if y > 48:
+            break
+        k = fragsort[i]
+        s = cl_main.cl.scores[k]
+        if not s.name:
+            continue
+        y += 8
+
+        top = s.colors & 0xf0;
+        bottom = (s.colors & 15)<<4;
+        top = Sbar_ColorForMap (top);
+        bottom = Sbar_ColorForMap (bottom);
+
+        gl_draw.Draw_Fill (x, y+1, 40, 4, top, 1);
+        gl_draw.Draw_Fill (x, y+5, 40, 3, bottom, 1)
+
+        f = s.frags;
+        num = f'{f:3d}'
+        gl_draw.Draw_Character (x+ 8, y, ord(num[0]))
+        gl_draw.Draw_Character (x+16, y, ord(num[1]))
+        gl_draw.Draw_Character (x+24, y, ord(num[2]))
+
+        if k == cl_main.cl.viewentity - 1:
+            gl_draw.Draw_Character(x, y, 16)
+            gl_draw.Draw_Character(x + 32, y, 17)
+
+        gl_draw.Draw_String (x+48, y, s.name)
+
+
+def Sbar_IntermissionOverlay():
+
+    if cl_main.cl.gametype == protocol.GAME_DEATHMATCH:
+        Sbar_DeathmatchOverlay()
+        return
+
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_MENU)
+
+    time = f'{cl_main.cl.completed_time / 60}: {cl_main.cl.completed_time % 60:02}'
+    secrets  = f'{cl_main.cl.stats[quakedef.STAT_SECRETS]}/{cl_main.cl.stats[quakedef.STAT_TOTALSECRETS]}'
+    monsters = f'{cl_main.cl.stats[quakedef.STAT_MONSTERS]}/{cl_main.cl.stats[quakedef.STAT_TOTALMONSTERS]}'
+
+    ltime     = Sbar_IntermissionTextWidth (time, 0)
+    lsecrets  = Sbar_IntermissionTextWidth (secrets, 0)
+    lmonsters = Sbar_IntermissionTextWidth (monsters, 0)
+
+    total = max (ltime, lsecrets)
+    total = max (lmonsters, total)
+
+    pic = gl_draw.Draw_CachePic ("gfx/inter.lmp")
+    total += pic.width + 24
+    total = min (320, total)
+    gl_draw.Draw_Pic (160 - total / 2, 56, pic)
+
+    pic = gl_draw.Draw_CachePic ("gfx/complete.lmp")
+    gl_draw.Draw_Pic (160 - pic.width / 2, 24, pic)
+
+    Sbar_IntermissionText (160 + total / 2 - ltime, 64, time, 0)
+    Sbar_IntermissionText (160 + total / 2 - lsecrets, 104, secrets, 0)
+    Sbar_IntermissionText (160 + total / 2 - lmonsters, 144, monsters, 0)
+
+
+def Sbar_FinaleOverlay():
+    gl_draw.GL_SetCanvas(quakedef.canvastype.CANVAS_MENU)
+    pic = gl_draw.Draw_CachePic('glx/finale.lmp')
+    gl_draw.Draw_Pic((320 - pic.width)/2, 16, pic)

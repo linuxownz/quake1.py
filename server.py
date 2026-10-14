@@ -2,6 +2,7 @@
 
 from enum import Enum
 
+import common
 import net_defs
 import progs
 import protocol
@@ -78,34 +79,33 @@ class client_t:
         self.spawned = False
         self.dropasap = False
 
-        self.sendsignon : sendsignon_e = sendsignon_e.PRESPAWN_DONE
+        self.sendsignon: sendsignon_e = sendsignon_e.PRESPAWN_DONE
         self.signonidx = 0
 
         self.last_message = 0.0
 
-        self.netconnection:net_defs.qsocket_t = None
+        self.netconnection: net_defs.qsocket_t = None
 
-        self.cmd : protocol.usercmd_t = None
-        self.wishdir: list[float] = [0., 0., 0.]
+        self.cmd: protocol.usercmd_t = protocol.usercmd_t()
+        self.wishdir: list[float] = [0.0, 0.0, 0.0]
 
-        self.message : common.sizebuf_s = None
-        self.msgbuf = bytearray()
+        # Allocate message buffer for unreliable client commands
+        self.msgbuf = bytearray(quakedef.MAX_MSGLEN)
+        self.message = common.sizebuf_s()
+        #common.SZ_Init(self.message, self.msgbuf, len(self.msgbuf))
 
-        raise NotImplementedError
-        self.edict : progs.edict_t = 0
-        self.edict_index = 0 # <<<<<<<<<<<<<< need this as edict is a pointer
+        self.edict: progs.edict_t = None
+        self.edict_index = 0
 
-        self.name = ''
+        self.name = ""
         self.colors = 0
 
-        self.ping_times = []
+        self.ping_times: list[float] = [0.0] * NUM_PING_TIMES
         self.num_pings = 0
 
-        self.spawn_parms : list[float]= []
+        self.spawn_parms: list[float] = [0.0] * NUM_SPAWN_PARMS
 
         self.old_frags = 0
-
-
 class server_static_t:
     def __init__(self):
         self.maxclients = 0

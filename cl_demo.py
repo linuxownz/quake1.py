@@ -17,16 +17,19 @@ import quakedef
 import sys_sdl_unix
 
 demo_head: bytearray = bytearray()
-demo_head_sizes: list[int] = 0
+demo_head_sizes: list[int] = []
 
 def CL_ClearSignons():
     cl_main.cls.signon = 0
+    # C: VEC_CLEAR(demo_head) / VEC_CLEAR(demo_head_sizes)
+    demo_head.clear()
+    demo_head_sizes.clear()
 
 def CL_StopPlayback():
     if not cl_main.cls.demoplayback:
         return
 
-    cl_main.cls.demoplayback.close()
+    cl_main.cls.demofile.close()
     cl_main.cls.demoplayback = False
     cl_main.cls.demopaused = False
     cl_main.cls.demofile = None
@@ -50,7 +53,7 @@ def CL_GetDemoMessage() -> int:
     if cl_main.cls.demopaused:
         return 0
 
-    if cl_main.cls.signon == client.SIGNONS:  # noqa: SIM102
+    if cl_main.cls.signon == quakedef.SIGNONS:  # noqa: SIM102
         if cl_main.cls.timedemo:              # noqa: SIM102
             if host.host_framecount == cl_main.cls.td_lastframe:
                 return 0
@@ -76,17 +79,21 @@ def CL_GetDemoMessage() -> int:
         data = cl_main.cls.demofile.read(4)
         r = len(data)
 
-        cl_main.cl.mviewangles[0][i] = common.LittleFloat(data)
+        cl_main.cl.mviewangles[0][i] = struct.unpack('<f', data)[0] if len(data) == 4 else 0.0
 
     net_main.net_message.cursize = common.LittleLong(net_main.net_message.cursize)
 
     if net_main.net_message.cursize > quakedef.MAX_MSGLEN:
         sys_sdl_unix.Sys_Error('Demo message > MAX_MSGLEN')
 
-    net_main.net_message.data = cl_main.cls.demofile.read(net_main.net_message.cursize)
-    if len(net_main.net_message.data) != net_main.net_message.cursize:
+    n = net_main.net_message.cursize
+    buf = cl_main.cls.demofile.read(n)
+    if len(buf) != n:
         CL_StopPlayback()
         return 0
+    if len(net_main.net_message.data) < n:
+        net_main.net_message.data = bytearray(n)
+    net_main.net_message.data[:n] = buf   # keep a writable buffer
 
     return 1
 
@@ -110,7 +117,8 @@ def CL_GetMessage() -> int:
 
     if cl_main.cls.signon < 2:
         #common.Vec_Append(demo_head, net_main.net_message.data)
-        demo_head.append(net_main.net_message.data)
+        # bytearray.append() takes one int; extend with the message bytes instead
+        demo_head.extend(net_main.net_message.data[:net_main.net_message.cursize])
 
         #common.VEC_PUSH(demo_head_sizes, net_main.net_message.cursize)
         demo_head_sizes.append(net_main.net_message.cursize)
@@ -156,7 +164,7 @@ def CL_Record_f():
         console.Con_Printf('record <demoname> [map]')
         return
 
-    if _cmd.Cmd_Argv(1).find('..'):
+    if '..' in _cmd.Cmd_Argv(1):
         console.Con_Printf('Relative pathnames are not allowed')
         return
 
@@ -168,21 +176,21 @@ def CL_Record_f():
     name = common.com_gamedir + '/' + _cmd.Cmd_Argv(1)
 
     if c > 2:
-        _cmd.Cmd_ExecuteString('map ' + _cmd.Cmd_Argv(2), _cmd.cmd_source.src_command)
+        _cmd.Cmd_ExecuteString('map ' + _cmd.Cmd_Argv(2), _cmd.cmd_source_t.src_command)
         if cl_main.cls.state != quakedef.cactive_t.ca_connected:
             return
 
-    common.COM_AddExtension(name, '.dem')
+    name = common.COM_AddExtension(name, '.dem')
 
-    console.Con_Printf('recording to ' + name)
+    console.Con_Printf('recording to ' + name + '\n')
     try:
         cl_main.cls.demofile = open(name, 'wb')
     except OSError as e:
-        console.Con_Printf('Error: couldnt create file ' + name + ' ' + e)
+        console.Con_Printf(f'Error: couldnt create file {name} {e}\n')
         return
 
     cl_main.cls.forcetrack = track # -1
-    cl_main.cls.demofile.write(b"%d" % cl_main.cls.forcetrack)
+    cl_main.cls.demofile.write(b"%d\n" % cl_main.cls.forcetrack)
 
     cl_main.cls.demorecording = True
 
@@ -212,7 +220,7 @@ def CL_Record_f():
         common.SZ_Clear(net_main.net_message)
 
         # 4. Current player names, colors, and frags
-        for i in range(cl.maxclients):
+        for i in range(cl_main.cl.maxclients):
             common.MSG_WriteByte(net_main.net_message, protocol.svc_updatename)
             common.MSG_WriteByte(net_main.net_message, i)
             common.MSG_WriteString(net_main.net_message, cl_main.cl.scores[i].name)
@@ -229,7 +237,7 @@ def CL_Record_f():
         for i in range(quakedef.MAX_LIGHTSTYLES):
             common.MSG_WriteByte(net_main.net_message, protocol.svc_lightstyle)
             common.MSG_WriteByte(net_main.net_message, i)
-            common.MSG_WriteString(net_main.net_message, cl_lightstyle[i].map)
+            common.MSG_WriteString(net_main.net_message, cl_main.cl_lightstyle[i].map)
 
         # 6. Level stats
         common.MSG_WriteByte(net_main.net_message, protocol.svc_updatestat)
@@ -266,15 +274,12 @@ def CL_Record_f():
 
 
 
-
-
-
-def CL_GetDemoMessage():
+def CL_GetDemoMessageUnused2():
 
     if cl_main.cls.demopaused:
         return 0
 
-    if cl_main.cls.signon == client.SIGNONS:
+    if cl_main.cls.signon == quakedef.SIGNONS:
         if cl_main.cls.timedemo:
             if host.host_framecount == cl_main.cls.td_lastframe:
                 return 0
@@ -325,13 +330,6 @@ def CL_GetDemoMessage():
     return 1
 
 
-
-def CL_GetMessage():
-    if cl_main.cls.demoplayback:
-        return CL_GetDemoMessage()
-
-    raise NotImplementedError
-
 def CL_PlayDemo_f():
 
     if _cmd.cmd_source != _cmd.cmd_source_t.src_command:
@@ -346,9 +344,10 @@ def CL_PlayDemo_f():
     name = common.COM_AddExtension(_cmd.Cmd_Argv(1), '.dem')
     console.Con_Printf(f'Playing demo from {name}\n')
 
-    (handle, length, path_id, is_pak) = common.COM_FOpenFile(name)
+    #(handle, length, path_id, is_pak) = common.COM_FOpenFile(name)
+    ffr = common.COM_FOpenFile(name)
 
-    cl_main.cls.demofile = handle
+    cl_main.cls.demofile = ffr.file
 
     if not cl_main.cls.demofile:
         console.Con_Printf(f'ERROR: could not open {name}\n')
@@ -361,22 +360,21 @@ def CL_PlayDemo_f():
 
     keys.key_dest = keys.keydest_t.key_game
 
-    # Demos start with 3 floats for the initial view angles
-    # We need to read them so the camera starts in the right spot
-    try:
-        import struct
-        # Read 12 bytes (3 floats * 4 bytes)
-        angle_data = cl_main.cls.demofile.read(12)
-        if len(angle_data) == 12:
-            cl_main.cl.viewangles = list(struct.unpack('<3f', angle_data))
-
-        # Now trigger the first block of network data
-        CL_GetMessage()
-
-    except Exception as e:
-        console.Con_Printf(f"ERROR: Failed to read demo header: {e}\n")
-        cl_main.CL_Disconnect()
-
+#    # Demos start with 3 floats for the initial view angles
+#    # We need to read them so the camera starts in the right spot
+#    try:
+#        # Read 12 bytes (3 floats * 4 bytes)
+#        angle_data = cl_main.cls.demofile.read(12)
+#        if len(angle_data) == 12:
+#            cl_main.cl.viewangles = list(struct.unpack('<3f', angle_data))
+#
+#        # Now trigger the first block of network data
+#        CL_GetMessage()
+#
+#    except Exception as e:
+#        console.Con_Printf(f"ERROR: Failed to read demo header: {e}\n")
+#        cl_main.CL_Disconnect()
+#
 
 
 def CL_FinishTimeDemo():

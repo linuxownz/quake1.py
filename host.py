@@ -75,7 +75,7 @@ def Max_Fps_f(cvar:cvar.cvar_t):
         console.Con_Warning('host_maxfps > 72 breaks physics')
 
 def Max_Edicts_f(cvar:cvar.cvar_t):
-    if cl_main.cls.state == quakedef.cactive_t.ca_connected or sv_main.sv_active:
+    if cl_main.cls.state == quakedef.cactive_t.ca_connected or sv_main.sv.active:
         console.Con_Printf('Changes to max_edicts will not take effect until next time map is loaded')
 
 def Host_EndGame(fmt, *msg):
@@ -85,7 +85,7 @@ def Host_EndGame(fmt, *msg):
 
     console.Con_DPrintf("Host_EndGame: " + message)
 
-    if sv_main.sv_active:
+    if sv_main.sv.active:
         Host_ShutdownServer(False)
 
     if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
@@ -114,7 +114,7 @@ def Host_Error (format:str, *args):
 
     console.Con_Printf(string)
 
-    if sv_main.sv_active:
+    if sv_main.sv.active:
         Host_ShutdownServer(False)
 
     if cl_main.cls.state == quakedef.cactive_t.ca_dedicated:
@@ -170,7 +170,7 @@ def Host_Version_f():
     console.Con_Printf("QuakeSpasm Version " + quakedef.QUAKESPASM_VERSION)
 
 def Host_Callback_Notify(cvar):
-    if sv_main.sv_active:
+    if sv_main.sv.active:
         SV_BroadcastPrintf(f"{cvar['name']} changed to {cvar['string']}")
 
 def Host_InitLocal():
@@ -253,7 +253,7 @@ def SV_ClientPrintf(fmt, *args):
     if args:
         string = fmt % args
 
-    common.MSG_WriteByte(host_client.message, protocol.sv_print)
+    common.MSG_WriteByte(host_client.message, protocol.svc_print)
     common.MSG_WriteString(host_client.message, string)
 
 def SV_BroadcastPrintf(fmt, *args):
@@ -286,7 +286,7 @@ def SV_DropClient(crash: bool):
         # 2. Run QuakeC ClientDisconnect (important for clearing player-owned entities)
         if host_client.edict and host_client.spawned:
             saveSelf = pr_edict.pr_global_struct.self
-            pr_edict.pr_global_struct.self = progs.EDICT_TO_PROG(host_client.edict)
+            pr_edict.pr_global_struct.self = pr_edict.EDICT_TO_PROG(host_client.edict)
             pr_exec.PR_ExecuteProgram(pr_edict.pr_global_struct.ClientDisconnect)
             pr_edict.pr_global_struct.self = saveSelf
 
@@ -331,10 +331,10 @@ def SV_DropClient(crash: bool):
 def Host_ShutdownServer(crash: bool):
     global host_client
 
-    if not sv_main.sv_active:
+    if not sv_main.sv.active:
         return
 
-    sv_main.sv_active = False
+    sv_main.sv.active = False
 
     if cl_main.cls.state == quakedef.cactive_t.ca_connected:
         cl_main.CL_Disconnect()
@@ -374,7 +374,7 @@ def Host_ShutdownServer(crash: bool):
         if host_client.active:
             SV_DropClient(crash)
 
-    sv_main.svs.clients = [ server.client_t() for i in range(sv_main.svs.maxclients) ]
+    sv_main.svs.clients = [ server.client_t() for i in range(sv_main.svs.maxclientslimit) ]
 
 def Host_ClearMemory():
 
@@ -392,6 +392,7 @@ def Host_ClearMemory():
 
 
 def Host_Init():
+    global host_hunklevel
     zone.Memory_Init(membase, memsize)
 
     _cmd.Cbuf_Init()
@@ -419,7 +420,7 @@ def Host_Init():
 
     global host_colormap
     if cl_main.cls.state != quakedef.cactive_t.ca_dedicated:
-        host_colormap = common.COM_LoadHunkFile('gfx/colormap.lmp')
+        host_colormap = common.COM_LoadHunkFile('gfx/colormap.lmp', False)
         if host_colormap is None:
             sys_sdl_unix.Sys_Error('couldnt load gfx/colormap.lmp')
 
@@ -454,7 +455,7 @@ def Host_Init():
         _cmd.Cbuf_AddText ("exec autoexec.cfg\n")
         _cmd.Cbuf_AddText ("stuffcmds")
         _cmd.Cbuf_Execute ()
-        if not sv_main.sv_active:
+        if not sv_main.sv.active:
             _cmd.Cbuf_AddText ("map start\n")
 
     _cmd.Cbuf_AddText("map start\n")
@@ -503,16 +504,29 @@ def Host_GetConsoleCommands():
         _cmd.Cbuf_AddText(cmd)
 
 
+def _sv_func(name):
+    # SV_RunClients / SV_Physics live in sv_user / sv_phys, not sv_main
+    import importlib
+    for m in ('sv_main', 'sv_phys', 'sv_user'):
+        try:
+            mod = importlib.import_module(m)
+        except ImportError:
+            continue
+        f = getattr(mod, name, None)
+        if f:
+            return f
+    raise AttributeError(name)
+
 def Host_ServerFrame():
     active = 0
     pr_edict.pr_global_struct.frametime = host_frametime
 
     sv_main.SV_ClearDatagram()
     sv_main.SV_CheckForNewClients()
-    sv_main.SV_RunClients()
+    _sv_func('SV_RunClients')()
 
     if not sv_main.sv.paused and ( sv_main.svs.maxclients > 1 or keys.key_dest == keys.keydest_t.key_game):
-        sv_main.SV_Physics()
+        _sv_func('SV_Physics')()
 
     if cl_main.cls.signon == quakedef.SIGNONS: # (4)
         active = 0
@@ -558,18 +572,17 @@ def _Host_Frame(time):
 
         net_main.NET_Poll()
 
-        if sv_main.sv_active:
+        if sv_main.sv.active:
             cl_main.CL_SendCmd()
 
         Host_GetConsoleCommands()
 
-
         # --- Server Operations ---
-        if sv_main.sv_active:
+        if sv_main.sv.active:
             Host_ServerFrame() # Added sv_main prefix
 
         # --- Client Operations ---
-        if not sv_main.sv_active:
+        if not sv_main.sv.active:
             cl_main.CL_SendCmd()
 
         if cl_main.cls.state == cl_main.cactive_t.ca_connected:
@@ -579,9 +592,6 @@ def _Host_Frame(time):
         host_speeds = cvar.Cvar_GetCvar('host_speeds')
         if int(host_speeds.value):
             time1 = sys_sdl_unix.Sys_DoubleTime()
-
-        # ? in_sdl.IN_MouseMove()
-        # ? cl_main.CL_Move(time)
 
         gl_screen.SCR_UpdateScreen()
 
@@ -801,8 +811,9 @@ def BuildTris(
     commands[numcommands] = 0
     numcommands += 1
 
-isdown: bool = False
-def Host_Shutdown():
+isdownxx: bool = False
+def Host_ShutdownXX():
+    global isdown
     if isdown:
         print('recursive shutdown\n')
         return

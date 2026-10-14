@@ -1,5 +1,6 @@
 #gl_sky.py
 import math
+
 import OpenGL.GL as gl
 
 import _cmd
@@ -13,12 +14,14 @@ import gl_rmain
 import gl_texmgr
 import gl_vidsdl
 import mathlib
+import protocol
 import quakedef
 import r_brush
 import render
 import zone
 
 MAX_CLIP_VERTS  = 64
+BACKFACE_EPSILON = 0.01
 
 skyflatcolor = [0, 0, 0]
 #skymins = [[0, 0, 0, 0, 0, 0],[0, 0, 0, 0, 0, 0]]
@@ -307,7 +310,7 @@ def Sky_ProjectPoly(nump: int, vecs: list):
     S/T bounds for sky clipping and drawing.
 
     C equivalent:
-    void Sky_ProjectPoly (int nump, vec3_t vecs) in gl_rsurf.c / r_sky.c
+    void Sky_ProjectPoly (int nump, vec3_t vecs) in r_brush.c / r_sky.c
     """
     global skymins, skymaxs
 
@@ -389,7 +392,7 @@ def Sky_ClipPoly(nump: int, vecs: list, stage: int):
     Once stage 6 is reached, projects the fully clipped polygon onto sky box faces.
 
     C equivalent:
-    static void Sky_ClipPoly (int nump, vec3_t vecs, int stage) in gl_rsurf.c / r_sky.c
+    static void Sky_ClipPoly (int nump, vec3_t vecs, int stage) in r_brush.c / r_sky.c
     """
     if stage == 6:  # Fully clipped against all 6 planes
         Sky_ProjectPoly(nump, vecs)
@@ -417,14 +420,14 @@ def Sky_ClipPoly(nump: int, vecs: list, stage: int):
         v = get_vert(i)
         d = v[0] * norm[0] + v[1] * norm[1] + v[2] * norm[2]  # DotProduct
 
-        if d > ON_EPSILON:
+        if d > quakedef.ON_EPSILON:
             front = True
-            sides[i] = SIDE_FRONT
-        elif d < -ON_EPSILON:  # Note: d < -ON_EPSILON matches C's d < -ON_EPSILON logic
+            sides[i] = quakedef.SIDE_FRONT
+        elif d < -quakedef.ON_EPSILON:  # Note: d < -ON_EPSILON matches C's d < -ON_EPSILON logic
             back = True
-            sides[i] = SIDE_BACK
+            sides[i] = quakedef.SIDE_BACK
         else:
-            sides[i] = SIDE_ON
+            sides[i] = quakedef.SIDE_ON
 
         dists[i] = d
 
@@ -446,13 +449,13 @@ def Sky_ClipPoly(nump: int, vecs: list, stage: int):
     for i in range(nump):
         v = get_vert(i)
 
-        if sides[i] == SIDE_FRONT:
+        if sides[i] == quakedef.SIDE_FRONT:
             newv_0.append([v[0], v[1], v[2]])
             newc_0 += 1
-        elif sides[i] == SIDE_BACK:
+        elif sides[i] == quakedef.SIDE_BACK:
             newv_1.append([v[0], v[1], v[2]])
             newc_1 += 1
-        elif sides[i] == SIDE_ON:
+        elif sides[i] == quakedef.SIDE_ON:
             newv_0.append([v[0], v[1], v[2]])
             newc_0 += 1
             newv_1.append([v[0], v[1], v[2]])
@@ -460,8 +463,8 @@ def Sky_ClipPoly(nump: int, vecs: list, stage: int):
 
         # Check if an edge splits across the plane
         if (
-            sides[i] == SIDE_ON
-            or sides[i + 1] == SIDE_ON
+            sides[i] == quakedef.SIDE_ON
+            or sides[i + 1] == quakedef.SIDE_ON
             or sides[i + 1] == sides[i]
         ):
             continue
@@ -511,7 +514,7 @@ def Sky_ProcessTextureChains():
     sky surface polygons to Sky_ProcessPoly for rendering and projection.
 
     C equivalent:
-    R_DrawSkyChains in gl_rsurf.c
+    R_DrawSkyChains in r_brush.c
     """
     if not gl_rmain.r_drawworld_cheatsafe:
         return
@@ -550,14 +553,6 @@ def Sky_ProcessTextureChains():
 
 
 
-import mathlib
-import quakedef
-import render
-import zone
-
-BACKFACE_EPSILON = 0.01
-
-
 def Sky_ProcessEntities():
     """Traverses visible brush entities (e.g. moving platforms/doors with sky brushes),
 
@@ -565,27 +560,28 @@ def Sky_ProcessEntities():
     and passes them to the sky rendering/projection pipeline.
 
     C equivalent:
-    void Sky_ProcessEntities (void) in gl_rsurf.c / r_sky.c
+    void Sky_ProcessEntities (void) in r_brush.c / r_sky.c
     """
-    if not render.r_drawentities.value:
+    r_drawentities = cvar.Cvar_GetCvar('r_drawentities').value
+    if not r_drawentities:
         return
 
     modelorg = [0.0, 0.0, 0.0]
 
-    for i in range(render.cl_numvisedicts):
-        e: quakedef.entity_t = render.cl_visedicts[i]
+    for i in range(cl_main.cl_numvisedicts):
+        e: quakedef.entity_t = cl_main.cl_visedicts[i]
 
-        if not e or not e.model or e.model.type != quakedef.mod_brush:
+        if not e or not e.model or e.model.type != quakedef.modtype_t.mod_brush:
             continue
 
-        if render.R_CullModelForEntity(e):
+        if gl_rmain.R_CullModelForEntity(e):
             continue
 
-        if e.alpha == quakedef.ENTALPHA_ZERO:
+        if e.alpha == protocol.ENTALPHA_ZERO:
             continue
 
         # Calculate camera origin relative to entity origin
-        mathlib.VectorSubtract(render.r_refdef.vieworg, e.origin, modelorg)
+        mathlib.VectorSubtract(gl_rmain.r_refdef.vieworg, e.origin, modelorg)
 
         forward = [0.0, 0.0, 0.0]
         right = [0.0, 0.0, 0.0]
@@ -929,7 +925,7 @@ def Sky_DrawSky():
         skymins[0][i] = skymins[1][i] = mathlib.FLT_MAX
         skymaxs[0][i] = skymaxs[1][i] = -mathlib.FLT_MAX
 
-    gl_fog.Fog_DisbleGFog()
+    gl_fog.Fog_DisableGFog()
     gl.glDisable(gl.GL_TEXTURE_2D)
     if gl_fog.Fog_GetDensity() > 0:
         gl.glColor3fv(gl_fog.Fog_GetColor())

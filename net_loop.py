@@ -8,6 +8,14 @@ import net_main
 import sv_main
 import sys_sdl_unix
 
+def _ensure_buffers(sock):
+    """qsocket_t has no receiveMessage buffer of its own; give it one (C: byte receiveMessage[NET_MAXMESSAGE])."""
+    size = getattr(net_defs, 'NET_MAXMESSAGE', 65535)
+    buf = getattr(sock, 'receiveMessage', None)
+    if buf is None or len(buf) < size:
+        sock.receiveMessage = bytearray(size)
+    return sock.receiveMessage
+
 localconnectpending = False
 loop_client : net_defs.qsocket_t = None
 loop_server : net_defs.qsocket_t = None
@@ -20,14 +28,16 @@ def Loop_Init():
 def Loop_Shutdown():
     pass
 
-def Loop_Listen():
+def Loop_Listen(state=True):
     pass
 
-def Loop_SearchForHosts():
+def Loop_SearchForHosts(xmit=True):
     if not sv_main.sv.active:
         return
 
     net_main.hostCacheCount = 1
+    while len(net_main.hostcache) < 1:
+        net_main.hostcache.append(net_defs.hostcache_t())
 
     hostname = cvar.Cvar_GetCvar('hostname').string
 
@@ -59,6 +69,7 @@ def Loop_Connect(host: str):
             console.Con_Printf('Loop_Connect: no qsocket available\n')
             return None
         loop_client.address = 'localhost'
+    _ensure_buffers(loop_client)
 
     loop_client.receiveMessageLength = 0
     loop_client.sendMessageLength = 0
@@ -70,6 +81,7 @@ def Loop_Connect(host: str):
             console.Con_Printf('Loop_Connect: no qsocket available\n')
             return None
         loop_server.address = 'LOCAL'
+    _ensure_buffers(loop_server)
 
     loop_server.receiveMessageLength = 0
     loop_server.sendMessageLength = 0
@@ -112,6 +124,7 @@ def Loop_GetMessage(sock: net_defs.qsocket_t):
         1: Reliable message
         2: Unreliable message
     """
+    _ensure_buffers(sock)
     if sock.receiveMessageLength == 0:
         return 0
 
@@ -159,13 +172,15 @@ def Loop_SendMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s):
     dest = sock.driverdata
     if not dest:
         return -1
+    _ensure_buffers(dest)
 
     # 2. Check for buffer overflow
     # Quake buffers are typically 8192 bytes.
     # Header (4 bytes) + aligned data length
     aligned_len = IntAlign(data.cursize)
-    if (dest.receiveMessageLength + aligned_len + 4) > net_defs.NET_MAXMESSAGE:
-        sys_sdl_unix.Sys_Error("Loop_SendMessage: prototype buffer overflow")
+    if (dest.receiveMessageLength + aligned_len + 4) > len(dest.receiveMessage):
+        console.Con_Printf('Loop_SendMessage: overflow\n')
+        return -1
 
     # 3. Write the Header
     # Byte 0: Message Type (1 for Reliable, 2 for Unreliable in this context)
@@ -200,13 +215,14 @@ def Loop_SendUnreliableMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s)
     dest = sock.driverdata
     if not dest:
         return -1
+    _ensure_buffers(dest)
 
     # 2. Check for buffer overflow
     # Quake buffers are typically 8192 bytes.
     # Header (4 bytes) + aligned data length
     aligned_len = IntAlign(data.cursize)
-    if (dest.receiveMessageLength + aligned_len + 4) > net_defs.NET_MAXMESSAGE:
-        sys_sdl_unix.Sys_Error("Loop_SendMessage: prototype buffer overflow")
+    if (dest.receiveMessageLength + aligned_len + 4) > len(dest.receiveMessage):
+        return 0  # unreliable: just drop it
 
     # 3. Write the Header
     # Byte 0: Message Type (1 for Reliable, 2 for Unreliable in this context)
@@ -228,16 +244,15 @@ def Loop_SendUnreliableMessage(sock: net_defs.qsocket_t, data: common.sizebuf_s)
 
     # In Loopback, reliable messages are "received" instantly,
     # so we block the sender until the receiver processes it.
-    sock.canSend = False
     return 1
 
 
 def Loop_CanSendMessage(sock: net_defs.qsocket_t):
     if not sock.driverdata:
         return False
-    return True
+    return sock.canSend  # C: return sock->canSend
 
-def Loop_CanSendUnreliableMessage():
+def Loop_CanSendUnreliableMessage(sock=None):
     return True
 
 def Loop_Close(sock: net_defs.qsocket_t):

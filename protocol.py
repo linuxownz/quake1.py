@@ -1,4 +1,4 @@
-#protocol.py 
+#protocol.py
 
 PROTOCOL_NETQUAKE  =  15
 PROTOCOL_FITZQUAKE = 666
@@ -119,7 +119,7 @@ def ENTALPHA_DECODE(a):
     if a==ENTALPHA_DEFAULT:
         return 1.0
     else:
-        returnfloat(a-1)/254 #client convert to float for rendering
+        return float(a-1)/254 #client convert to float for rendering
 
 def ENTALPHA_TOSAVE(a):
     if a==ENTALPHA_DEFAULT:
@@ -134,8 +134,8 @@ ENTSCALE_DEFAULT=16 # Equivalent to float 1.0f due to byte packing.
 
 def ENTSCALE_ENCODE(a):
     if a:
-        return (a) * ENTSCALE_DEFAULT 
-    else: 
+        return (a) * ENTSCALE_DEFAULT
+    else:
         return ENTSCALE_DEFAULT # Convert to byte
 
 def ENTSCALE_DECODE(a):

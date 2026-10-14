@@ -22,6 +22,7 @@ import gl_screen
 import gl_vidsdl
 import gl_warp
 import protocol
+
 #import quakedef
 import sbar
 import sys_sdl_unix
@@ -146,10 +147,14 @@ def Draw_CachePic(path: str) -> wad.qpic_t:
     pic.name = path
 
     # 4. Load lump file
-    dat: wad.qpic_t = common.COM_LoadTempFile(path)
-    if not dat:
+    data = bytearray(common.COM_LoadTempFile(path, False))
+    width, height = struct.unpack_from("<2i", data, 0)
+    thedata = data[8 : 8 + (width * height)]
+
+    if not thedata:
         sys_sdl_unix.Sys_Error(f'Draw_CachePic: failed to load {path}')
 
+    dat: wad.qpic_t = wad.qpic_t(width, height, thedata)
     wad.SwapPic(dat)
 
     # 5. Handle player menu pixel buffer copy & calculate byte size
@@ -157,6 +162,7 @@ def Draw_CachePic(path: str) -> wad.qpic_t:
     if path == 'gfx/menuplyr.lmp':
         menuplyr_pixels[:size_in_bytes] = dat.data[:size_in_bytes]
 
+    pic.pic = dat
     pic.pic.width = dat.width
     pic.pic.height = dat.height
 
@@ -167,14 +173,13 @@ def Draw_CachePic(path: str) -> wad.qpic_t:
         gl_texmgr.TEXPREF_ALPHA | gl_texmgr.TEXPREF_PAD | gl_texmgr.TEXPREF_NOPICMIP
     )
 
-    # 7. Store glpic_t metadata into cache picture handle
-    pic.pic = glp
-
-    # 8. Set UV coordinates on the stored picture handle
-    pic.pic.sl = 0.0
-    pic.pic.sh = dat.width / gl_texmgr.TexMgr_PadConditional(dat.width)
-    pic.pic.tl = 0.0
-    pic.pic.th = dat.height / gl_texmgr.TexMgr_PadConditional(dat.height)
+    # 7. Keep the qpic_t (Draw_Pic needs width/height/gl_texture/data UVs)
+    dat.gl_texture = glp
+    dat.data = [0.0,
+                dat.width  / gl_texmgr.TexMgr_PadConditional(dat.width),
+                0.0,
+                dat.height / gl_texmgr.TexMgr_PadConditional(dat.height)]
+    pic.pic = dat
 
     return pic.pic
 
@@ -194,52 +199,6 @@ def Scrap_Upload():
 
 
 def Scrap_AllocBlock(w, h) -> (int, int, int):
-    # Initialize best_x and best_y to track the best location found across all i
-    best_x = -1
-    best_y = BLOCK_HEIGHT # Initialize to max possible height
-
-    for texnum in range(MAX_SCRAPS):
-        # Reset best height tracker for this texture
-        # NOTE: In the C code, 'best' is used for this, but it's confusingly named.
-        min_required_height = BLOCK_HEIGHT
-
-        for i in range(BLOCK_WIDTH - w + 1): # +1 to include the last valid position
-            best2 = 0 # Height of the tallest column in the current w-wide window
-
-            for j in range(w):
-                current_height = scrap_allocated[texnum][i + j]
-
-                # C-break condition: if any column is too high, this position fails the overall test (Best-Fit logic is more complex)
-                if current_height >= min_required_height:
-                    break
-
-                # Update best2: Find the tallest column in the current window
-                best2 = max(best2, current_height)
-
-            # C condition: j == w means the inner loop completed successfully (all w columns checked)
-            if j == w - 1: # Python's j loop ends at w-1, so checking j==w-1 means it completed  # noqa: SIM102
-
-                # CRITICAL FIX: Track the *lowest* required shelf height (best2)
-                if best2 < min_required_height:
-                    min_required_height = best2
-                    best_x = i
-
-        # After checking all 'i' positions, we have the best spot (best_x, min_required_height)
-
-        # Check the final feasibility of the best spot found
-        if min_required_height + h > BLOCK_HEIGHT:
-            continue
-
-        # Allocation: Use the stored best_x and min_required_height
-        for i in range(w):
-            scrap_allocated[texnum][best_x + i] = min_required_height + h
-
-        return texnum, best_x, min_required_height
-
-    # Sys_Error('Scrap_AllocBlock: full') # Replaced with standard Python exception
-    raise Exception('Scrap_AllocBlock: full')  # noqa: TRY002
-
-def Scrap_AllocBlockFail(w, h) -> (int, int, int):
     x = y = 0
 
     for texnum in range(MAX_SCRAPS):
@@ -252,10 +211,11 @@ def Scrap_AllocBlockFail(w, h) -> (int, int, int):
                 if scrap_allocated[texnum][i + j] >= best:
                     break
                 best2 = max(scrap_allocated[texnum][i + j], best2)
-
-            if j == w:
+            else:
+                # inner loop completed: all w columns fit below `best`
                 x = i
                 y = best = best2
+
         if best + h > BLOCK_HEIGHT:
             continue
 
@@ -265,7 +225,10 @@ def Scrap_AllocBlockFail(w, h) -> (int, int, int):
         return texnum, x, y
 
     sys_sdl_unix.Sys_Error('Scrap_AllocBlock: full')
-    return 0
+    return 0, 0, 0
+
+Scrap_AllocBlockFail = Scrap_AllocBlock
+
 
 def Draw_PicFromWad(name):
     global scrap_dirty
@@ -306,6 +269,7 @@ def Draw_PicFromWad(name):
         gl.tl = 0
         gl.th = p.height/gl_texmgr.TexMgr_PadConditional(p.height)
 
+    p.gl_texture = gl.gltexture
     p.data = [0, 0, 0, 0]
     p.data[0] = gl.sl
     p.data[1] = gl.sh
@@ -355,7 +319,8 @@ def Draw_NewGame():
     menu_numcachepics = 0
 
 def Draw_Init():
-    global pic_ins, pic_ovr, pic_crosshair
+    import quakedef
+    global pic_ins, pic_ovr, pic_nul, pic_crosshair
     global scrap_textures
     global gl_texmgr, cvar
     global currentcanvas
@@ -378,35 +343,44 @@ def Draw_Init():
 
     pic_ins = Draw_MakePic('ins', 8, 9, pic_ins_data)
     pic_ovr = Draw_MakePic('ovr', 8, 8, pic_ovr_data)
-    pic_ins = Draw_MakePic('ins', 8, 8, pic_nul_data)
+    pic_nul = Draw_MakePic('nul', 8, 8, pic_nul_data)
 
     Draw_LoadPics()
 
-def Draw_CharacterQuad(x: int, y: int, num: str):
-    row: int = num >> 4
-    col: int = num & 15
+def Draw_CharacterQuad(x: int, y: int, num: int | str) -> None:
+    # Handle both integer character codes (e.g. 65) and single-character strings (e.g. 'A')
+    char_code: int = ord(num) if isinstance(num, str) else num
 
-    frow: int = row * 0.0625
-    fcol: int = col * 0.0625
-    size: int = 0.0625
+    row: int = char_code >> 4
+    col: int = char_code & 15
+
+    frow: float = row * 0.0625
+    fcol: float = col * 0.0625
+    size: float = 0.0625
 
     gl.glTexCoord2f(fcol, frow)
     gl.glVertex2f(x, y)
-    gl.glTexCoord2f (fcol + size, frow);
-    gl.glVertex2f (x+8, y);
-    gl.glTexCoord2f (fcol + size, frow + size);
-    gl.glVertex2f (x+8, y+8);
-    gl.glTexCoord2f (fcol, frow + size);
-    gl.glVertex2f (x, y+8);
+
+    gl.glTexCoord2f(fcol + size, frow)
+    gl.glVertex2f(x + 8, y)
+
+    gl.glTexCoord2f(fcol + size, frow + size)
+    gl.glVertex2f(x + 8, y + 8)
+
+    gl.glTexCoord2f(fcol, frow + size)
+    gl.glVertex2f(x, y + 8)
 
 
 
 def Draw_Pic(x, y, pic):
+    if scrap_dirty:
+        Scrap_Upload()
+
     if not pic or not hasattr(pic, 'gl_texture') or pic.gl_texture is None:
         return
 
     gl.glEnable(gl.GL_TEXTURE_2D)
-    gl.glBindTexture(gl.GL_TEXTURE_2D, pic.gl_texture.texnum)
+    gl_texmgr.GL_Bind(pic.gl_texture)   # keep GL_Bind's current-texture cache in sync
 
     gl.glEnable(gl.GL_BLEND)
     gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
@@ -420,11 +394,7 @@ def Draw_Pic(x, y, pic):
     gl.glTexCoord2f(sl, th); gl.glVertex2f(x, y + pic.height)
     gl.glEnd()
 
-    # --- CRITICAL FIX ---
-    # Unbind the texture and disable 2D texturing so the 3D world
-    # doesn't inherit the crosshair texture.
-    gl.glBindTexture(gl.GL_TEXTURE_2D, 0)
-    gl.glDisable(gl.GL_TEXTURE_2D)
+    gl.glDisable(gl.GL_BLEND)
 
 
 oldtop: int    = -2
@@ -432,8 +402,7 @@ oldbottom: int = -2
 def Draw_TransPicTranslate(x:int, y:int, pic: wad.qpic_t, top:int, bottom:int):
     global oldbottom, oldtop
     if top != oldtop or bottom != oldbottom:
-        p: glpic_t = pic.data if isinstance(pic.data, glpic_t) else pic
-        glt: gl_texmgr.gltexture_t = p.gltexture
+        glt: gl_texmgr.gltexture_t = pic.gl_texture
         oldtop = top
         oldbottom = bottom
         gl_texmgr.TexMgr_ReloadImage(glt, top, bottom)
@@ -442,11 +411,12 @@ def Draw_TransPicTranslate(x:int, y:int, pic: wad.qpic_t, top:int, bottom:int):
 
 
 def Draw_ConsoleBackground():
+    import quakedef
     pic: wad.qpic_t = Draw_CachePic('gfx/conback.lmp')
     pic.width  = gl_vidsdl._vid.conwidth
     pic.height = gl_vidsdl._vid.conheight
 
-    alpha: float = 1.0 if console.con_forcedup else cvar.Cvar_GetCvar('scr_alpha').value
+    alpha: float = 1.0 if console.con_forcedup else cvar.Cvar_GetCvar('scr_conalpha').value
 
     GL_SetCanvas(quakedef.canvastype.CANVAS_CONSOLE)
 
@@ -466,10 +436,9 @@ def Draw_ConsoleBackground():
             gl.glColor4f(1, 1, 1, 1)
 
 def Draw_TileClear(x:int, y:int, w:int, h:int):
-    glp: glpic_t = draw_backtile.data
-
-    gl.glColor3f (1,1,1);
-    gl.GL_Bind (glp.gltexture);
+    gl.glColor3f (1,1,1)
+    gl.glEnable(gl.GL_TEXTURE_2D)
+    gl_texmgr.GL_Bind (draw_backtile.gl_texture)
     gl.glBegin (gl.GL_QUADS);
     gl.glTexCoord2f (x/64.0, y/64.0);
     gl.glVertex2f (x, y);
@@ -505,49 +474,28 @@ def Draw_MakePic(name, width, height, data):
 
     return pic
 
-def Draw_Character(x, y, num, scale=2.0):
-    """ differs from original source """
-    global char_texture
-    if not char_texture:
+def Draw_Character(x, y, num):
+    if y <= -8:
         return
 
-    # Quake's conchars is a 16x16 grid.
-    row = (num >> 4) & 0xF
-    col = num & 0xF
+    if isinstance(num, str):
+        num = ord(num)
+    num &= 255
+    if num == 32:
+        return
 
-    # Map to UV coordinates (0.0 to 1.0)
-    s1 = col * 0.0625
-    t1 = row * 0.0625
-    s2 = s1 + 0.0625
-    t2 = t1 + 0.0625
-
-    # --- SCALING MATH ---
-    # Instead of a fixed 8x8, we use the scale factor
-    draw_size = 8 * scale
-
-    # --- RENDER STATE ---
-    gl.glEnable(gl.GL_BLEND)
-    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
     gl.glEnable(gl.GL_TEXTURE_2D)
-    gl.glBindTexture(gl.GL_TEXTURE_2D, char_texture.texnum)
-
-    gl.glColor4f(1.0, 1.0, 1.0, 1.0)
-    gl.glEnable(gl.GL_ALPHA_TEST)
-    gl.glAlphaFunc(gl.GL_GREATER, 0.0)
-
-    # --- DRAWING ---
+    gl_texmgr.GL_Bind(char_texture)
     gl.glBegin(gl.GL_QUADS)
-    gl.glTexCoord2f(s1, t1); gl.glVertex2f(x, y)
-    gl.glTexCoord2f(s2, t1); gl.glVertex2f(x + draw_size, y)
-    gl.glTexCoord2f(s2, t2); gl.glVertex2f(x + draw_size, y + draw_size)
-    gl.glTexCoord2f(s1, t2); gl.glVertex2f(x, y + draw_size)
+
+    Draw_CharacterQuad(x, y, num)
+
     gl.glEnd()
 
-def Draw_String(x, y, text, scale=2.0):
-    # Characters are 8 pixels wide base, so move by 8 * scale each time
-    step = 8 * scale
+
+def Draw_String(x, y, text):
     for i, char in enumerate(text):
-        Draw_Character(x + (i * step), y, ord(char), scale)
+        Draw_Character(x + (i * 8), y, ord(char))
 
 
 def Draw_Fill(x, y, w, h, color_index):
@@ -574,7 +522,8 @@ def Draw_Fill(x, y, w, h, color_index):
 
 
 def Draw_FadeScreen():
-    GL_SetCanvas(quakedef.CANVAS_DEFAULT)
+    import quakedef
+    GL_SetCanvas(quakedef.canvastype.CANVAS_DEFAULT)
 
     gl.glEnable (gl.GL_BLEND);
     gl.glDisable (gl.GL_ALPHA_TEST);
@@ -596,6 +545,7 @@ def Draw_FadeScreen():
     sbar.Sbar_Changed();
 
 def GL_SetCanvas(newcanvas: quakedef.canvastype):
+    import quakedef
     global currentcanvas
 
     if newcanvas == currentcanvas:
@@ -612,21 +562,21 @@ def GL_SetCanvas(newcanvas: quakedef.canvastype):
             gl.glViewport(gl_screen.glx, gl_screen.gly, gl_screen.glwidth, gl_screen.glheight)
         case quakedef.canvastype.CANVAS_CONSOLE:
             lines = gl_vidsdl._vid.conheight - ( gl_screen.scr_con_current * gl_vidsdl._vid.conheight / gl_screen.glheight)
-            gl.glOrtho(0, gl_vidsdl._vid.conwidth, gl_vidsdl._vid.conheight, + lines, lines, -99999, 99999)
+            gl.glOrtho(0, gl_vidsdl._vid.conwidth, gl_vidsdl._vid.conheight + lines, lines, -99999, 99999)
             gl.glViewport(gl_screen.glx, gl_screen.gly, gl_screen.glwidth, gl_screen.glheight)
         case quakedef.canvastype.CANVAS_MENU:
             s = min(gl_screen.glwidth/320, gl_screen.glheight/200)
             s = common.CLAMP(1.0, cvar.Cvar_GetCvar('scr_menuscale').value, s)
             gl.glOrtho(0, 640, 200, 0, -99999, 99999)
-            gl.glViewport(gl_screen.glx + ( gl_screen.glwidth - 320 * s) / 2, gl_screen.gly + (gl_screen.glheight - 200 * s)/2, 640 * s, 200 * s)
+            gl.glViewport(int(gl_screen.glx + ( gl_screen.glwidth - 320 * s) / 2), int(gl_screen.gly + (gl_screen.glheight - 200 * s)/2), int(640 * s), int(200 * s))
         case quakedef.canvastype.CANVAS_SBAR:
-            s = common.CLAMP(1.0, cvar.Cvar_GetCvar('scr_sbarscale').value, float(gl_screen.glwidth)/320)
+            s = int(common.CLAMP(1.0, cvar.Cvar_GetCvar('scr_sbarscale').value, float(gl_screen.glwidth)/320))
             if cl_main.cl.gametype == protocol.GAME_DEATHMATCH:
                 gl.glOrtho(0, gl_screen.glwidth / s, 48, 0, -99999, 99999)
                 gl.glViewport(gl_screen.glx, gl_screen.gly, gl_screen.glwidth, 48 * s)
             else:
                 gl.glOrtho(0, 320, 48, 0, -99999, 99999)
-                gl.glViewport (gl_screen.glx + (gl_screen.glwidth - 320*s) / 2, gl_screen.gly, 320*s, 48*s)
+                gl.glViewport (gl_screen.glx + (gl_screen.glwidth - 320*s) // 2, gl_screen.gly, 320*s, 48*s)
         case quakedef.canvastype.CANVAS_WARPIMAGE:
             gl.glOrtho(0, 128, 0, 128, -99999, 99999)
             gl.glViewport(gl_screen.glx, gl_screen.gly+gl_screen.glheight-gl_warp.gl_warpimagesize, gl_warp.gl_warpimagesize, gl_warp.gl_warpimagesize)
@@ -637,7 +587,12 @@ def GL_SetCanvas(newcanvas: quakedef.canvastype):
         case quakedef.canvastype.CANVAS_BOTTOMLEFT:
             s = gl_screen.glwidth / gl_vidsdl._vid.conwidth
             gl.glOrtho(0, 320, 200, 0, -99999, 99999)
-            gl.glViewport(gl_screen.glx, gl_screen.gly, 320 * s, 200 * s)
+            gl.glViewport(gl_screen.glx, gl_screen.gly, int(320 * s), int(200 * s))
+        case quakedef.canvastype.CANVAS_BOTTOMRIGHT:
+            s = gl_screen.glwidth/gl_vidsdl._vid.conwidth
+            gl.glOrtho (0, 320, 200, 0, -99999, 99999);
+            gl.glViewport (gl_screen.glx+gl_screen.glwidth-int(320*s), gl_screen.gly, int(320*s), int(200*s));
+
         case quakedef.canvastype.CANVAS_TOPRIGHT:
             s = 1
             gl.glOrtho(0, 320, 200, 0, -99999, 99999)
@@ -650,6 +605,7 @@ def GL_SetCanvas(newcanvas: quakedef.canvastype):
     gl.glLoadIdentity()
 
 def GL_Set2D():
+    import quakedef
     global currentcanvas
     currentcanvas = quakedef.canvastype.CANVAS_INVALID
     GL_SetCanvas(quakedef.canvastype.CANVAS_DEFAULT)

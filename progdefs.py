@@ -2,10 +2,13 @@
 
 from dataclasses import dataclass, field
 
+import traceback
+
 # ==============================================================================
 # globalvars_t (Global variables shared between Engine and QuakeC)
 # ==============================================================================
 
+PROGHEADER_CRC = 5927
 
 @dataclass(slots=True)
 class globalvars_t:
@@ -95,6 +98,7 @@ class entvars_t:
     angles: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     avelocity: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
     punchangle: list[float] = field(default_factory=lambda: [0.0, 0.0, 0.0])
+    #_classname: int = 0
     classname: int = 0
     model: int = 0
     frame: float = 0.0
@@ -160,6 +164,24 @@ class entvars_t:
     noise1: int = 0
     noise2: int = 0
     noise3: int = 0
+
+#   @property
+#   def classname(self) -> float:
+#       return self._classname
+
+#   @classname.setter
+#   def classname(self, value):
+#       val_int = int(value) if isinstance(value, (int, float)) else None
+#       if val_int is not None and (val_int == -1 or val_int == 0xFFFFFFFF):
+#           print("\n" + "=" * 60)
+#           print(f"[EVAL WATCHDOG] Caught attempt to set classname to {value}!")
+#           traceback.print_stack()
+#           print("=" * 60 + "\n")
+#           print('\n\n\n\n\n\n')
+#           breakpoint()
+
+#       self._classname = value
+
 
     def reset_fields(self) -> None:
         """memset(&ent->v, 0, sizeof(entvars_t)) parity."""

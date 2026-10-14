@@ -10,13 +10,13 @@ import mathlib
 import net_main
 import protocol
 import quakedef
-from view import V_StartPitchDrift, V_StopPitchDrift
+import view
 
 
 class kbutton_t:
     def __init__(self):
-        self.state = -1  # bit 0 = down, bit 1 = stayed down
-        self.down: list[int] = [-1, 0]
+        self.state = 0  # bit 0 = down, bit 1 = impulse down, bit 2 = impulse up
+        self.down: list[int] = [0, 0]
 
 # Global button instances
 
@@ -77,7 +77,7 @@ def KeyUp(b: kbutton_t):
     k = 0
     c = _cmd.Cmd_Argv(1)
 
-    if c[0]:
+    if c:
         k = int(c)
     else:
         b.down[0] = b.down[1] = 0
@@ -114,7 +114,7 @@ def IN_MLookUp() -> None:
     KeyUp(in_mlook)
     lookspring = cvar.Cvar_GetCvar('lookspring').value
     if not (in_mlook.state & 1) and lookspring:
-        V_StartPitchDrift()
+        view.V_StartPitchDrift()
 
 def IN_UpDown() -> None:
     KeyDown(in_up)
@@ -261,12 +261,12 @@ def CL_AdjustAngles():
         speed = host.host_frametime
 
     if not ( in_strafe.state & 1):
-        cl_main.cl.viewangles[quakedef.YAW] -= speed * cl_yawspeed * CL_KeyState(in_strafe_right)
-        cl_main.cl.viewangles[quakedef.YAW] += speed * cl_yawspeed * CL_KeyState(in_strafe_left)
+        cl_main.cl.viewangles[quakedef.YAW] -= speed * cl_yawspeed * CL_KeyState(in_turn_right)
+        cl_main.cl.viewangles[quakedef.YAW] += speed * cl_yawspeed * CL_KeyState(in_turn_left)
         cl_main.cl.viewangles[quakedef.YAW] = mathlib.anglemod(cl_main.cl.viewangles[quakedef.YAW])
 
     if in_klook.state & 1:
-        V_StopPitchDrift()
+        view.V_StopPitchDrift()
         cl_main.cl.viewangles[quakedef.PITCH] -= speed * cl_pitchspeed * CL_KeyState(in_forward)
         cl_main.cl.viewangles[quakedef.PITCH] += speed * cl_pitchspeed * CL_KeyState(in_back)
 
@@ -277,7 +277,7 @@ def CL_AdjustAngles():
     cl_main.cl.viewangles[quakedef.PITCH] += speed * cl_pitchspeed * down
 
     if up or down:
-        V_StopPitchDrift()
+        view.V_StopPitchDrift()
 
     cl_main.cl.viewangles[quakedef.PITCH] = min(cl_main.cl.viewangles[quakedef.PITCH], cl_maxpitch)
     cl_main.cl.viewangles[quakedef.PITCH] = max(cl_main.cl.viewangles[quakedef.PITCH], cl_minpitch)
@@ -293,7 +293,10 @@ def CL_BaseMove(command: protocol.usercmd_t):
 
     CL_AdjustAngles()
 
-    command = protocol.usercmd_t()
+    # C: memset(cmd, 0, ...) -- fill the caller's cmd, don't replace it with a new object
+    command.forwardmove = 0
+    command.sidemove = 0
+    command.upmove = 0
 
     cl_sidespeed    = cvar.Cvar_GetCvar('cl_sidespeed').value
     cl_upspeed      = cvar.Cvar_GetCvar('cl_upspeed').value
@@ -342,9 +345,9 @@ def CL_SendMove(command: protocol.usercmd_t):
         else:
             common.MSG_WriteAngle16(buf, cl_main.cl.viewangles[i], cl_main.cl.protocolflags)
 
-    common.MSG_WriteShort(buf, command.forwardmove)
-    common.MSG_WriteShort(buf, command.sidemove)
-    common.MSG_WriteShort(buf, command.upmove)
+    common.MSG_WriteShort(buf, int(command.forwardmove))
+    common.MSG_WriteShort(buf, int(command.sidemove))
+    common.MSG_WriteShort(buf, int(command.upmove))
 
     bits = 0
 
@@ -354,7 +357,7 @@ def CL_SendMove(command: protocol.usercmd_t):
 
     if in_jump.state & 3:
         bits |= 2
-    in_jump.state &= 2
+    in_jump.state &= ~2
 
     common.MSG_WriteByte(buf, bits)
 
@@ -377,6 +380,9 @@ def CL_SendMove(command: protocol.usercmd_t):
 
 
 def CL_InitInput():
+
+    from view import V_StartPitchDrift, V_StopPitchDrift
+
     _cmd.Cmd_AddCommand ("+moveup",IN_UpDown);
     _cmd.Cmd_AddCommand ("-moveup",IN_UpUp);
     _cmd.Cmd_AddCommand ("+movedown",IN_DownDown);

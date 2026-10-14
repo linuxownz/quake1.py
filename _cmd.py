@@ -12,6 +12,7 @@ import cvar
 import protocol
 import quakedef
 import sys_sdl_unix
+import zone
 
 MAX_ALIAS_NAME = 32
 CMDLINE_LENGTH = 256
@@ -23,10 +24,10 @@ cmd_null_string = ''
 cmd_args = ''
 
 class cmdalias_t:
-    def __init__(self, name, value, next):
-        self.name = name
+    def __init__(self, name = '', value = 0, _next = None):
+        self.name  = name
         self.value = value
-        self.next = next
+        self.next  = _next
 
 cmd_alias : cmdalias_t = None
 
@@ -49,7 +50,13 @@ class cmd_source_t(Enum):
 cmd_source: cmd_source_t = None
 
 def Cbuf_Init():
-    cmd_text.__init__()
+    global cmd_text
+    cmd_text = common.sizebuf_s()
+    cmd_text.allowoverflow = False
+    cmd_text.cursize = 0
+    cmd_text.data = bytearray()
+    cmd_text.maxsize = 1 << 18
+    cmd_text.overflowed = False
 
 def Cmd_AddCommand(cmd_name, function):
     cmd_functions.append(cmd_function(cmd_name, function))
@@ -154,8 +161,11 @@ def Cmd_Unaliasall_f():
 
 
 def Cmd_StuffCmds_f() -> None:
-    # Assuming cmdline is a Cvar object with a .string attribute
-    cmdline_str = cvar.Cvar_GetCvar('cmdline').string
+    cvar_obj = cvar.Cvar_GetCvar('cmdline')
+    if not cvar_obj or not cvar_obj.string:
+        return
+
+    cmdline_str = cvar_obj.string
     cmds = []
     plus = False
 
@@ -163,20 +173,104 @@ def Cmd_StuffCmds_f() -> None:
         if char == '+':
             plus = True
             if len(cmds) > 0:
-                # Replace trailing space with ';' and add a space back
                 cmds[-1] = ';'
                 cmds.append(' ')
         elif char == '-' and (i == 0 or cmdline_str[i - 1] == ' '):
-            # Non-+ flag encountered; stop accumulating
             plus = False
         elif plus:
             cmds.append(char)
 
-    # Join character array and push into the front of the command buffer
     cmds_str = "".join(cmds)
-    Cbuf_InsertText(cmds_str)
+    if cmds_str.strip():
+        Cbuf_InsertText(cmds_str)
 
 
+default_cfg = """
+unbindall
+
+bind ALT +strafe
+bind , +moveleft
+bind a +moveleft
+bind . +moveright
+bind d +moveright
+bind DEL +lookdown
+bind PGDN +lookup
+bind END centerview
+bind e +moveup
+bind c +movedown
+bind SHIFT +speed
+bind CTRL +attack
+bind UPARROW +forward
+bind w +forward
+bind DOWNARROW +back
+bind s +back
+bind LEFTARROW +left
+bind RIGHTARROW +right
+bind SPACE +jump
+bind TAB +showscores
+bind 1 "impulse 1"
+bind 2 "impulse 2"
+bind 3 "impulse 3"
+bind 4 "impulse 4"
+bind 5 "impulse 5"
+bind 6 "impulse 6"
+bind 7 "impulse 7"
+bind 8 "impulse 8"
+
+bind 0 "impulse 0"
+
+bind / "impulse 10"
+bind MWHEELDOWN "impulse 10"
+bind MWHEELUP "impulse 12"
+
+alias zoom_in "sensitivity 2;fov 90;wait;fov 70;wait;fov 50;wait;fov 30;wait;fov 10;wait;fov 5;bind F11 zoom_out"
+alias zoom_out "sensitivity 4;fov 5;wait;fov 10;wait;fov 30;wait;fov 50;wait;fov 70;wait;fov 90;bind F11 zoom_in; sensitivity 3"
+bind F11 zoom_in
+
+bind F1 "help"
+bind F2 "menu_save"
+bind F3 "menu_load"
+bind F4 "menu_options"
+bind F5 "menu_multiplayer"
+bind F6 "echo Quicksaving...; wait; save quick"
+bind F9 "echo Quickloading...; wait; load quick"
+bind F10 "quit"
+bind F12 "screenshot"
+
+bind \\ +mlook
+
+bind PAUSE "pause"
+bind ESCAPE "togglemenu"
+bind ~ "toggleconsole"
+bind ` "toggleconsole"
+
+bind t "messagemode"
+
+bind + "sizeup"
+bind = "sizeup"
+bind - "sizedown"
+
+bind INS +klook
+
+bind MOUSE1 +attack
+bind MOUSE2 +jump
+
+bind LSHOULDER "impulse 12"
+bind RSHOULDER "impulse 10"
+bind LTRIGGER +jump
+bind RTRIGGER +attack
+
+gamma 1.0
+volume 0.7
+sensitivity 3
+
+viewsize 110
+scr_conscale 1.6
+scr_menuscale 1.6
+scr_sbarscale 1.6
+
++mlook
+"""
 
 def Cmd_Exec_f():
     # We expect one argument: the filename
@@ -186,12 +280,14 @@ def Cmd_Exec_f():
 
     filename = Cmd_Argv(1)
 
-    # Load from the Virtual File System in common.py
-    # This will check id1/, then pak0.pak, etc.
-    data = common.COM_LoadFile(filename)
+    mark = zone.Hunk_LowMark()
+    data = common.COM_LoadHunkFile(filename, False)
 
     if data is None:
-        console.Con_Printf(f"couldn't execute {filename}\n")
+        if filename == 'default.cfg':
+            data = default_cfg
+        else:
+            console.Con_Printf(f"couldn't execute {filename}\n")
         return
 
     console.Con_Printf(f"executing {filename}\n")
@@ -200,12 +296,17 @@ def Cmd_Exec_f():
     try:
         if isinstance(data, bytes):
             text = data.decode('utf-8')
+        elif isinstance(data, memoryview):
+            text = data.tobytes().decode('utf-8')
         else:
-            text = str(data)
+            text = data.decode('latin-1')
 
         Cbuf_InsertText(text)
     except Exception as e:
         console.Con_Printf(f"Error executing {filename}: {e}\n")
+
+    if data == default_cfg:
+        zone.Hunk_FreeToLowMark(mark)
 
 
 def Cmd_Echo_f():
@@ -353,41 +454,27 @@ def Cmd_Args() -> str:
 def Cmd_TokenizeString(text: str) -> None:
     global cmd_argc, cmd_argv, cmd_args
 
-    # Clear previous args (replacing Z_Free loop & reset)
     cmd_argv.clear()
     cmd_argc = 0
-    cmd_args = None
+    cmd_args = ""
 
-    idx = 0
-    length = len(text)
+    if not text:
+        return
 
-    while True:
-        # Skip leading whitespace up to a newline
-        while idx < length and text[idx] <= ' ' and text[idx] != '\n':
-            idx += 1
+    remaining = text
+    while remaining:
+        # COM_Parse updates common.com_token and returns the remaining data string
+        remaining = common.COM_Parse(remaining)
 
-        if idx < length and text[idx] == '\n':
-            # Stop tokenizing at newline (end of current command)
-            break
-
-        if idx >= length:
-            return
-
-        # Set raw arguments pointer tail starting at cmd_argv[1]
-        if cmd_argc == 1:
-            cmd_args = text[idx:]
-
-        # Extract token using engine string tokenizer
-        token, next_idx = common.COM_Parse(text, idx)
-        if token is None:
-            return
-
-        idx = next_idx
-
-        # Append token up to MAX_ARGS ceiling
-        if cmd_argc < MAX_ARGS:
+        # Read the parsed word out of common.com_token
+        token = common.com_token
+        if token and cmd_argc < MAX_ARGS:
             cmd_argv.append(token)
             cmd_argc += 1
+
+    # Populate cmd_args (everything after the command name)
+    if cmd_argc > 1:
+        cmd_args = " ".join(cmd_argv[1:])
 
 def Cbuf_InsertText(text: str):
     # Save remaining unexecuted buffer data
@@ -421,10 +508,9 @@ def Cbuf_AddText(text: str):
 def Cbuf_Execute():
     global cmd_wait
 
-    # Process commands while the buffer has data
     while cmd_text.cursize > 0:
-        # Convert buffer slice to string for scanning (assuming ASCII/UTF-8 encoding)
-        text_str = cmd_text.data[:cmd_text.cursize].decode('ascii', errors='ignore')
+        # Decode current byte array to string
+        text_str = cmd_text.data[:cmd_text.cursize].decode('latin-1', errors='ignore')
 
         quotes = 0
         split_idx = len(text_str)
@@ -433,72 +519,83 @@ def Cbuf_Execute():
         for i, char in enumerate(text_str):
             if char == '"':
                 quotes += 1
-            if not (quotes & 1) and char == ';':
+            elif not (quotes & 1) and char == ';':  # noqa: SIM114
                 split_idx = i
                 break
-            if char == '\n':
+            elif char == '\r' or char == '\n':
                 split_idx = i
                 break
 
-        # Extract command line (truncate to 1023 chars max to mirror C buffer ceiling)
-        line = text_str[:min(split_idx, 1023)]
+        # Extract the command slice
+        raw_line = text_str[:split_idx]
 
-        # Shift remaining buffer forward (C's memmove equivalent)
-        if split_idx == cmd_text.cursize:
-            cmd_text.cursize = 0
-            cmd_text.data.clear()
-        else:
-            consume_bytes = split_idx + 1  # Include the separator character
-            cmd_text.data = cmd_text.data[consume_bytes:]
-            cmd_text.cursize -= consume_bytes
+        # Calculate bytes to consume including the trailing delimiter (\r, \n, or ;)
+        consume_bytes = split_idx
+        if split_idx < len(text_str):
+            consume_bytes += 1
+            # Handle \r\n pair in one pass if present
+            if text_str[split_idx] == '\r' and split_idx + 1 < len(text_str) and text_str[split_idx + 1] == '\n':
+                consume_bytes += 1
+
+        # Shift remaining buffer forward
+        cmd_text.data = cmd_text.data[consume_bytes:]
+        cmd_text.cursize -= consume_bytes
+
+        # Strip whitespace/newlines and skip empty lines or line comments
+        line = raw_line.strip()
+        if not line or line.startswith('//'):
+            continue
+
+        if line == '/':
+            pass
+            #breakpoint()
+
+        print(f'executing {line}')
 
         # Execute single command
-        Cmd_ExecuteString(line, src_command)
+        Cmd_ExecuteString(line, cmd_source_t.src_command)
 
         # Handle frame delay flag ('wait' command)
         if cmd_wait:
             cmd_wait = False
             break
 
-def Cmd_ExecuteString(text: str, src: _cmd.cmd_source_t):
-    import cvar
-    global cmd_argv, cmd_argc
-    global cmd_source
+def Cmd_ExecuteString(text: str, src: cmd_source_t):
+    global cmd_argv, cmd_argc, cmd_source
 
     cmd_source = src
 
-    try:
-        # posix=False treats backslashes as literal characters
-        lexer = shlex.shlex(text, posix=False)
-        lexer.whitespace_split = True
-        lexer.commenters = ""
-        # Manually strip quotes from the resulting tokens
-        cmd_argv = [token.strip('"') for token in lexer]
-    except Exception:
-        cmd_argv = text.split()
+    # Tokenize the whole line into cmd_argv
+    Cmd_TokenizeString(text)
 
-    cmd_argc = len(cmd_argv)
-
-    if not cmd_argv:
-        assert(cmd_argc == 0)
+    if cmd_argc == 0:
         return
 
-    cmd_argc = len(cmd_argv)
+    # ONLY look at the first token (the command name)
     cmd_name = cmd_argv[0].lower()
 
-    # 1. Check registered commands (like 'echo', 'exec', etc)
+    if cmd_name.startswith('//'):
+        return
+
+    # 1. Check registered functions
     for cmd_func in cmd_functions:
         if cmd_name == cmd_func.name:
-            cmd_func.function()
-            return
+            cmd_func.function()  # Call handler (e.g. Cmd_Exec_f or Host_Map_f)
+            return               # STOP! Do not process remaining tokens as commands!
 
-    # 2. Check CVars (like 'sensitivity')
+    # 2. Check CVars
     if cvar.Cvar_Command(cmd_argv):
         return
 
-    # 3. SILENCE THE IMPULSE COMMANDS
-    # If it starts with + or -, it's handled by the move system,
-    # not the command system. We just return so it doesn't log an error.
+    # 3. Check Aliases
+    a = cmd_alias
+    while a is not None:
+        if cmd_name == a.name.lower():
+            Cbuf_InsertText(a.value)
+            return
+        a = a.next
+
+    # 4. Movement keys
     if cmd_name.startswith(('+', '-')):
         return
 

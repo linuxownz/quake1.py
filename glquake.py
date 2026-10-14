@@ -3,7 +3,7 @@
 from enum import Enum
 
 import gl_model
-#import gl_texmgr
+import gl_texmgr
 import quakedef
 
 GL_UNUSED_TEXTURE     = ~0
@@ -106,7 +106,7 @@ class devstats_t:
     def __init__(self):
         self.packetsize = 0
         self.edicts = 0
-        self.videdicts = 0
+        self.visedicts = 0
         self.efrags = 0
         self.tempents = 0
         self.beams = 0
@@ -137,7 +137,6 @@ class lightmap_s:
         self.polys   : gl_model.glpoly_t     = None
         self.modified = False
         self.rectchange : glRect_t = glRect_t()
-
         self.data : bytes = bytearray(4 * LMBLOCK_WIDTH * LMBLOCK_HEIGHT)
 
 class glsl_attrib_binding_t:

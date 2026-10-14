@@ -98,7 +98,7 @@ turbsin: list[float] = [
 ]
 
 def WARPCALC(s, t):
-    return  ((s + turbsin[int((t*2)+(cl_main.cl.time*(128.0/math.pi))) & 255]) * (1.0/64))
+    return  ((s + turbsin[int((t*2)+(cl_main.cl.time*(128.0/math.pi))) & 255 - 1]) * (1.0/64))
 
 def WARPCALC2(s,t):
     return ((s + turbsin[int((t*0.125+cl_main.cl.time)*(128.0/math.pi)) & 255]) * (1.0/64))
@@ -133,7 +133,7 @@ def SubdividePolygon(numverts: int, verts: list[float]) -> None:
     maxs: list[float] = [0.0, 0.0, 0.0]
     BoundPoly(numverts, verts, mins, maxs)
 
-    subdivide_size = cvar.Cvar_GetCvar("gl_subdivide_size").value
+    subdivide_size = cvar.Cvar_GetCvar("r_subdivide_size").value
 
     for i in range(3):
         m = (mins[i] + maxs[i]) * 0.5
@@ -262,7 +262,7 @@ def GL_SubdivideSurface(fa: quakedef.msurface_t) -> None:
 
 
 def DrawWaterPoly(p: quakedef.glpoly_t) -> None:
-    subdivide_size = cvar.Cvar_GetCvar("gl_subdivide_size").value
+    subdivide_size = cvar.Cvar_GetCvar("r_subdivide_size").value
 
     gl.glBegin(gl.GL_POLYGON)
 

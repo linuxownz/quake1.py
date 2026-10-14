@@ -3,6 +3,7 @@
 import io
 import os
 import sys
+import traceback
 from pathlib import Path
 
 import sdl2
@@ -11,12 +12,24 @@ import common
 import host
 import in_sdl
 
+
+# Catch crashes and print the exact file and line number
+def crash_handler(type, value, tb):
+    print("\n" + "=" * 60)
+    print("CRASH LOCATION TRACEBACK:")
+    print("=" * 60)
+    traceback.print_exception(type, value, tb)
+    print("=" * 60 + "\n")
+
+sys.excepthook = crash_handler
+
+
+
 isDedicated = False
 stdinIsATTY = False
 
 MAX_HANDLES = 32
-sys_handles : list[io.FileIO] = [None] # could be io.BufferedStream, etc TODO
-
+sys_handles : list[io.FileIO] = [None for _ in range(MAX_HANDLES)]
 
 __cwd = '.'
 __userdir = ''
@@ -41,7 +54,7 @@ def Sys_GetUserDir():
 
 def Sys_mkdir(pathname):
     if not Path(pathname).exists():
-        os.mkdirs(pathname)
+        os.makedirs(pathname)
 
 def Sys_Init():
     global stdinIsATTY
@@ -66,7 +79,6 @@ def Sys_Init():
     Sys_mkdir(__userdir)
 
 def Sys_IsDedicated():
-    global isDedicated
     return isDedicated
 
 def Sys_DoubleTime():
@@ -75,7 +87,6 @@ def Sys_DoubleTime():
 def Sys_Error(msg):
     print(msg)
     host.Host_Shutdown()
-
     sys.exit(1)
 
 def Sys_filelength(file: io.FileIO) -> int:
@@ -87,23 +98,20 @@ def Sys_filelength(file: io.FileIO) -> int:
 
 def findhandle():
     for i in range(1, MAX_HANDLES):
-        try:
-            dummy = sys_handles[i]
-        except IndexError:
+        if not sys_handles[i]:
             return i
-
     Sys_Error("out of handles")
     return -1
 
 def Sys_FileOpenRead(path) -> (int, int): # return handle, file length
-    i = findhandle()
-
     try:
         file = open(path, 'rb', buffering = 0)
     except FileNotFoundError:
         return (-1, -1)
 
-    sys_handles.insert(i, file)
+    i = findhandle()
+
+    sys_handles[i] = file   # assign into the slot: insert() grew the table and shifted live handles
 
     return (i, Sys_filelength(file))
 
@@ -114,7 +122,7 @@ def Sys_FileOpenWrite(path) -> io.FileIO: # return file handle index into sys_ha
     except:
         Sys_Error(f"error opening file{path} for writing")
 
-    sys_handles.insert(i, file)
+    sys_handles[i] = file   # assign into the slot: insert() grew the table and shifted live handles
     return i
 
 def Sys_FileClose(handle) -> None:
@@ -125,9 +133,10 @@ def Sys_FileSeek(handle, position) -> None:
     file: io.FileIO = sys_handles[handle]
     file.seek(position, io.SEEK_SET)
 
-def Sys_FileRead(handle, count) -> bytes:
+def Sys_FileRead(handle, buffer, size) -> int:
     file: io.FileIO = sys_handles[handle]
-    return file.read(count)
+    filelen =  file.readinto(buffer)
+    return filelen
 
 def Sys_FileWrite(handle, data: bytes) -> int:
     file: io.FileIO = sys_handles[handle]

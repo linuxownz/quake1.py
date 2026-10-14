@@ -18,14 +18,15 @@ def CFG_OpenConfig(cfg_name) -> bool:
 
     CFG_CloseConfig()
 
-    (handle, length, path_id, is_pak ) = common.COM_FOpenFile(cfg_name)
-
-    f = common.COM_FileIOFromHandle(handle)
+    #(handle, length, path_id, is_pak ) = common.COM_FOpenFile(cfg_name)
+    ffr = common.COM_FOpenFile(cfg_name)
+    is_pak = ffr.is_pak
+    length = ffr.filesize
 
     if length == -1:
         return -1
 
-    cfg_file = common._fshandle_t(f, is_pak, f.tell(), length, 0)
+    cfg_file = common._fshandle_t(ffr.file, is_pak, ffr.file.tell(), length, 0)
 
     return 0
 

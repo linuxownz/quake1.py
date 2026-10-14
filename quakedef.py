@@ -5,17 +5,23 @@ from dataclasses import dataclass, field
 from enum import Enum
 from typing import Optional
 
+import bspfile
 import common
+import gl_model
 import gl_texmgr
+import modelgen
 import protocol
 import q_sound
 import quakedef
 import render
+import spritegn
 
 # --- Constants ---
 MAXLIGHTMAPS = 4
 HEADER_LUMPS = 15
 BSPVERSION   = 29
+
+NUMVERTEXNORMALS = 162
 
 BSP2VERSION_2PSB = int.from_bytes(b'BSP2', byteorder='big')
 BSP2VERSION_BSP2 = int.from_bytes(b'BSP2', byteorder='little')
@@ -262,6 +268,7 @@ class cache_user_t:
     """Python equivalent of cache_user_t handle."""
     def __init__(self, data=None):
         self.data = data  # Holds the actual model data (or None if evicted)
+        self._cache_sys = None  # used by zone.Cache_Check / Cache_Alloc / Cache_Free
 
     @property
     def is_loaded(self) -> bool:
@@ -470,7 +477,10 @@ class dl2leaf_t:
         self.nummarksurface: int = 0
         self.ambient_level: list[int] = [0] * bspfile.NUM_AMBIENTS
 
-
+class link_t:
+    def __init__(self):
+        self.prev: link_t = None
+        self.next: link_t = None
 
 
 SIDE_FRONT = 0
@@ -491,10 +501,10 @@ class texchain_t(Enum):
     chain_model = 1
 
 class texture_t:
-    def __init__(self, name, width, height, shift = 0,
+    def __init__(self, name = '', width = 0, height = 0, shift = 0,
                 gltexture = None, fullbright = None,
                 warpimage = None, update_warp = False,
-                texturechains: list[msurface_t] = None, # Use string for forward ref
+                texturechains: list['msurface_t'] | None = None, # Use string for forward ref
                 anim_total = 0, anim_min = 0, anim_max = 0,
                 anim_next = None, alternate_anims = None):
         self.name:str = name
@@ -528,7 +538,7 @@ SURF_DRAWWATER      = 0x2000
 
 class medge_t:
     def __init__(self):
-        self.v = []
+        self.v = [0, 0]
         self.cachededgeoffset = 0
 
 class mtexinfo_t:
@@ -539,39 +549,65 @@ class mtexinfo_t:
 
 VERTEXSIZE = 7
 
+
 class glpoly_t:
-    def __init__(self):
-        self.next  : glpoly_t | None = None
-        self.chain : glpoly_t | None = None
-        self.numverts = 0
-        self.verts: list[list[float]] = [[0.0] * VERTEXSIZE for _ in range(4)]
+    def __init__(self, numverts: int = 0):
+        self.next: glpoly_t | None = None
+        self.chain: glpoly_t | None = None
+        self.numverts: int = numverts
+        # Allocate exact number of vertices required
+        self.verts: list[list[float]] = [
+            [0.0] * VERTEXSIZE for _ in range(numverts)
+        ]
+
 
 class msurface_t:
-    def __init__(self):
-        self.visframe = 0
-        self.mins = [0, 0, 0]
-        self.maxs = [0, 0, 0]
-        self.plane : list[mplane_t] | None = None
-        self.flags = 0
-        self.firstedge = 0
-        self.numedges = 0
-        self.texturemins = [0, 0]
-        self.extents = [0, 0]
+    """
+    C equivalent (render.h / bspfile.h):
+    typedef struct msurface_s msurface_t;
+
+    Represents a BSP leaf polygon surface, including geometry bounds,
+    plane classification, lightmapping buffers, and draw-chain pointers.
+    """
+
+    def __init__(self) -> None:
+        self.visframe: int = 0  # Frame engine tick for visibility culling check
+        self.mins: list[float] = [0, 0, 0]
+        self.maxs: list[float] = [0, 0, 0]
+
+        self.plane: quakedef.mplane_t | None = None  # Surface plane equation
+        self.flags: int = 0  # SURF_PLANEBACK, SURF_DRAWSKY, SURF_DRAWTURB, etc.
+
+        self.firstedge: int = 0  # Index into model's surfedges array
+        self.numedges: int = 0  # Total edge count forming polygon loop
+
+        self.texturemins: list[int] = [0, 0]  # Minimum S/T lightmap bounding box coordinates
+        self.extents: list[int] = [0, 0]  # Lightmap S/T pixel extents ([width, height])
+
         self.light_s = 0
         self.light_t = 0
-        self.polys : glpoly_t | None = None
-        self.texturechain : msurface_t | None = None
-        self.texinfo : mtexinfo_t | None = None
-        self.vbo_firstvert: int = 0
-        self.dlightframe: int = 0
-        self.dlightbits: list[int] = [0] * ((MAX_DLIGHTS + 31) >> 5)
-        self.lightmaptexturenum: int = 0
-        self.styles = [0, 0, 0, 0]
-        self.cached_light[0, 0, 0, 0]
+
+        self.polys: glpoly_t = None
+
+        self.texturechain: msurface_t | None = None  # Direct node reference for texture batching list
+        self.texinfo: quakedef.mtexinfo_t | None = None  # Texture vector projection info & texture reference
+
+        self.vbo_firstvert = 0
+
+        self.chain: msurface_t | None = None  # Dynamic surface list pointer (r_brush.c)
+
+        self.lights: list[int] = [0] * quakedef.MAXLIGHTMAPS  # Style index list (e.g. 0xFF for unlit)
+        self.samples: bytes | bytearray | None = None  # Raw dynamic/static lightmap pixel intensity array
+
+
+        # OpenGL dynamic state bindings
+        self.dlightframe: int = 0  # Frame dynamic lighting was calculated
+        self.dlightbits: list[int] = [0, 0]  # (MAX_DLIGHTS+31)//32 words, one bit per dynamic light
         self.cached_dlight: bool = False
-        self.samples:bytearray = bytearray()
-        #self.lightofs = -1         # ?
-        #self.lightmap_texture = 0  # ?
+        self.lightmaptexturenum: int = 0  # OpenGL lightmap dynamic atlas binding ID
+        self.styles: list[int] = [0] * quakedef.MAXLIGHTMAPS  # Active intensity level modifiers
+        self.cached_light: list[int] = [0] * quakedef.MAXLIGHTMAPS  # Cache validation values for fast update checks
+
 
 class mnode_t:
     def __init__(self):
@@ -579,8 +615,8 @@ class mnode_t:
         self.parent = None            # Set by Mod_SetParent
         self.plane: quakedef.mplane_t = None             # Pointer to mplane_t
         self.children = [None, None]  # Set to Node or Leaf objects by Mod_SetParent
-        #self.mins = [0, 0, 0]
-        #self.maxs = [0, 0, 0]
+        self.mins = [0, 0, 0]
+        self.maxs = [0, 0, 0]
         self.firstsurface = 0
         self.numsurfaces = 0
 
@@ -665,15 +701,15 @@ class maliasframedesc_t:
         self.firstpose = 0
         self.numposes = 0
         self.interval = 0
-        self.bboxmin: trivertx_t = None
-        self.bboxmax: trivertx_t = None
+        self.bboxmin: modelgen.trivertx_t = None
+        self.bboxmax: modelgen.trivertx_t = None
         self.frame = 0
         self.name = ''
 
 class maliasgroupframedesc_t:
     def __init__(self):
-        self.bboxmin: trivertx_t = None
-        self.bboxmax: trivertx_t = None
+        self.bboxmin: modelgen.trivertx_t = None
+        self.bboxmax: modelgen.trivertx_t = None
         self.frame = 0
 
 class maliasgroup_t:
@@ -716,15 +752,15 @@ class aliashdr_t:
         self.posedata = 0
         self.commands = 0
 
-        self.gltextures: list[list[Optional[gltexture_t]]] = [
+        self.gltextures: list[list[Optional[gl_texmgr.gltexture_t]]] = [
             [None] * 4 for _ in range(MAX_SKINS)
         ]
-        self.fbtextures: list[list[Optional[gltexture_t]]] = [
+        self.fbtextures: list[list[Optional[gl_texmgr.gltexture_t]]] = [
             [None] * 4 for _ in range(MAX_SKINS)
         ]
 
-        self.texels = list[int] = []
-        self.frames: list[maliasframedesc_t] = []
+        self.texels: list[int] = [0 for _ in range(MAX_SKINS)]
+        self.frames: list[maliasframedesc_t] = [0]
 
 class synctype_t(Enum):
     ST_SYNC = 0
@@ -834,7 +870,7 @@ class scoreboard_t:
         self.translations = []
 
 class cshift_t:
-    def __init__(self, destcolor, percent):
+    def __init__(self, destcolor = [0,0,0], percent = 0):
         self.destcolor = destcolor
         self.percent = percent
 
@@ -921,8 +957,8 @@ class client_state_t:
         self.item_gettime = []
         self.faceanumtime = 0
 
-        self.cshifts      : list[cshift_t] = []
-        self.prev_cshifts : list[cshift_t] = []
+        self.cshifts      : list[cshift_t] = [ cshift_t() for _ in range(NUM_CSHIFTS)]
+        self.prev_cshifts : list[cshift_t] = [ cshift_t() for _ in range(NUM_CSHIFTS)]
 
         self.mviewangles  = [[0, 0, 0], [0, 0, 0]]
         self.viewangles   = [0, 0, 0]
@@ -947,7 +983,7 @@ class client_state_t:
         self.intermission = 0
         self.completed_time = 0
 
-        self.mtime = []
+        self.mtime = [0, 0]
         self.time = 0.0
 
         self.oldtime = 0.0
@@ -973,7 +1009,7 @@ class client_state_t:
         self.viewent : render.entity_t = render.entity_t()
 
         self.cdtrack = 0
-        self.looptrace = 0
+        self.looptrack = 0
 
         self.scores : list[scoreboard_t] = [None] * quakedef.MAX_SCOREBOARD
 

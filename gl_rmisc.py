@@ -166,9 +166,10 @@ def R_SetWateralpha_f(var : cvar.cvar_t):
 def R_SetClearColor_f(var: cvar.cvar_t):
 
     r_clearcolor = int(cvar.Cvar_GetCvar('r_clearcolor').value) & 0xFF
-    v1 = gl_texmgr.d_8to24table[r_clearcolor + 0]
-    v2 = gl_texmgr.d_8to24table[r_clearcolor + 1]
-    v3 = gl_texmgr.d_8to24table[r_clearcolor + 2]
+    # d_8to24table has 4 bytes (RGBA) per palette entry
+    v1 = gl_texmgr.d_8to24table[r_clearcolor * 4 + 0]
+    v2 = gl_texmgr.d_8to24table[r_clearcolor * 4 + 1]
+    v3 = gl_texmgr.d_8to24table[r_clearcolor * 4 + 2]
 
     OpenGL.GL.glClearColor(v1/255.0, v2/255.0, v3/255.0, 0)
 
@@ -207,6 +208,8 @@ def GL_WaterAlphaForSurface(fa: quakedef.msurface_t) -> float:
 def R_Init():
     _cmd.Cmd_AddCommand('timerefresh', R_TimeRefresh_f)
     _cmd.Cmd_AddCommand('pointfile', R_ReadPointFile_f)
+
+    cvar.Cvar_RegisterVariable({'name': 'r_lightmapwide', 'value': '0', 'flag': cvar.CVAR_ROM})
 
     import gl_rmain
     gl_rmain.gl_rmain_Init()
@@ -321,7 +324,7 @@ def R_NewMap():
 
     R_ParseWorldspawn()
 
-    gl_warp.load_subdivide_size = cvar.Cvar_GetCvar('gl_subdivide_size').value
+    gl_warp.load_subdivide_size = cvar.Cvar_GetCvar('r_subdivide_size').value
 
 
 

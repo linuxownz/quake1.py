@@ -12,6 +12,7 @@ import common
 import console
 import gl_vidsdl
 import host
+import sv_main
 import sys_sdl_unix
 import sys_sdl_unix as unix
 
@@ -38,7 +39,7 @@ def main():
     host.membase = bytearray(host.memsize)
 
     if host.membase is None:
-        unix.Sys_Error("failed to alloc %d bytes of memory" % host.memsize)
+        unix.Sys_Error(f"failed to alloc {host.memsize} bytes of memory")
 
     common.COM_InitArgv()
     Sys_InitSDL()
@@ -67,6 +68,10 @@ def main():
     else:
         sys_throttle = float(cvar.Cvar_GetCvar('sys_throttle').value)
         while True:
+
+            #print(f"cls.state: {cl_main.cls.state} | host_frametime: {host.host_frametime} | sv.time: {sv_main.sv.time}")
+
+
             if not gl_vidsdl.VID_HasMouseOrInputFocus() or cl_main.cl.paused:
                 sdl2.SDL_Delay(16)
 
@@ -81,7 +86,7 @@ def main():
 
             host.Host_Frame(time)
 
-            #sdl2.SDL_GL_SwapWindow(gl_vidsdl.draw_context)
+            sdl2.SDL_GL_SwapWindow(gl_vidsdl.draw_context)
 
             if time < sys_throttle and not cl_main.cls.timedemo:
                 sdl2.SDL_Delay(1)
