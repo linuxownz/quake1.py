@@ -429,8 +429,8 @@ def Mod_LoadTextures(lump: quakedef.lump_t) -> None:
         # Texture upload (C: Mod_LoadTextures, johnfitz section)
         if not sys_sdl_unix.isDedicated:
             if tx.name.lower().startswith("sky"):
-                # sky textures are not uploaded here: Sky_LoadTexture lives in the sky module (not ported/seen yet)
-                pass
+                import gl_sky  # local import: gl_sky imports gl_model
+                gl_sky.Sky_LoadTexture(loadmodel, tx, pixel_data)
             elif tx.name.startswith("*"):
                 # warping texture
                 texturename = f"{loadmodel.name}:{tx.name}"

@@ -1,6 +1,8 @@
 #gl_sky.py
 import math
+import re
 
+import numpy as np
 import OpenGL.GL as gl
 
 import _cmd
@@ -18,7 +20,6 @@ import protocol
 import quakedef
 import r_brush
 import render
-import zone
 
 MAX_CLIP_VERTS  = 64
 BACKFACE_EPSILON = 0.01
@@ -66,8 +67,20 @@ vec_to_st = [
 
 skyfog = 0.0
 
-def Sky_LoadTexture(mod: quakedef.qmodel_t, mt: quakedef.texture_t):
+def Sky_LoadTexture(mod: quakedef.qmodel_t, mt: quakedef.texture_t, pixels: bytes = None):
+    """Split a 256x128 sky miptex into its two 128x128 layers and upload them as RGBA.
+
+    pixels: the raw 8-bit mip 0 data of the miptex (width*height bytes).
+    Back (solid) layer is the right half, front (cloud) layer the left half; index 0 in the
+    front layer is transparent.  Also computes the r_fastsky average colour.
+    """
     global solidskytexture, alphaskytexture, skyflatcolor
+
+    if pixels is None:
+        pixels = getattr(mt, 'data', None)
+    if pixels is None:
+        console.Con_Warning(f'Sky_LoadTexture: no pixel data for {mt.name}\n')
+        return
 
     if mt.width != 256 or mt.height != 128:
         console.Con_Warning(
@@ -76,96 +89,44 @@ def Sky_LoadTexture(mod: quakedef.qmodel_t, mt: quakedef.texture_t):
         if mt.width < 2 or mt.height < 1:
             return
 
-    halfwidth = mt.width // 2
-    skytex_size = halfwidth * mt.height * 2
+    w = mt.width
+    h = mt.height
+    halfwidth = w // 2
 
-    # Allocate hunk memory for both layers (halfwidth * height * 2 bytes)
-    back_data = zone.Hunk_AllocName(skytex_size, "skytex")
+    arr = np.frombuffer(bytes(pixels[:w * h]), dtype=np.uint8).reshape(h, w)
+    palette = np.frombuffer(gl_texmgr.d_8to24table, dtype=np.uint8).reshape(256, 4)
 
-    # In C: (byte *)(mt + 1) points to raw pixel data packed right after the texture_t struct
-    if hasattr(mt, "buffer"):
-        src_bytes = memoryview(mt.buffer)[ctypes.sizeof(mt) :]
-    else:
-        src_bytes = memoryview(mt.data)
+    back_idx = np.ascontiguousarray(arr[:, halfwidth:halfwidth * 2])
+    front_idx = np.ascontiguousarray(arr[:, :halfwidth])
 
-    # ------------------------------------
-    # Extract back layer and upload
-    # ------------------------------------
-    for y in range(mt.height):
-        dest_offset = y * halfwidth
-        src_offset = halfwidth + (y * mt.width)
-        back_data[dest_offset : dest_offset + halfwidth] = src_bytes[
-            src_offset : src_offset + halfwidth
-        ]
+    back_rgba = palette[back_idx].copy()
+    back_rgba[..., 3] = 255
+    back_bytes = back_rgba.tobytes()
 
-    texturename_back = f"{mod.name}:{mt.name}_back"
     solidskytexture = gl_texmgr.TexMgr_LoadImage(
-        mod,
-        texturename_back,
-        halfwidth,
-        mt.height,
-        gl_texmgr.SRC_INDEXED,
-        back_data,
-        "",
-        back_data,
-        gl_texmgr.TEXPREF_NONE,
-    )
+        mod, f"{mod.name}:{mt.name}_back", halfwidth, h,
+        gl_texmgr.srcformat.SRC_RGBA, back_bytes, "", back_bytes,
+        gl_texmgr.TEXPREF_NONE)
 
-    # ------------------------------------
-    # Extract front layer and upload
-    # ------------------------------------
-    front_data_offset = halfwidth * mt.height
-    front_data = memoryview(back_data)[front_data_offset:]
+    opaque = front_idx != 0
+    front_rgba = palette[front_idx].copy()
+    front_rgba[..., 3] = np.where(opaque, 255, 0)
+    front_bytes = front_rgba.tobytes()
 
-    r = g = b = count = 0
+    alphaskytexture = gl_texmgr.TexMgr_LoadImage(
+        mod, f"{mod.name}:{mt.name}_front", halfwidth, h,
+        gl_texmgr.srcformat.SRC_RGBA, front_bytes, "", front_bytes,
+        gl_texmgr.TEXPREF_ALPHA)
 
-    for y in range(mt.height):
-        row_src_offset = y * mt.width
-        row_front_offset = y * halfwidth
-
-        for x in range(halfwidth):
-            p = src_bytes[row_src_offset + x]
-
-            if p == 0:
-                p = 255
-            else:
-                # Direct 1:1 mapping of d_8to24table palette lookup
-                # d_8to24table[p] stores a 32-bit integer formatted as 0xAABBGGRR or [R, G, B, A]
-                rgba = gl_texmgr.d_8to24table[p]
-
-                # Extract byte channels (matches ((byte *)rgba)[0..2] in C)
-                r += rgba & 0xFF
-                g += (rgba >> 8) & 0xFF
-                b += (rgba >> 16) & 0xFF
-                count += 1
-
-            front_data[row_front_offset + x] = p
-
-    texturename_front = f"{mod.name}:{mt.name}_front"
-    alphaskytexture = texmgr.TexMgr_LoadImage(
-        mod,
-        texturename_front,
-        halfwidth,
-        mt.height,
-        texmgr.SRC_INDEXED,
-        front_data,
-        "",
-        front_data,
-        texmgr.TEXPREF_ALPHA,
-    )
-
-    # ------------------------------------
-    # Calculate r_fastsky color based on average of all opaque foreground colors
-    # ------------------------------------
+    # r_fastsky colour: average of all opaque front-layer pixels
+    count = int(opaque.sum())
     if count > 0:
-        skyflatcolor[0] = float(r) / (count * 255)
-        skyflatcolor[1] = float(g) / (count * 255)
-        skyflatcolor[2] = float(b) / (count * 255)
+        rgb = palette[front_idx[opaque]][:, :3].astype(np.float64).sum(axis=0)
+        skyflatcolor[0] = float(rgb[0]) / (count * 255)
+        skyflatcolor[1] = float(rgb[1]) / (count * 255)
+        skyflatcolor[2] = float(rgb[2]) / (count * 255)
     else:
-        skyflatcolor[0] = 0.0
-        skyflatcolor[1] = 0.0
-        skyflatcolor[2] = 0.0
-
+        skyflatcolor[0] = skyflatcolor[1] = skyflatcolor[2] = 0.0
 
 
 suf:list[str] = ["rt", "bk", "lf", "ft", "up", "dn"]
@@ -184,19 +145,26 @@ def Sky_LoadSkyBox(name: str):
         skybox_name = ''
         return
 
+    try:
+        import image
+    except ImportError:
+        console.Con_Printf('skybox: image module not available\n')
+        skybox_name = ''
+        return
+
+    nonefound = True
     for i in range(6):
-        mark = zone.Hunk_LowMark()
         filename = f'gfx/env/{name}{suf[i]}'
         data, width, height = image.Image_LoadImage(filename)
 
         if data:
-            skybox_textures[i] = gl_texmgr.TexMgr_LoadImage(cl_main.cl.worldmodel, filename, width, height, gl_texmgr.srcformat.SRC_RGBA, data, filename, 0, gl_texmgr.TEXPREF_NONE)
+            skybox_textures[i] = gl_texmgr.TexMgr_LoadImage(
+                cl_main.cl.worldmodel, filename, width, height,
+                gl_texmgr.srcformat.SRC_RGBA, data, filename, 0, gl_texmgr.TEXPREF_NONE)
             nonefound = False
         else:
-            console.Con_Printf(f'Couldnt load {filename}')
+            console.Con_Printf(f'Couldn\'t load {filename}\n')
             skybox_textures[i] = gl_texmgr.notexture
-
-        zone.Hunk_FreeToLowMark(mark)
 
     if nonefound:
         for i in range(6):
@@ -209,11 +177,12 @@ def Sky_LoadSkyBox(name: str):
 
     skybox_name = name
 
+
 def Sky_ClearAll():
-    global skybox_name
+    global skybox_name, solidskytexture, alphaskytexture
 
     skybox_name = ''
-    for i in range(6):
+    for i in range(len(skybox_textures)):
         skybox_textures[i] = None
 
     solidskytexture = None
@@ -223,47 +192,32 @@ def Sky_ClearAll():
     cvar.Cvar_SetQuick(r_skyfog, r_skyfog.default_string)  # this may be wrong
 
 
-
 def Sky_NewMap():
+    """Read sky/skyfog keys from the worldspawn entity (first {...} block of the entities lump)."""
+    global skyfog
+
     skyfog = cvar.Cvar_GetCvar('r_skyfog').value
 
-    data = cl_main.cl.worldmodel.entities
-    if not data:
+    ents = cl_main.cl.worldmodel.entities
+    if not ents:
         return
+    if isinstance(ents, (bytes, bytearray)):
+        ents = bytes(ents).decode('latin-1')
 
-    data = common.COM_Parse(data)
-    if not data:
-        return
-    if common.com_token[0] != '{':
-        return
+    end = ents.find('}')
+    block = ents[:end] if end >= 0 else ents
 
-    while True:
-        data = common.COM_Parse(data)
+    for key, value in re.findall(r'"([^"]*)"\s+"([^"]*)"', block):
+        if key.startswith('_'):
+            key = key[1:]
 
-        if not data:
-            return
-        if common.com_token[0] == '}':
-            break
-        if common.com_token[0] == '_':
-            key = common.com_token[1:]
-        else:
-            key = common.com_token[:]
-
-        key.rstrip()
-
-        data = common.COM_ParseEx(data)
-        if not data:
-            return
-
-        value = com_token[:]
-
-        if key == 'sky':
+        if key in ('sky', 'skyname', 'qlsky'):
             Sky_LoadSkyBox(value)
-
-        if key == 'skyfog':
-            skyfog = float(value)
-        elif key in ['skyname', 'qlsky']:
-            Sky_LoadSkyBox(value)
+        elif key == 'skyfog':
+            try:
+                skyfog = float(value)
+            except ValueError:
+                pass
 
 
 def Sky_SkyCommand_f():
@@ -620,13 +574,10 @@ def Sky_ProcessEntities():
                     and dot > BACKFACE_EPSILON
                 ):
 
-                    # Emulate temporary arena allocation via Hunk mark
-                    mark = zone.Hunk_LowMark()
-
                     # Copy polygon structure and transform vertices into world-space
                     p = quakedef.glpoly_t()
                     p.numverts = s.polys.numverts
-                    p.verts = [[0.0, 0.0, 0.0] for _ in range(p.numverts)]
+                    p.verts = [[0.0] * 7 for _ in range(p.numverts)]
 
                     for k in range(p.numverts):
                         if rotated:
@@ -657,8 +608,6 @@ def Sky_ProcessEntities():
 
                     # Submit transformed world-space polygon to sky processing
                     Sky_ProcessPoly(p)
-
-                    zone.Hunk_FreeToLowMark(mark)
 
 
 
@@ -707,8 +656,8 @@ def Sky_DrawSkyBox():
 
         skymins[0][i] = -1
         skymins[1][i] = -1
-        skymins[0][i] = 1
-        skymins[1][i] = 1
+        skymaxs[0][i] = 1
+        skymaxs[1][i] = 1
 
         gl.glBegin(gl.GL_QUADS)
         Sky_EmitSkyBoxVertex (skymins[0][i], skymins[1][i], i)
@@ -758,162 +707,123 @@ def Sky_SetBoxVert(s: float, t: float, axis: int, v: quakedef.vec3_t):
         v[j] += gl_rmain.r_origin[j]
 
 
-def Sky_GetTexCoord(v: quakedef.vec3_t, speed: float) -> tuple[float, float]:
-    _dir: quakedef.vec3_t = [0.,0.,0.]
+def _sky_texcoords(verts, speed: float):
+    """Vectorised Sky_GetTexCoord for an (n,3) float32 array; returns (n,2) float32."""
+    d = verts - np.asarray(gl_rmain.r_origin, dtype=np.float32)
+    d[:, 2] *= 3
+    length = 6 * 63 / np.sqrt((d * d).sum(axis=1))
 
-    mathlib.VectorSubtract(v, gl_rmain.r_origin, _dir)
-    _dir[2] *= 3
-
-    length = _dir[0] * _dir[0] + _dir[1] * _dir[1] + _dir[2] * _dir[2]
-    length = math.sqrt(length)
-    length = 6 * 63 / length
-
-    scroll  = cl_main.cl.time * speed
+    scroll = cl_main.cl.time * speed
     scroll -= int(scroll) & ~127
 
-    s = (scroll + _dir[0] * length) * (1.0/128)
-    t = (scroll + _dir[1] * length) * (1.0/128)
+    st = np.empty((len(verts), 2), dtype=np.float32)
+    st[:, 0] = (scroll + d[:, 0] * length) * (1.0 / 128)
+    st[:, 1] = (scroll + d[:, 1] * length) * (1.0 / 128)
+    return st
 
-    return (s, t)
 
-def Sky_DrawFaceQuad(p: quakedef.glpoly_t):
-    s: float = 0.0
-    t: float = 0.0
+def _draw_sky_arrays(verts, texcoords=None):
+    """Draw GL_QUADS from client-side arrays (verts: (4n,3) f32, texcoords: (4n,2) f32 or None)."""
+    gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+    gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+    gl.glVertexPointer(3, gl.GL_FLOAT, 0, verts)
+    if texcoords is not None:
+        gl.glClientActiveTexture(gl.GL_TEXTURE0)
+        gl.glEnableClientState(gl.GL_TEXTURE_COORD_ARRAY)
+        gl.glTexCoordPointer(2, gl.GL_FLOAT, 0, texcoords)
+    gl.glDrawArrays(gl.GL_QUADS, 0, len(verts))
+    if texcoords is not None:
+        gl.glDisableClientState(gl.GL_TEXTURE_COORD_ARRAY)
+    gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
 
-    r_skyalpha = cvar.Cvar_GetCvar('r_skyalpha').value
-
-    if gl_vidsdl.gl_mtexable and r_skyalpha >= 1.0:
-        gl_texmgr.GL_Bind(solidskytexture)
-        gl_texmgr.GL_EnableMultitexture()
-        gl_texmgr.GL_Bind(alphaskytexture)
-
-        gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_DECAL)
-
-        gl.glBegin(gl.GL_QUADS)
-
-        for i in range(4):
-            v = p.verts[i]
-
-            s, t = Sky_GetTexCoord(v, 8)
-            gl.glMultiTexCoord2f(gl.GL_TEXTURE0, s, t)
-            s, t = Sky_GetTexCoord(v, 16)
-            gl.glMultiTexCoord2f(gl.GL_TEXTURE1, s, t)
-            gl.glVertex3fv(v)
-
-        gl.glEnd()
-
-        gl_texmgr.GL_DisableMultitexture()
-
-        gl_rmain.rs_skypasses += 1
-        gl_rmain.rs_skypolys += 1
-    else:
-        gl_texmgr.GL_Bind(solidskytexture)
-
-        if r_skyalpha < 1.0:
-            gl.glColor3f(1., 1., 1.)
-
-        gl.glBegin(gl.GL_QUADS)
-        for i in range(4):
-            v = p.verts[i]
-            s, t = Sky_GetTexCoord(v, 8)
-            gl.glTexCoord2f(s, t)
-            gl.glVertex3fv(v)
-        gl.glEnd()
-
-        gl_texmgr.GL_Bind(alphaskytexture)
-        gl.glEnable(gl.GL_BLEND)
-
-        if r_skyalpha < 1.0:
-            gl.glColor4f(1., 1., 1., r_skyalpha)
-
-        gl.glBegin(gl.GL_QUADS)
-        for i in range(4):
-            v = p.verts[i]
-            s, t = Sky_GetTexCoord(v, 16)
-            gl.glTexCoord2f(s, t)
-            gl.glVertex3fv(v)
-        gl.glEnd()
-
-        gl.glDisable(gl.GL_BLEND)
-
-        gl_rmain.rs_skypolys += 1
-        gl_rmain.rs_skypasses += 2
-
-    if gl_fog.Fog_GetDensity() > 0 and skyfog > 0:
-        c = gl_fog.Fog_GetColor()
-        gl.glEnable(gl.GL_BLEND)
-        gl.glDisable(gl.GL_TEXTURE_2D)
-        gl.glColor4f(c[0], c[1], c[2], common.CLAMP(0.0, skyfog, 1.0))
-
-        gl.glBegin(gl.GL_QUADS)
-        for i in range(4):
-            v = p.verts[i]
-            gl.glVertex3fv(v)
-        gl.glEnd()
-
-        gl.glColor3f(1., 1., 1.)
-        gl.glEnable(gl.GL_TEXTURE_2D)
-        gl.glDisable(gl.GL_BLEND)
-
-        gl_rmain.rs_skypasses += 1
 
 def Sky_DrawFace(axis: int):
-
-    verts: list[quakedef.vec3_t] = [[0.,0.,0.], [0.,0.,0.], [0.,0.,0.], [0.,0.,0.]]
-    up: quakedef.vec3_t = [0., 0., 0.]
-    right: quakedef.vec3_t = [0., 0., 0.]
-    temp: quakedef.vec3_t = [0., 0., 0.]
-    temp2: quakedef.vec3_t = [0., 0., 0.]
-
+    """Draw the two scrolling sky layers on one face of the sky cube, subdivided into a
+    di x dj grid (r_sky_quality) so the projection looks right; all quads of the face go
+    out in one array draw per layer."""
+    verts = [[0., 0., 0.] for _ in range(4)]
     Sky_SetBoxVert(-1.0, -1.0, axis, verts[0])
     Sky_SetBoxVert(-1.0,  1.0, axis, verts[1])
     Sky_SetBoxVert(1.0,   1.0, axis, verts[2])
     Sky_SetBoxVert(1.0,  -1.0, axis, verts[3])
 
-    p: quakedef.glpoly_t = quakedef.glpoly_t()
-
-    mathlib.VectorSubtract(verts[2],verts[3],up);
-    mathlib.VectorSubtract(verts[2],verts[1],right)
+    v0 = np.asarray(verts[0], dtype=np.float32)
+    up = np.asarray(verts[2], dtype=np.float32) - np.asarray(verts[3], dtype=np.float32)
+    right = np.asarray(verts[2], dtype=np.float32) - np.asarray(verts[1], dtype=np.float32)
 
     di = max(int(cvar.Cvar_GetCvar('r_sky_quality').value), 1)
     qi = 1.0 / di
     dj = di * 2 if axis < 4 else di
     qj = 1.0 / dj
 
+    smin = skymins[0][axis] / 2 + 0.5
+    smax = skymaxs[0][axis] / 2 + 0.5
+    tmin = skymins[1][axis] / 2 + 0.5
+    tmax = skymaxs[1][axis] / 2 + 0.5
+
+    cells = []
     for i in range(di):
+        if i * qi < smin - qi or i * qi > smax:
+            continue
         for j in range(dj):
-            if i*qi < skymins[0][axis]/2+0.5 - qi or i*qi > skymaxs[0][axis]/2+0.5  or \
-                j*qj < skymins[1][axis]/2+0.5 - qj or j*qj > skymaxs[1][axis]/2+0.5:
+            if j * qj < tmin - qj or j * qj > tmax:
                 continue
+            cells.append((i, j))
 
-            mathlib.VectorScale (right, qi*i, temp)
-            mathlib.VectorScale (up, qj*j, temp2)
-            mathlib.VectorAdd(temp,temp2,temp)
-            mathlib.VectorAdd(verts[0],temp,p.verts[0])
+    if not cells:
+        return
 
-            mathlib.VectorScale (up, qj, temp)
-            mathlib.VectorAdd (p.verts[0],temp,p.verts[1])
+    ij = np.asarray(cells, dtype=np.float32)
+    base = v0 + right * (qi * ij[:, 0:1]) + up * (qj * ij[:, 1:2])
+    p1 = base + up * qj
+    p2 = p1 + right * qi
+    p3 = base + right * qi
+    quad_verts = np.ascontiguousarray(np.stack([base, p1, p2, p3], axis=1).reshape(-1, 3), dtype=np.float32)
 
-            mathlib.VectorScale (right, qi, temp)
-            mathlib.VectorAdd (p.verts[1],temp,p.verts[2])
+    r_skyalpha = cvar.Cvar_GetCvar('r_skyalpha').value
 
-            mathlib.VectorAdd (p.verts[0],temp,p.verts[3])
+    # layer 1: opaque back layer
+    gl_texmgr.GL_Bind(solidskytexture)
+    if r_skyalpha < 1.0:
+        gl.glColor3f(1., 1., 1.)
+    _draw_sky_arrays(quad_verts, np.ascontiguousarray(_sky_texcoords(quad_verts, 8)))
 
-            Sky_DrawFaceQuad (p)
+    # layer 2: alpha-blended cloud layer, scrolling twice as fast
+    gl_texmgr.GL_Bind(alphaskytexture)
+    gl.glEnable(gl.GL_BLEND)
+    gl.glBlendFunc(gl.GL_SRC_ALPHA, gl.GL_ONE_MINUS_SRC_ALPHA)
+    if r_skyalpha < 1.0:
+        gl.glColor4f(1., 1., 1., r_skyalpha)
+    _draw_sky_arrays(quad_verts, np.ascontiguousarray(_sky_texcoords(quad_verts, 16)))
+    gl.glDisable(gl.GL_BLEND)
+
+    gl_rmain.rs_skypolys += len(cells)
+    gl_rmain.rs_skypasses += 2
+
+    if gl_fog.Fog_GetDensity() > 0 and skyfog > 0:
+        c = gl_fog.Fog_GetColor()
+        gl.glEnable(gl.GL_BLEND)
+        gl.glDisable(gl.GL_TEXTURE_2D)
+        gl.glColor4f(c[0], c[1], c[2], common.CLAMP(0.0, skyfog, 1.0))
+        _draw_sky_arrays(quad_verts)
+        gl.glColor3f(1., 1., 1.)
+        gl.glEnable(gl.GL_TEXTURE_2D)
+        gl.glDisable(gl.GL_BLEND)
+        gl_rmain.rs_skypasses += 1
 
 
 def Sky_DrawSkyLayers():
     r_skyalpha = cvar.Cvar_GetCvar('r_skyalpha').value
 
-    if r_skyalpha < 1.0:
-        gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE)
+    gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE,
+                 gl.GL_MODULATE if r_skyalpha < 1.0 else gl.GL_REPLACE)
 
     for i in range(6):
         if skymins[0][i] < skymaxs[0][i] and skymins[1][i] < skymaxs[1][i]:
             Sky_DrawFace (i);
 
-    if r_skyalpha < 1.0:
-        gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_REPLACE)
+    gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_REPLACE)
+    gl.glColor3f(1., 1., 1.)
 
 
 def Sky_DrawSky():
@@ -925,6 +835,7 @@ def Sky_DrawSky():
         skymins[0][i] = skymins[1][i] = mathlib.FLT_MAX
         skymaxs[0][i] = skymaxs[1][i] = -mathlib.FLT_MAX
 
+    gl.glUseProgram(0)  # sky is drawn with the fixed-function pipeline
     gl_fog.Fog_DisableGFog()
     gl.glDisable(gl.GL_TEXTURE_2D)
     if gl_fog.Fog_GetDensity() > 0:
@@ -939,7 +850,7 @@ def Sky_DrawSky():
     gl.glEnable(gl.GL_TEXTURE_2D)
 
 
-    if cvar.Cvar_GetCvar('r_fastsky').value and not ( gl_fog.Fog_GetDensity() > 0 and skyfog >= 1):
+    if not cvar.Cvar_GetCvar('r_fastsky').value and not (gl_fog.Fog_GetDensity() > 0 and skyfog >= 1):
         gl.glDepthFunc(gl.GL_GEQUAL)
         gl.glDepthMask(0)
 
@@ -952,28 +863,3 @@ def Sky_DrawSky():
         gl.glDepthFunc(gl.GL_LEQUAL)
 
     gl_fog.Fog_EnableGFog()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
