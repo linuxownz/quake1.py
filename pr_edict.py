@@ -576,14 +576,30 @@ def ED_FieldAtOfs(ofs: int) -> ddef_t:
     return None
 
 
+_fieldname_cache = {}
+_fieldname_cache_key = None
+
+
 def ED_FindField(name: str) -> ddef_t:
+    """Look up a field def by name. Results (including misses) are cached; the old
+    version decoded every field name from pr_strings on every call."""
+    global _fieldname_cache, _fieldname_cache_key
     if progz is None:
         return None
-    for i in range(progz.numfielddefs):
-        _def = pr_fielddefs[i]
-        if PR_GetString(_def.s_name) == name:
-            return _def
-    return None
+    key = (id(pr_fielddefs), progz.numfielddefs)
+    if key != _fieldname_cache_key:
+        cache = {}
+        for i in range(progz.numfielddefs):
+            _def = pr_fielddefs[i]
+            cache.setdefault(PR_GetString(_def.s_name), _def)
+        _fieldname_cache = cache
+        _fieldname_cache_key = key
+    return _fieldname_cache.get(name)
+
+
+_EV_VECTOR = etype_t.ev_vector.value
+_EV_FLOAT = etype_t.ev_float.value
+_EV_ENTITY = etype_t.ev_entity.value
 
 
 class GlobalVars:
@@ -606,10 +622,10 @@ class GlobalVars:
         except KeyError:
             raise AttributeError(f'progs.dat has no global {name!r}')
         t = self._typ[name]
-        if t == etype_t.ev_vector.value:
+        if t == _EV_VECTOR:
             return list(pr_globals[ofs:ofs + 3])
         v = pr_globals[ofs]
-        if t == etype_t.ev_float.value:
+        if t == _EV_FLOAT:
             return float(v)
         return int(v)
 
@@ -619,12 +635,12 @@ class GlobalVars:
         except KeyError:
             raise AttributeError(f'progs.dat has no global {name!r}')
         t = self._typ[name]
-        if t == etype_t.ev_vector.value:
+        if t == _EV_VECTOR:
             for i in range(3):
                 pr_globals[ofs + i] = float(value[i])
-        elif t == etype_t.ev_float.value:
+        elif t == _EV_FLOAT:
             pr_globals[ofs] = float(value)
-        elif t == etype_t.ev_entity.value and not isinstance(value, (int, float)):
+        elif t == _EV_ENTITY and not isinstance(value, (int, float)):
             pr_globals[ofs] = EDICT_TO_PROG(value)
         else:
             pr_globals[ofs] = int(value)
@@ -1503,10 +1519,6 @@ def PR_LoadProgs() -> None:
 
     raw_data = common.COM_LoadHunkFile('progs.dat', False)
     if not raw_data:
-        ffr = common.COM_OpenFile('progs.dat')
-        print('DBG handle=', ffr.handle, 'size=', ffr.filesize, 'pak=', ffr.is_pak)
-        import sys_sdl_unix
-        print('DBG sys_handles=', getattr(sys_sdl_unix, 'sys_handles', None))
         host.Host_Error("PR_LoadProgs: couldn't load progs.dat")
 
     console.Con_Printf(f'Programs occupy {len(raw_data) // 1024}K.\n')

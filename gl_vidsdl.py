@@ -78,6 +78,7 @@ _vid : vid.viddef_t = vid.viddef_t()
 modestate : vid.modestate_t = vid.modestate_t.MS_UNINIT
 
 scr_skipupdate = False
+swap_count = 0  # incremented on every SDL_GL_SwapWindow; lets the main loop avoid a second swap per frame
 
 gl_mtexable = False
 gl_packed_pixels = False
@@ -1219,12 +1220,13 @@ def VID_SyncCvars():
 
 
 def VID_SwapBuffers():
-    global draw_context
+    global draw_context, swap_count
+    swap_count += 1
     sdl2.SDL_GL_SwapWindow(draw_context)
 
 
 def VID_IsMinimized():
-    return sdl2.video.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_SHOWN
+    return bool(sdl2.video.SDL_GetWindowFlags(draw_context) & sdl2.SDL_WINDOW_MINIMIZED)
 
 def VID_HasMouseOrInputFocus():
     flags = sdl2.video.SDL_GetWindowFlags(draw_context)
@@ -1239,6 +1241,7 @@ def GL_BeginRendering():
 
 def GL_EndRendering():
     if not gl_vidsdl.scr_skipupdate:
+        gl_vidsdl.swap_count += 1
         sdl2.SDL_GL_SwapWindow(gl_vidsdl.draw_context)
 
 

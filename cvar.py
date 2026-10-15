@@ -36,6 +36,13 @@ __cvars: dict[cvar_t] = {}
 #HAVE TO CONVERT THIS TO A dictionary
 
 def Cvar_List_f():
+
+    for name in __cvars:
+        cvar:cvar_t = __cvars[name]
+        console.Con_Print(f'{cvar.name:20s} {cvar.value} {cvar.string}\n')
+
+
+def Cvar_List_fXXX():
     """
     Lists all cvars. If an argument is provided, only lists those
     starting with that string.

@@ -76,7 +76,7 @@ def CL_ParseBeam(m: quakedef.qmodel_t):
             mathlib.VectorCopy(end, b.end)
             return
 
-    if host.dev_overflows.beams or host.dev_overflows.beams + 3 < host.realtime:
+    if host.dev_overflows.beams == 0 or host.dev_overflows.beams + 3 < host.realtime:
         console.Con_Printf('Beam list overflow')
         host.dev_overflows.beams = host.realtime
 
@@ -263,9 +263,14 @@ def CL_UpdateTEnts():
             else:
                 pitch = 270
         else:
-            yaw = math.atan2(dist[1], dist[0] * 180 / math.pi )
+            yaw = math.atan2(dist[1], dist[0]) * 180 / math.pi
             if yaw < 0:
                 yaw += 360
+
+            forward = math.sqrt(dist[0] * dist[0] + dist[1] * dist[1])
+            pitch = math.atan2(dist[2], forward) * 180 / math.pi
+            if pitch < 0:
+                pitch += 360
 
 
         mathlib.VectorCopy(b.start, org)

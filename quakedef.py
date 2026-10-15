@@ -2,7 +2,7 @@
 import ctypes
 import io
 from dataclasses import dataclass, field
-from enum import Enum
+from enum import Enum, IntEnum
 from typing import Optional
 
 import bspfile
@@ -496,7 +496,7 @@ class mplane_t:
         self.pad = b'\x00\x00'
         self.unpack_string = '<3f f B B 2B'
 
-class texchain_t(Enum):
+class texchain_t(IntEnum):  # IntEnum: int hashing is much faster than Enum.__hash__ (used as dict key per surface)
     chain_world = 0
     chain_model = 1
 

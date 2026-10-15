@@ -2504,7 +2504,7 @@ def Mod_LoadBrushModel(mod: quakedef.model_t, buffer: bytes) -> None:
     if (
         mod.bspversion == BSPVERSION
         and cvar.Cvar_GetCvar('external_vis').value
-        and sv_main.sv.modelname # was modelname[0] FIXME
+        and sv_main.sv.modelname
         and loadname.lower() == sv_main.sv.name.lower() == 0
     ):
 
@@ -2748,67 +2748,64 @@ def Mod_FloodFillSkin(skin: bytearray, skinwidth: int, skinheight: int) -> None:
         return
 
     fillcolor = skin[0]  # Assume pixel (0,0) defines the background color to replace
-    fifo: typing.List[floodfill_t] = [
-        floodfill_t() for _ in range(FLOODFILL_FIFO_SIZE)
-    ]
-    inpt = 0
-    outpt = 0
-    filledcolor = -1
 
     # Search Quake 8-to-24 bit RGBA table for an opaque black entry
-    if filledcolor == -1:
-        filledcolor = 0
-        for i in range(256):
-            if gl_texmgr.d_8to24table[i] == (255 << 0):  # Alpha == 1.0 (0xFF000000)
-                filledcolor = i
-                break
+    filledcolor = 0
+    for i in range(256):
+        if gl_texmgr.d_8to24table[i] == (255 << 0):
+            filledcolor = i
+            break
 
     # Guard against filling to target color or sentinel marker (255)
     if fillcolor == filledcolor or fillcolor == 255:
         return
 
-    # Seed FIFO queue with starting position (0,0)
-    fifo[inpt].x = 0
-    fifo[inpt].y = 0
-    inpt = (inpt + 1) & FLOODFILL_FIFO_MASK
-
-    while outpt != inpt:
-        x = fifo[outpt].x
-        y = fifo[outpt].y
+    # BFS over pixel offsets (x/y recovered with divmod); a plain growing list replaces
+    # the C ring buffer, since every pixel is enqueued at most once
+    w = skinwidth
+    last_row = skinheight - 1
+    queue = [0]
+    qi = 0
+    while qi < len(queue):
+        pos = queue[qi]
+        qi += 1
+        y, x = divmod(pos, w)
         fdc = filledcolor
-        pos_offset = x + skinwidth * y
 
-        outpt = (outpt + 1) & FLOODFILL_FIFO_MASK
-
-        # Helper step logic replicating FLOODFILL_STEP macro
-        def floodfill_step(off: int, dx: int, dy: int) -> None:
-            nonlocal inpt, fdc
-            target_idx = pos_offset + off
-            pixel_val = skin[target_idx]
-
-            if pixel_val == fillcolor:
-                skin[target_idx] = 255  # Mark as visited
-                fifo[inpt].x = x + dx
-                fifo[inpt].y = y + dy
-                inpt = (inpt + 1) & FLOODFILL_FIFO_MASK
-            elif pixel_val != 255:
-                fdc = pixel_val
-
-        # Step Left
         if x > 0:
-            floodfill_step(-1, -1, 0)
-        # Step Right
-        if x < skinwidth - 1:
-            floodfill_step(1, 1, 0)
-        # Step Up
+            p = pos - 1
+            v = skin[p]
+            if v == fillcolor:
+                skin[p] = 255
+                queue.append(p)
+            elif v != 255:
+                fdc = v
+        if x < w - 1:
+            p = pos + 1
+            v = skin[p]
+            if v == fillcolor:
+                skin[p] = 255
+                queue.append(p)
+            elif v != 255:
+                fdc = v
         if y > 0:
-            floodfill_step(-skinwidth, 0, -1)
-        # Step Down
-        if y < skinheight - 1:
-            floodfill_step(skinwidth, 0, 1)
+            p = pos - w
+            v = skin[p]
+            if v == fillcolor:
+                skin[p] = 255
+                queue.append(p)
+            elif v != 255:
+                fdc = v
+        if y < last_row:
+            p = pos + w
+            v = skin[p]
+            if v == fillcolor:
+                skin[p] = 255
+                queue.append(p)
+            elif v != 255:
+                fdc = v
 
-        # Write resolved fill color to current pixel
-        skin[pos_offset] = fdc
+        skin[pos] = fdc
 
 
 # Constants

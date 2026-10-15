@@ -123,25 +123,22 @@ def ResampleSfx(sfx: q_sound.sfx_t, inrate: int, inwidth: int, pcm: bytes,
         return sc
 
     last = nsamples - 1
-    samplefrac = 0
     fracstep = int(stepscale * 256)
+    # samplefrac is just i*fracstep, so source indices can be computed directly
+    idx = [min((i * fracstep) >> 8, last) for i in range(outcount)]
     if sc.width == 2:
-        out = array('h')
-        for _ in range(outcount):
-            si = min(samplefrac >> 8, last)
-            samplefrac += fracstep
-            out.append(src[si] if inwidth == 2 else (src[si] - 128) << 8)
+        if inwidth == 2:
+            out = array('h', [src[si] for si in idx])
+        else:
+            out = array('h', [(src[si] - 128) << 8 for si in idx])
         if sys.byteorder == 'big':
             out.byteswap()
         sc.data = bytearray(out.tobytes())
     else:
-        out = bytearray(outcount)
-        for i in range(outcount):
-            si = min(samplefrac >> 8, last)
-            samplefrac += fracstep
-            s = src[si] if inwidth == 2 else (src[si] - 128) << 8
-            out[i] = (s >> 8) & 0xFF
-        sc.data = out
+        if inwidth == 2:
+            sc.data = bytearray([(src[si] >> 8) & 0xFF for si in idx])
+        else:
+            sc.data = bytearray([src[si] ^ 0x80 for si in idx])
     return sc
 
 

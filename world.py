@@ -425,22 +425,30 @@ def SV_LinkEdict(ent: progs.edict_t, touch_triggers: bool):
 
 
 def SV_HullPointContents(hull: quakedef.hull_t, num: int, p: quakedef.vec3_t) -> int:
+    clipnodes = hull.clipnodes
+    planes = hull.planes
+    first = hull.firstclipnode
+    last = hull.lastclipnode
+    p0, p1, p2 = p[0], p[1], p[2]
     while num >= 0:
-        if num < hull.firstclipnode or num > hull.lastclipnode:
+        if num < first or num > last:
             sys_sdl_unix.Sys_Error('SV_HullPointContents: bad node number')
 
-        node = hull.clipnodes[num]
-        plane = hull.planes[node.planenum]
+        node = clipnodes[num]
+        plane = planes[node.planenum]
+        t = plane.type
 
-        if plane.type < 3:
-            d = p[plane.type] - plane.dist
+        if t == 0:
+            d = p0 - plane.dist
+        elif t == 1:
+            d = p1 - plane.dist
+        elif t == 2:
+            d = p2 - plane.dist
         else:
-            d = mathlib.DoublePrecisionDotProduct(plane.normal, p) - plane.dist
+            n = plane.normal
+            d = n[0] * p0 + n[1] * p1 + n[2] * p2 - plane.dist
 
-        if d < 0:
-            num = node.children[1]
-        else:
-            num = node.children[0]
+        num = node.children[1] if d < 0 else node.children[0]
 
     return num
 

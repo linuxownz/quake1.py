@@ -247,7 +247,7 @@ def R_ParticleExplosion(org: quakedef.vec3_t):
         p.next = active_particles
         active_particles = p
 
-        p.dir = cl_main.cl.time + 5
+        p.die = cl_main.cl.time + 5
         p.color = ramp1[0]
         p.ramp = random.randint(0, 3)
 
@@ -346,7 +346,7 @@ def R_RunParticleEffect(org: quakedef.vec3_t, _dir: quakedef.vec3_t, color, coun
 
         else:
             p.die = cl_main.cl.time + 0.1 * random.randint(0, 5)
-            p.color = color & ~7 + random.randint(0,7)
+            p.color = (color & ~7) + random.randint(0, 7)
             p.type = glquake.ptype_t.pt_slowgrav
             for j in range(3):
                 p.org[j] = org[j] + random.randint(0, 15) - 8
@@ -382,7 +382,7 @@ def R_LavaSplash(org: quakedef.vec3_t):
 
                 mathlib.VectorNormalize(_dir)
                 vel = 50 + random.randint(0, 63)
-                mathlib.VectorScale(dir, vel, p.vel)
+                mathlib.VectorScale(_dir, vel, p.vel)
 
 
 def R_TeleportSplash(org: quakedef.vec3_t):
