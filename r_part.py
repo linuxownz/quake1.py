@@ -3,6 +3,7 @@
 import math
 import random
 
+import numpy as np
 import OpenGL.GL as gl
 
 import cl_main
@@ -500,10 +501,22 @@ def R_RocketTrail(start: quakedef.vec3_t, end: quakedef.vec3_t, _type: int):
         mathlib.VectorAdd(start, vec, start)
 
 
+_PT_STATIC   = glquake.ptype_t.pt_static
+_PT_GRAV     = glquake.ptype_t.pt_grav
+_PT_SLOWGRAV = glquake.ptype_t.pt_slowgrav
+_PT_FIRE     = glquake.ptype_t.pt_fire
+_PT_EXPLODE  = glquake.ptype_t.pt_explode
+_PT_EXPLODE2 = glquake.ptype_t.pt_explode2
+_PT_BLOB     = glquake.ptype_t.pt_blob
+_PT_BLOB2    = glquake.ptype_t.pt_blob2
+
+
 def CL_RunParticles():
     global free_particles, active_particles
 
-    frametime = cl_main.cl.time - cl_main.cl.oldtime
+    cl = cl_main.cl
+    now = cl.time
+    frametime = now - cl.oldtime
     time3 = frametime * 15
     time2 = frametime * 10
     time1 = frametime * 5
@@ -513,7 +526,7 @@ def CL_RunParticles():
 
     while True:
         kill = active_particles
-        if kill and kill.die < cl_main.cl.time:
+        if kill and kill.die < now:
             active_particles = kill.next
             kill.next = free_particles
             free_particles = kill
@@ -524,68 +537,110 @@ def CL_RunParticles():
     while p:
         while True:
             kill = p.next
-            if kill and kill.die < cl_main.cl.time:
+            if kill and kill.die < now:
                 p.next = kill.next
                 kill.next = free_particles
                 free_particles = kill
                 continue
             break
 
-        p.org[0] += p.vel[0] * frametime
-        p.org[1] += p.vel[1] * frametime
-        p.org[2] += p.vel[2] * frametime
+        org = p.org
+        vel = p.vel
+        org[0] += vel[0] * frametime
+        org[1] += vel[1] * frametime
+        org[2] += vel[2] * frametime
 
-        match p.type:
-            case glquake.ptype_t.pt_static:
-                pass
-            case glquake.ptype_t.pt_fire:
-                p.ramp += time1
-                if p.ramp >= 6:
-                    p.die = -1
-                else:
-                    p.color = ramp3[int(p.ramp)]
-                p.vel[2] += grav
-            case glquake.ptype_t.pt_explode:
-                p.ramp += time2
-                if p.ramp >= 8:
-                    p.die = -1
-                else:
-                    p.color = ramp1[int(p.ramp)]
-                for i in range(3):
-                    p.vel[i] += p.vel[i] * dvel
-                p.vel[2] -= grav
-            case glquake.ptype_t.pt_explode2:
-                p.ramp += time3
-                if p.ramp >= 8:
-                    p.die = -1
-                else:
-                    p.color = ramp2[int(p.ramp)]
-                for i in range(3):
-                    p.vel[i] -= p.vel[i] * frametime
-                p.vel[2] -= grav
-            case glquake.ptype_t.pt_blob:
-                for i in range(3):
-                    p.vel[i] += p.vel[i] * dvel
-                p.vel[2] -= grav
-            case glquake.ptype_t.pt_blob2:
-                for i in range(2):
-                    p.vel[i] -= p.vel[i] * dvel
-                p.vel[2] -= grav
-            case glquake.ptype_t.pt_grav | glquake.ptype_t.pt_slowgrav:
-                p.vel[2] -= grav
+        t = p.type
+        if t is _PT_STATIC:
+            pass
+        elif t is _PT_FIRE:
+            p.ramp += time1
+            if p.ramp >= 6:
+                p.die = -1
+            else:
+                p.color = ramp3[int(p.ramp)]
+            vel[2] += grav
+        elif t is _PT_EXPLODE:
+            p.ramp += time2
+            if p.ramp >= 8:
+                p.die = -1
+            else:
+                p.color = ramp1[int(p.ramp)]
+            vel[0] += vel[0] * dvel
+            vel[1] += vel[1] * dvel
+            vel[2] += vel[2] * dvel
+            vel[2] -= grav
+        elif t is _PT_EXPLODE2:
+            p.ramp += time3
+            if p.ramp >= 8:
+                p.die = -1
+            else:
+                p.color = ramp2[int(p.ramp)]
+            vel[0] -= vel[0] * frametime
+            vel[1] -= vel[1] * frametime
+            vel[2] -= vel[2] * frametime
+            vel[2] -= grav
+        elif t is _PT_BLOB:
+            vel[0] += vel[0] * dvel
+            vel[1] += vel[1] * dvel
+            vel[2] += vel[2] * dvel
+            vel[2] -= grav
+        elif t is _PT_BLOB2:
+            vel[0] -= vel[0] * dvel
+            vel[1] -= vel[1] * dvel
+            vel[2] -= grav
+        elif t is _PT_GRAV or t is _PT_SLOWGRAV:
+            vel[2] -= grav
         p = p.next
 
 
+_QUAD_TC = np.array([[0, 0], [0.5, 0], [0.5, 0.5], [0, 0.5]], dtype=np.float32)
+_TRI_TC  = np.array([[0, 0], [1, 0], [0, 1]], dtype=np.float32)
+
+
+def _build_particle_arrays(orgs, colors, r_origin, vpn, vup, vright, palette, quads, texscale):
+    """Vectorised version of the per-particle quad/triangle construction.
+    orgs: (n,3) positions, colors: (n,) palette indices, palette: (256,4) uint8.
+    Returns (verts (m,3) f32, texcoords (m,2) f32, colors (m,4) u8, vertices_per_particle)."""
+    n = len(orgs)
+    org = np.asarray(orgs, dtype=np.float32).reshape(n, 3)
+    ci = np.asarray(colors).astype(np.int32) & 255
+
+    scale = (org - np.asarray(r_origin, dtype=np.float32)) @ np.asarray(vpn, dtype=np.float32)
+    scale = np.where(scale < 20, 1 + 0.08, 1 + scale * 0.004).astype(np.float32)
+    if quads:
+        scale = scale / 2.0
+    scale = (scale * texscale)[:, None]
+
+    up = np.asarray(vup, dtype=np.float32) * 1.5
+    right = np.asarray(vright, dtype=np.float32) * 1.5
+
+    rgba = np.empty((n, 4), dtype=np.uint8)
+    rgba[:, :3] = palette[ci, :3]
+    rgba[:, 3] = 255
+
+    if quads:
+        v1 = org + scale * up
+        v2 = v1 + scale * right
+        v3 = org + scale * right
+        verts = np.stack([org, v1, v2, v3], axis=1).reshape(-1, 3)
+        tc = np.tile(_QUAD_TC, (n, 1))
+        per = 4
+    else:
+        v1 = org + scale * up
+        v2 = org + scale * right
+        verts = np.stack([org, v1, v2], axis=1).reshape(-1, 3)
+        tc = np.tile(_TRI_TC, (n, 1))
+        per = 3
+
+    cols = np.repeat(rgba, per, axis=0)
+    return (np.ascontiguousarray(verts, dtype=np.float32),
+            np.ascontiguousarray(tc, dtype=np.float32),
+            np.ascontiguousarray(cols, dtype=np.uint8),
+            per)
+
+
 def R_DrawParticles():
-    p: glquake.particle_t = None
-    up: quakedef.vec3_t = [0, 0, 0]
-    right: quakedef.vec3_t = [0, 0, 0]
-    p_up: quakedef.vec3_t = [0, 0, 0]
-    p_right: quakedef.vec3_t = [0, 0, 0]
-    p_upright: quakedef.vec3_t = [0, 0, 0]
-
-    color: list[int] = [0, 0, 0, 0]
-
     r_particles = cvar.Cvar_GetCvar('r_particles').value
     r_quadparticles = cvar.Cvar_GetCvar('r_quadparticles').value
 
@@ -595,8 +650,18 @@ def R_DrawParticles():
     if not active_particles:
         return
 
-    mathlib.VectorScale(gl_rmain.vup, 1.5, up)
-    mathlib.VectorScale(gl_rmain.vright, 1.5, right)
+    orgs = []
+    colors = []
+    p = active_particles
+    while p:
+        orgs.append(p.org)
+        colors.append(p.color)
+        p = p.next
+
+    palette = np.frombuffer(gl_texmgr.d_8to24table, dtype=np.uint8).reshape(256, 4)
+    verts, tcs, cols, per = _build_particle_arrays(
+        orgs, colors, gl_rmain.r_origin, gl_rmain.vpn, gl_rmain.vup, gl_rmain.vright,
+        palette, bool(r_quadparticles), texturescalefactor)
 
     gl_texmgr.GL_Bind(particletexture)
 
@@ -604,88 +669,22 @@ def R_DrawParticles():
     gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_MODULATE)
     gl.glDepthMask(gl.GL_FALSE)
 
-    if r_quadparticles:
-        gl.glBegin(gl.GL_QUADS)
+    # client-side arrays: make sure no VBO is bound or the pointers would be read as offsets
+    gl.glBindBuffer(gl.GL_ARRAY_BUFFER, 0)
+    gl.glClientActiveTexture(gl.GL_TEXTURE0)
+    gl.glEnableClientState(gl.GL_VERTEX_ARRAY)
+    gl.glEnableClientState(gl.GL_TEXTURE_COORD_ARRAY)
+    gl.glEnableClientState(gl.GL_COLOR_ARRAY)
+    gl.glVertexPointer(3, gl.GL_FLOAT, 0, verts)
+    gl.glTexCoordPointer(2, gl.GL_FLOAT, 0, tcs)
+    gl.glColorPointer(4, gl.GL_UNSIGNED_BYTE, 0, cols)
 
-        p = active_particles
-        while p:
-            scale = (
-                (p.org[0] - gl_rmain.r_origin[0]) * gl_rmain.vpn[0] +
-                (p.org[1] - gl_rmain.r_origin[1]) * gl_rmain.vpn[1] +
-                (p.org[2] - gl_rmain.r_origin[2]) * gl_rmain.vpn[2]
-            )
+    gl.glDrawArrays(gl.GL_QUADS if per == 4 else gl.GL_TRIANGLES, 0, len(verts))
 
-            if scale < 20:
-                scale = 1 + 0.08
-            else:
-                scale = 1 + scale * 0.004
+    gl.glDisableClientState(gl.GL_COLOR_ARRAY)
+    gl.glDisableClientState(gl.GL_TEXTURE_COORD_ARRAY)
+    gl.glDisableClientState(gl.GL_VERTEX_ARRAY)
 
-            scale /= 2.0
-            scale *= texturescalefactor
-
-            base_idx = int(p.color) * 4
-            color[0] = gl_texmgr.d_8to24table[base_idx + 0]  # Red
-            color[1] = gl_texmgr.d_8to24table[base_idx + 1]  # Green
-            color[2] = gl_texmgr.d_8to24table[base_idx + 2]  # Blue
-            color[3] = 255
-
-            gl.glColor4ubv(color)
-
-            gl.glTexCoord2f(0, 0)
-            gl.glVertex3fv(p.org)
-
-            gl.glTexCoord2f(0.5, 0)
-            mathlib.VectorMA(p.org, scale, up, p_up)
-            gl.glVertex3fv(p_up)
-
-            gl.glTexCoord2f (0.5,0.5)
-            mathlib.VectorMA (p_up, scale, right, p_upright)
-            gl.glVertex3fv (p_upright)
-
-            gl.glTexCoord2f (0,0.5)
-            mathlib.VectorMA (p.org, scale, right, p_right)
-            gl.glVertex3fv (p_right)
-            p = p.next
-        gl.glEnd()
-    else:
-        gl.glBegin(gl.GL_TRIANGLES)
-        p = active_particles
-        while p:
-
-            scale = (
-                (p.org[0] - gl_rmain.r_origin[0]) * gl_rmain.vpn[0] +
-                (p.org[1] - gl_rmain.r_origin[1]) * gl_rmain.vpn[1] +
-                (p.org[2] - gl_rmain.r_origin[2]) * gl_rmain.vpn[2]
-            )
-
-            if scale < 20:
-                scale = 1 + 0.08
-            else:
-                scale = 1 + scale * 0.004
-
-            scale *= texturescalefactor
-
-            base_idx = int(p.color) * 4
-            color[0] = gl_texmgr.d_8to24table[base_idx + 0]  # Red
-            color[1] = gl_texmgr.d_8to24table[base_idx + 1]  # Green
-            color[2] = gl_texmgr.d_8to24table[base_idx + 2]  # Blue
-            color[3] = 255
-
-            gl.glColor4ubv(color)
-
-            gl.glTexCoord2f (0,0)
-            gl.glVertex3fv (p.org)
-
-            gl.glTexCoord2f (1,0)
-            mathlib.VectorMA (p.org, scale, up, p_up)
-            gl.glVertex3fv (p_up)
-
-            gl.glTexCoord2f (0,1)
-            mathlib.VectorMA (p.org, scale, right, p_right)
-            gl.glVertex3fv (p_right)
-
-            p = p.next
-        gl.glEnd()
     gl.glDepthMask(gl.GL_TRUE)
     gl.glDisable(gl.GL_BLEND)
     gl.glTexEnvf(gl.GL_TEXTURE_ENV, gl.GL_TEXTURE_ENV_MODE, gl.GL_REPLACE)
