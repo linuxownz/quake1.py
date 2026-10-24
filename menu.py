@@ -1,7 +1,7 @@
 #menu.py
 
 from dataclasses import dataclass
-from enum import Enum
+from enum import Enum, IntEnum
 from random import randint
 
 import _cmd
@@ -47,8 +47,8 @@ class m_state_e(Enum):
     m_search = 15
     m_slist  = 16
 
-class opt_items_e(Enum):
-    OPT_CUSTOMIZE    = 1
+class opt_items_e(IntEnum):
+    OPT_CUSTOMIZE    = 0
     OPT_CONSOLE      = 2
     OPT_DEFAULTS     = 3
     OPT_SCALE        = 4
@@ -68,7 +68,7 @@ class opt_items_e(Enum):
     OPT_VIDEO        = 18
     OPTIONS_ITEMS    = 19
 
-class always_run_e(Enum):
+class always_run_e(IntEnum):
     ALWAYSRUN_OFF        = 0,
     ALWAYSRUN_VANILLA    = 1,
     ALWAYSRUN_QUAKESPASM = 2
@@ -497,8 +497,8 @@ def M_Menu_Setup_f():
     setup_myname   = cvar.Cvar_GetCvar('_cl_name').string
     setup_hostname = cvar.Cvar_GetCvar('hostname').string
 
-    setup_top    = setup_oldtop    = cvar.Cvar_GetCvar('_cl_color').value >> 4
-    setup_bottom = setup_oldbottom = cvar.Cvar_GetCvar('_cl_color').value & 15
+    setup_top    = setup_oldtop    = int(cvar.Cvar_GetCvar('_cl_color').value) >> 4
+    setup_bottom = setup_oldbottom = int(cvar.Cvar_GetCvar('_cl_color').value) & 15
 
 def M_Menu_Options_f():
     global m_state, m_entersound
@@ -513,7 +513,7 @@ def M_Menu_Keys_f():
 
     in_sdl.IN_Deactivate(gl_vidsdl.modestate == vid.modestate_t.MS_WINDOWED)
     keys.key_dest = keys.keydest_t.key_menu
-    m_state = m_state_e.m_options
+    m_state = m_state_e.m_keys
     m_entersound = True
 
 def M_Menu_Help_f():
@@ -540,7 +540,7 @@ def M_Menu_Quit_f():
     m_quit_prestate = m_state
     m_state = m_state_e.m_quit
     m_entersound = True
-    msgNumber = randint(7)
+    msgNumber = randint(0,7)
 
 def M_Menu_Credits_f():
     raise NotImplementedError
@@ -692,10 +692,10 @@ def M_SinglePlayer_Draw():
 
     f = int(host.realtime * 10 ) % 6
 
-    M_DrawTransPic(54, 32, + m_singleplayer_cursor * 20, gl_draw.Draw_CachePic(f'gfx/menudot{f+1}.lmp'))
+    M_DrawTransPic(54, 32 + m_singleplayer_cursor * 20, gl_draw.Draw_CachePic(f'gfx/menudot{f+1}.lmp'))
 
 def M_SinglePlayer_Key(k: int):
-    global m_entersound
+    global m_entersound, m_singleplayer_cursor
     match k:
         case keys.Key.K_ESCAPE | keys.Key.K_BBUTTON:
             M_Menu_Main_f()
@@ -1057,7 +1057,7 @@ def M_Net_Key(k):
             again = False
 
 
-def M_AdjustSliders(dir):
+def M_AdjustSliders(_dir):
     f = 0.0
     l = 0.0
 
@@ -1066,7 +1066,7 @@ def M_AdjustSliders(dir):
     match options_cursor:
         case opt_items_e.OPT_SCALE:
             l = ((gl_vidsdl._vid.width + 31) / 32) / 10.0
-            f = cvar.Cvar_GetCvar('scr_conscale').value + dir * .1
+            f = cvar.Cvar_GetCvar('scr_conscale').value + _dir * .1
             if f < 1:
                 f = 1
             elif f > l:
@@ -1075,52 +1075,52 @@ def M_AdjustSliders(dir):
             cvar.Cvar_SetValue('scr_menuscale', f)
             cvar.Cvar_SetValue('scr_sbarscale', f)
         case opt_items_e.OPT_SCRSIZE:
-            f = cvar.Cvar_GetCvar('scr_viewsize').value + dir * 10
+            f = cvar.Cvar_GetCvar('viewsize').value + _dir * 10
             if f > 120:
                 f = 120
             elif f < 30:
                 f = 30
             cvar.Cvar_SetValue('viewsize', f)
         case opt_items_e.OPT_GAMMA:
-            f = cvar.Cvar_GetCvar('vid_gamma').value - dir * 0.05
+            f = cvar.Cvar_GetCvar('gamma').value - _dir * 0.05
             if f < 0.5:
                 f = 0.5
             elif f > 1:
                 f = 1
             cvar.Cvar_SetValue('gamma', f)
         case opt_items_e.OPT_CONTRAST:
-            f = cvar.Cvar_GetCvar('vid_contrast').value + dir * 0.1
+            f = cvar.Cvar_GetCvar('contrast').value + _dir * 0.1
             if f < 1:
                 f = 1
             elif f > 2:
                 f = 2
             cvar.Cvar_SetValue('contrast', f)
         case opt_items_e.OPT_MOUSESPEED:
-            f = cvar.Cvar_GetCvar('sensitivity').value + dir * 0.5
+            f = cvar.Cvar_GetCvar('sensitivity').value + _dir * 0.5
             if f > 11:
                 f = 11
             elif f < 1:
                 f = 1
             cvar.Cvar_SetValue('sensitivity', f)
         case opt_items_e.OPT_SBALPHA:
-            f = cvar.Cvar_GetCvar('scr_sbaralpha').value - dir * 0.05
+            f = cvar.Cvar_GetCvar('scr_sbaralpha').value - _dir * 0.05
             if f < 0:
                 f = 0
             elif f > 1:
                 f = 1
             cvar.Cvar_SetValue('scr_sbaralpha', f)
         case opt_items_e.OPT_MUSICVOL:
-            f = cvar.Cvar_GetCvar('bgmvolume').value + dir * 0.1
+            f = cvar.Cvar_GetCvar('bgmvolume').value + _dir * 0.1
             if f < 0:
                 f = 0
             elif f > 1:
                 f = 1
             cvar.Cvar_SetValue('bgmvolume', f)
         case opt_items_e.OPT_MUSICEXT:
-            f = cvar.Cvar_GetCvar('bgm_extmusic').value
+            f = 0#cvar.Cvar_GetCvar('bgm_extmusic').value
             cvar.Cvar_Set('bgm_extmusic', "0" if f else "1")
         case opt_items_e.OPT_SNDVOL:
-            f = cvar.Cvar_GetCvar('sfxvolume').value + dir * 0.1
+            f = cvar.Cvar_GetCvar('volume').value + _dir * 0.1
             if f < 0:
                 f = 0
             elif f > 1:
@@ -1134,7 +1134,7 @@ def M_AdjustSliders(dir):
             else:
                 curr_alwaysrun = always_run_e.ALWAYSRUN_OFF
 
-            target_alwaysrun = (always_run_e.ALWAYSRUN_ITEMS + curr_alwaysrun + dir) % always_run_e.ALWAYSRUN_ITEMS
+            target_alwaysrun = (always_run_e.ALWAYSRUN_ITEMS + curr_alwaysrun + _dir) % always_run_e.ALWAYSRUN_ITEMS
 
             if target_alwaysrun == always_run_e.ALWAYSRUN_VANILLA:
                 cvar.Cvar_SetValue('cl_alwaysrun', 0)
@@ -1158,7 +1158,7 @@ def M_AdjustSliders(dir):
         case opt_items_e.OPT_LOOKSPRING:
             cvar.Cvar_Set('lookspring', '0' if cvar.Cvar_GetCvar('lookspring').value else '1')
         case opt_items_e.OPT_LOOKSTRAFE:
-            cvar.Cvar_Set('lookspring', '0' if cvar.Cvar_GetCvar('lookspring').value else '1')
+            cvar.Cvar_Set('lookstrafe', '0' if cvar.Cvar_GetCvar('lookstrafe').value else '1')
 
 
 def M_DrawSlider(x:int, y:int, rng:float, value:float, format:str):
@@ -1167,11 +1167,11 @@ def M_DrawSlider(x:int, y:int, rng:float, value:float, format:str):
     elif rng > 1:
         rng = 1
 
-    M_AdjustSliders(x - 8, y, 128)
+    #M_AdjustSliders(x - 8, y, 128)
     for i in range(SLIDER_RANGE):
         M_DrawCharacter(x + i * 8, y, 129)
     M_DrawCharacter(x + i * 8, y, 130)
-    M_DrawCharacter(x + (SLIDER_RANGE-1)*8 * range, y, 131)
+    M_DrawCharacter(x + (SLIDER_RANGE-1)*8 * rng, y, 131)
     string = format % value
     M_Print(x + (SLIDER_RANGE + 1) * 8, y, string)
 
@@ -1187,68 +1187,68 @@ def M_Options_Draw():
     M_DrawPic ( (320-p.width)/2, 4, p)
 
     M_Print (16, 32,            "              Controls")
-    M_Print (16, 32 + 8*opt_items_e.OPT_CONSOLE,    "          Goto console")
-    M_Print (16, 32 + 8*opt_items_e.OPT_DEFAULTS,   "          Reset config")
+    M_Print (16, 32 + 8*opt_items_e.OPT_CONSOLE.value,    "          Goto console")
+    M_Print (16, 32 + 8*opt_items_e.OPT_DEFAULTS.value,   "          Reset config")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_SCALE,      "                 Scale")
-    l = (vid.width / 320.0) - 1
+    M_Print (16, 32 + 8*opt_items_e.OPT_SCALE.value,      "                 Scale")
+    l = (gl_vidsdl._vid.width / 320.0) - 1
     r = (cvar.Cvar_GetCvar('scr_conscale').value - 1) / l if l > 0 else 0
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SCALE, r, cvar.Cvar_GetCvar('scr_conscale').value, "%.1f")
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SCALE.value, r, cvar.Cvar_GetCvar('scr_conscale').value, "%.1f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_SCRSIZE,    "           Screen size")
-    r = (cvar.Cvar_GetCvar('scr_viewsize').value - 30) / (120 - 30)
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SCRSIZE, r, cvar.Cvar_GetCvar('scr_viewsize').value, "%.0f")
+    M_Print (16, 32 + 8*opt_items_e.OPT_SCRSIZE.value,    "           Screen size")
+    r = (cvar.Cvar_GetCvar('viewsize').value - 30) / (120 - 30)
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SCRSIZE.value, r, cvar.Cvar_GetCvar('viewsize').value, "%.0f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_GAMMA,      "            Brightness")
-    r = (1.0 - cvar.Cvar_GetCvar('vid_gamma').value) / 0.5
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_GAMMA, r, cvar.Cvar_GetCvar('vid_gamma').value, "%.2f")
+    M_Print (16, 32 + 8*opt_items_e.OPT_GAMMA.value,      "            Brightness")
+    r = (1.0 - cvar.Cvar_GetCvar('gamma').value) / 0.5
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_GAMMA.value, r, cvar.Cvar_GetCvar('gamma').value, "%.2f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_CONTRAST,   "              Contrast")
-    r = cvar.Cvar_GetCvar('vid_contrast').value - 1.0
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_CONTRAST, r, cvar.Cvar_GetCvar('vid_contrast').value, "%.1f")
+    M_Print (16, 32 + 8*opt_items_e.OPT_CONTRAST.value,   "              Contrast")
+    r = cvar.Cvar_GetCvar('contrast').value - 1.0
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_CONTRAST.value, r, cvar.Cvar_GetCvar('contrast').value, "%.1f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_MOUSESPEED, "           Mouse Speed")
+    M_Print (16, 32 + 8*opt_items_e.OPT_MOUSESPEED.value, "           Mouse Speed")
     r = (cvar.Cvar_GetCvar('sensitivity').value - 1)/10
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_MOUSESPEED, r, cvar.Cvar_GetCvar('sensitivity').value, "%.1f")
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_MOUSESPEED.value, r, cvar.Cvar_GetCvar('sensitivity').value, "%.1f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_SBALPHA,    "       Statusbar alpha")
+    M_Print (16, 32 + 8*opt_items_e.OPT_SBALPHA.value,    "       Statusbar alpha")
     r = (1.0 - cvar.Cvar_GetCvar('scr_sbaralpha').value)
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SBALPHA, r, cvar.Cvar_GetCvar('scr_sbaralpha').value, "%.2f")
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SBALPHA.value, r, cvar.Cvar_GetCvar('scr_sbaralpha').value, "%.2f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_SNDVOL,     "          Sound Volume")
-    r = cvar.Cvar_GetCvar('sfxvolume').value
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SNDVOL, r, cvar.Cvar_GetCvar('sfxvolume').value, "%.1f")
+    M_Print (16, 32 + 8*opt_items_e.OPT_SNDVOL.value,     "          Sound Volume")
+    r = cvar.Cvar_GetCvar('volume').value
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_SNDVOL.value, r, cvar.Cvar_GetCvar('volume').value, "%.1f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_MUSICVOL,   "          Music Volume")
+    M_Print (16, 32 + 8*opt_items_e.OPT_MUSICVOL.value,   "          Music Volume")
     r = cvar.Cvar_GetCvar('bgmvolume').value
-    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_MUSICVOL, r, cvar.Cvar_GetCvar('bgmvolume').value, "%.1f")
+    M_DrawSlider (220, 32 + 8*opt_items_e.OPT_MUSICVOL.value, r, cvar.Cvar_GetCvar('bgmvolume').value, "%.1f")
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_MUSICEXT,   "        External Music")
-    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_MUSICEXT, cvar.Cvar_GetCvar('bgm_extmusic').value)
+    #M_Print (16, 32 + 8*opt_items_e.OPT_MUSICEXT.value,   "        External Music")
+    #M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_MUSICEXT.value, cvar.Cvar_GetCvar('bgm_extmusic').value)
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_ALWAYRUN,   "            Always Run")
+    M_Print (16, 32 + 8*opt_items_e.OPT_ALWAYRUN.value,   "            Always Run")
     if (cvar.Cvar_GetCvar('cl_alwaysrun').value):
-        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN, "quakespasm")
+        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN.value, "quakespasm")
     elif (cvar.Cvar_GetCvar('cl_forwardspeed').value > 200.0):
-        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN, "vanilla")
+        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN.value, "vanilla")
     else:
-        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN, "off")
+        M_Print (220, 32 + 8*opt_items_e.OPT_ALWAYRUN.value, "off")
 
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_INVMOUSE,   "          Invert Mouse")
-    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_INVMOUSE, cvar.Cvar_GetCvar('m_pitch').value < 0)
+    M_Print (16, 32 + 8*opt_items_e.OPT_INVMOUSE.value,   "          Invert Mouse")
+    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_INVMOUSE.value, cvar.Cvar_GetCvar('m_pitch').value < 0)
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_ALWAYSMLOOK,    "            Mouse Look")
-    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_ALWAYSMLOOK, cvar.Cvar_GetCvar('in_mlook').state & 1)
+    M_Print (16, 32 + 8*opt_items_e.OPT_ALWAYSMLOOK.value,    "            Mouse Look")
+    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_ALWAYSMLOOK.value, cl_input.in_mlook.state & 1)
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_LOOKSPRING, "            Lookspring")
-    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_LOOKSPRING, cvar.Cvar_GetCvar('lookspring').value)
+    M_Print (16, 32 + 8*opt_items_e.OPT_LOOKSPRING.value, "            Lookspring")
+    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_LOOKSPRING.value, cvar.Cvar_GetCvar('lookspring').value)
 
-    M_Print (16, 32 + 8*opt_items_e.OPT_LOOKSTRAFE, "            Lookstrafe")
-    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_LOOKSTRAFE, cvar.Cvar_GetCvar('lookstrafe').value)
+    M_Print (16, 32 + 8*opt_items_e.OPT_LOOKSTRAFE.value, "            Lookstrafe")
+    M_DrawCheckbox (220, 32 + 8*opt_items_e.OPT_LOOKSTRAFE.value, cvar.Cvar_GetCvar('lookstrafe').value)
 
     if (vid_menudrawfn):
-        M_Print (16, 32 + 8*opt_items_e.OPT_VIDEO,  "         Video Options")
+        M_Print (16, 32 + 8*opt_items_e.OPT_VIDEO.value,  "         Video Options")
 
     M_DrawCharacter(200, 32 + options_cursor * 8, 12 + ( int(host.realtime * 4) & 1))
 
@@ -1260,16 +1260,16 @@ def M_Options_Key(k):
         case keys.Key.K_ENTER | keys.Key.K_KP_ENTER | keys.Key.K_ABUTTON:
             m_entersound = True
             match options_cursor:
-                case opt_items_e.OPT_CUSTOMIZE:
+                case opt_items_e.OPT_CUSTOMIZE.value:
                     M_Menu_Keys_f()
-                case opt_items_e.OPT_CONSOLE:
+                case opt_items_e.OPT_CONSOLE.value:
                     m_state = m_state_e.m_none
                     console.Con_ToggleConsole_f()
-                case opt_items_e.OPT_DEFAULTS:
+                case opt_items_e.OPT_DEFAULTS.value:
                     if gl_screen.SCR_ModalMessage('This will reset all controls\nand s tored cvars. Continue (y/n)\n', 15.0):
                         _cmd.Cbuf_AddText('resetcfg\n')
                         _cmd.Cbuf_AddText('exec default.cfg\n')
-                case opt_items_e.OPT_VIDEO:
+                case opt_items_e.OPT_VIDEO.value:
                     M_Menu_Video_f()
                 case _:
                     M_AdjustSliders(1)
@@ -1277,12 +1277,12 @@ def M_Options_Key(k):
             snd_dma.S_LocalSound('misc/menu1.wav')
             options_cursor -= 1
             if options_cursor < 0:
-                options_cursor = opt_items_e.OPTIONS_ITEMS - 1
+                options_cursor = opt_items_e.OPTIONS_ITEMS.value - 1
 
         case keys.Key.K_DOWNARROW:
             snd_dma.S_LocalSound('misc/menu1.wav')
             options_cursor += 1
-            if options_cursor >= opt_items_e.OPTIONS_ITEMS:
+            if options_cursor >= opt_items_e.OPTIONS_ITEMS.value:
                 options_cursor = 0
 
         case keys.Key.K_LEFTARROW:
@@ -1290,9 +1290,9 @@ def M_Options_Key(k):
         case keys.Key.K_RIGHTARROW:
             M_AdjustSliders(1)
 
-    if options_cursor == opt_items_e.OPTIONS_ITEMS - 1 and vid_menudrawfn is None:
+    if options_cursor == opt_items_e.OPTIONS_ITEMS.value - 1 and vid_menudrawfn is None:
         if k == keys.Key.K_UPARROW:
-            options_cursor = opt_items_e.OPTIONS_ITEMS - 2
+            options_cursor = opt_items_e.OPTIONS_ITEMS.value - 2
         else:
             options_cursor = 0
 
@@ -1308,7 +1308,7 @@ def M_FindKeysForCommand(command: str, threekeys: list[int]):
         if not b:
             continue
 
-        if b == command:
+        if b == command[0]:
             threekeys[count] = j
             count += 1
             if count == 3:
@@ -1340,7 +1340,7 @@ def M_Keys_Draw():
 
         M_FindKeysForCommand(bindnames[i], _keys)
 
-        if keys[0] == -1:
+        if _keys[0] == -1:
             M_Print(140, y, '???')
         else:
             name = keys.Key_KeynumToString(_keys[0])
@@ -1792,13 +1792,13 @@ def M_GameOptions_Draw():
             else:
                 m_serverInfoMessage = False
 
-def M_NetStart_Change(dir):
+def M_NetStart_Change(_dir):
     global maxplayers, startlevel, startepisode
     global m_serverInfoMessage, m_serverInfoMessageTime
 
     match gameoptions_cursor:
         case 1:
-            maxplayers += dir
+            maxplayers += _dir
             if maxplayers > sv_main.svs.maxclientslimit:
                 maxplayers = sv_main.svs.maxclientslimit
                 m_serverInfoMessage = True
@@ -1809,28 +1809,28 @@ def M_NetStart_Change(dir):
             cvar.Cvar_Set('coop', '0' if cvar.Cvar_GetCvar('coop').value else '1')
         case 3:
             count = 6 if common.rogue else 2
-            f = cvar.Cvar_GetCvar('teamplay').value + dir
+            f = cvar.Cvar_GetCvar('teamplay').value + _dir
             if f > count:
                 f = 0
             elif f < 0:
                 f = count
             cvar.Cvar_SetValue('teamplay', f)
         case 4:
-            f = cvar.Cvar_GetCvar('skill').value + dir
+            f = cvar.Cvar_GetCvar('skill').value + _dir
             if f > 3:
                 f = 3
             elif f < 0:
                 f = 3
             cvar.Cvar_SetValue('skill', f)
         case 5:
-            f = cvar.Cvar_GetCvar('fraglimit').value + dir * 10
+            f = cvar.Cvar_GetCvar('fraglimit').value + _dir * 10
             if f > 100:
                 f = 0
             elif f < 0:
                 f = 100
             cvar.Cvar_SetValue('fraglimit', f)
         case 7:
-            startepisode += dir
+            startepisode += _dir
             if common.hipnotic:
                 count = 6
             elif common.rogue:
@@ -1847,7 +1847,7 @@ def M_NetStart_Change(dir):
 
             startlevel = 0
         case 8:
-            startlevel += dir
+            startlevel += _dir
             if common.hipnotic:
                 count = hipnoticepisodes[startepisode].levels
             elif common.rogue:

@@ -514,7 +514,7 @@ def Key_EventWithKeycode(key, down, keycode):
         return
 
     # 7. Menu Redirection
-    if key_dest == keydest_t.key_menu and menubound[key]:
+    if key_dest == keydest_t.key_menu and True: #menubound[key]:
         menu.M_Keydown(key)
         return
 

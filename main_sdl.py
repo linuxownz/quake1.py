@@ -114,6 +114,8 @@ def main():
 
             #print(f"cls.state: {cl_main.cls.state} | host_frametime: {host.host_frametime} | sv.time: {sv_main.sv.time}")
 
+            #import keys
+            #print(f'keys.key_dest = {keys.key_dest}')
 
             if not gl_vidsdl.VID_HasMouseOrInputFocus() or cl_main.cl.paused:
                 sdl2.SDL_Delay(16)

@@ -1235,10 +1235,11 @@ def TexMgr_ReloadImage(
     # Load texture source buffer
     if glt.source_file and glt.source_offset:
         f: io.FileIO | None = None
-        f, _, _, _ = common.COM_FOpenFile(glt.source_file)
+        #f, _, _, _ = common.COM_FOpenFile(glt.source_file)
+        ffr = common.COM_FOpenFile(glt.source_file)
 
-        if f:
-            f.seek(glt.source_offset, 1)  # SEEK_CUR
+        if ffr.file:
+            ffr.file.seek(glt.source_offset, 1)  # SEEK_CUR
             size = glt.source_width * glt.source_height
 
             if glt.source_format == gl_texmgr.srcformat.SRC_RGBA:
@@ -1246,8 +1247,8 @@ def TexMgr_ReloadImage(
             elif glt.source_format == gl_texmgr.srcformat.SRC_LIGHTMAP:
                 size *= r_brush.lightmap_bytes
 
-            data = bytearray(f.read(size))
-            f.close()
+            data = bytearray(ffr.file.read(size))
+            ffr.file.close()
 
             if len(data) != size:
                 host.Host_Error(f"read error for {glt.name}")

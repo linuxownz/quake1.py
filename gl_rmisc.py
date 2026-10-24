@@ -102,6 +102,7 @@ def GL_CreateProgram(vertSource, fragSource, numbindings, bindings: list[glquake
 
 
 def R_DeleteShaders():
+    global gl_num_programs
     if not gl_vidsdl.gl_glsl_able:
         return
 

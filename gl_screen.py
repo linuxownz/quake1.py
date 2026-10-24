@@ -4,6 +4,7 @@ import math
 
 import OpenGL
 import OpenGL.GL as gl
+import sdl2
 
 import _cmd
 import cl_main
@@ -14,15 +15,14 @@ import gl_draw
 import gl_rmain
 import gl_vidsdl
 import host
-#import image
 import keys
 import menu
 import quakedef
 import sbar
 import snd_dma
 import sys_sdl_unix
-import view
 import vid
+import view
 import wad
 
 glx = 0
@@ -605,6 +605,8 @@ def SCR_DrawNotifyString():
 
     start = scr_notifystring
 
+    start_idx = 0
+
     y = 200 * 0.35
 
     while True:
@@ -612,7 +614,7 @@ def SCR_DrawNotifyString():
         l = 0
         while l < 40:
             pos = start_idx + l
-            if pos >= length or start[pos] == "\n" or start[pos] == "\0":
+            if pos >= l or start[pos] == "\n" or start[pos] == "\0":
                 break
             l += 1
 
@@ -627,12 +629,12 @@ def SCR_DrawNotifyString():
         y += 8
 
         # Advance start pointer to end of current line
-        while start_idx < length and start[start_idx] != "\n":
+        while start_idx < l and start[start_idx] != "\n":
             if start[start_idx] == "\0":
                 break
             start_idx += 1
 
-        if start_idx >= length or start[start_idx] == "\0":
+        if start_idx >= l or start[start_idx] == "\0":
             break
 
         start_idx += 1  # Skip the '\n'
@@ -655,7 +657,7 @@ def SCR_ModalMessage(text: str, timeout: float) -> bool:
     time1 = sys_sdl_unix.Sys_DoubleTime() + timeout
     time2 = 0.0
 
-    keys.key_BeginInputGrab()
+    keys.Key_BeginInputGrab()
 
     lastkey = 0
     lastchar = 0
@@ -663,19 +665,21 @@ def SCR_ModalMessage(text: str, timeout: float) -> bool:
     while True:
         sys_sdl_unix.Sys_SendKeyEvents()
         lastkey, lastchar = keys.Key_GetGrabbedInput()
-        sys_sdl_unix.Sys_Sleep(16)
+        sdl2.SDL_Delay(16)
+
+        SCR_UpdateScreen()
 
         if timeout:
-            time2 = sys_env.Sys_DoubleTime()
+            time2 = sys_sdl_unix.Sys_DoubleTime()
 
         # Loop termination condition evaluation
         ch = chr(lastchar) if isinstance(lastchar, int) and 0 <= lastchar < 128 else ""
 
         if (
             ch in ("y", "Y", "n", "N")
-            or lastkey == keys.K_ESCAPE
-            or lastkey == keys.K_ABUTTON
-            or lastkey == keys.K_BBUTTON
+            or lastkey == keys.Key.K_ESCAPE
+            or lastkey == keys.Key.K_ABUTTON
+            or lastkey == keys.Key.K_BBUTTON
             or time2 > time1
         ):
             break
@@ -685,7 +689,7 @@ def SCR_ModalMessage(text: str, timeout: float) -> bool:
     if time2 > time1:
         return False
 
-    return lastchar in 'yY' or lastkey == keys.K_ABUTTON
+    return ch in 'yY' or lastkey == keys.Key.K_ABUTTON
 
 
 
@@ -703,7 +707,7 @@ def SCR_TileClear():
 
     if gl_rmain.r_refdef.vrect.x > 0:
         gl_draw.Draw_TileClear(0, 0, gl_rmain.r_refdef.vrect.x, glheight - sbar.sb_lines)
-        gl_draw.Draw_TileClear(gl_rmain.r_refdef.vrect.x + gl_rmain.r_refdef.vrect.width, 0, glwidth - gl_rmain.r_refdef.vrect.x - gl_rmain.r_refdef.vrect.width, glheight - sbar.b_lines)
+        gl_draw.Draw_TileClear(gl_rmain.r_refdef.vrect.x + gl_rmain.r_refdef.vrect.width, 0, glwidth - gl_rmain.r_refdef.vrect.x - gl_rmain.r_refdef.vrect.width, glheight - sbar.sb_lines)
 
     if gl_rmain.r_refdef.vrect.y > 0:
         gl_draw.Draw_TileClear (gl_rmain.r_refdef.vrect.x, 0, gl_rmain.r_refdef.vrect.width, gl_rmain.r_refdef.vrect.y)

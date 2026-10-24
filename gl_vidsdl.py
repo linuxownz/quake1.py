@@ -3,7 +3,7 @@
 import ctypes
 import os
 import sys
-from enum import Enum
+from enum import Enum, IntEnum
 
 import OpenGL
 import OpenGL.GL
@@ -97,7 +97,7 @@ gl_stencilbits = 0
 
 fsaa = 0
 
-class vid_opt_e(Enum):
+class vid_opt_e(IntEnum):
     VID_OPT_MODE        = 0
     VID_OPT_BPP         = 1
     VID_OPT_REFRESHRATE = 2
@@ -155,6 +155,7 @@ def VID_Gamma_Shutdown():
 
 
 def VID_InitModelist():
+    global nummodes
     sdlmodes = sdl2.SDL_GetNumDisplayModes(0)
 
     nummodes = 0
@@ -190,14 +191,14 @@ def VID_Restart():
     height      = cvar.Cvar_GetCvar('vid_height').value
     refreshrate = cvar.Cvar_GetCvar('vid_refreshrate').value
     bpp         = cvar.Cvar_GetCvar('vid_bpp').value
-    fullscreen  = True if cvar.Cvar_GetCvar('vid_fullscreen').value else False
+    fullscreen  = bool(cvar.Cvar_GetCvar('vid_fullscreen').value)
 
     if not VID_ValidMode(width, height, refreshrate, bpp, fullscreen):
         console.Con_Printf(f'{width}x{height}x{bpp} {refreshrate}Hz {"fullscreen" if fullscreen else "windowed"} is not a valid mode')
         return
 
     gl_texmgr.TexMgr_DeleteTextureObjects()
-    gl_rmain.GLSLGamma_DeleteTexture ()
+    #gl_rmain.GLSLGamma_DeleteTexture () # TODO FIXME
     gl_rmain.R_ScaleView_DeleteTexture ()
     gl_rmisc.R_DeleteShaders ()
     r_brush.GL_DeleteBModelVertexBuffer ()
@@ -412,7 +413,7 @@ def VID_SetMode(width, height, refreshrate, bpp, fullscreen):
     if VID_GetFullscreen() and sdl2.SDL_SetWindowFullscreen(draw_context, 0) != 0:
         sys_sdl_unix.Sys_Error('Couldnt set fullscreen state mode')
 
-    sdl2.SDL_SetWindowSize(draw_context, width, height)
+    sdl2.SDL_SetWindowSize(draw_context, int(width), int(height))
 
     if previous_display >= 0:
         sdl2.SDL_SetWindowPosition(draw_context, sdl2.SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display), sdl2.SDL_WINDOWPOS_CENTERED_DISPLAY(previous_display))
@@ -889,11 +890,14 @@ def VID_Menu_Init():
         w = modelist[i].width
         h = modelist[i].height
 
+        duplicate_found = False
         for j in range(vid_menu_nummodes):
-            if vid_menu_modes[i].width == w and vid_menu_modes[i].height == h:
+            if vid_menu_modes[j].width == w and vid_menu_modes[j].height == h:
+                duplicate_found = True
                 break
 
-        if j == vid_menu_nummodes:
+        #if j == vid_menu_nummodes:
+        if not duplicate_found:
             vid_menu_modes[j].width = w
             vid_menu_modes[j].height = h
             vid_menu_nummodes += 1
@@ -934,6 +938,8 @@ def VID_Menu_RebuildBppList():
     global vid_menu_numbpps
     global vid_menu_bpps
 
+    j = 0
+
     vid_menu_numbpps = 0
 
     for i in range(nummodes):
@@ -970,6 +976,8 @@ def VID_Menu_RebuildRateList():
     global vid_menu_rates
 
     vid_menu_numrates = 0
+
+    j = 0
 
     for i in range(nummodes):
         if modelist[i].width != cvar.Cvar_GetCvar('vid_width').value or \
@@ -1015,11 +1023,11 @@ def VID_MenuDraw():
 
     y += 16
 
-    for i in range(gl_vidsdl.VIDEO_OPTIONS_ITEMS):
+    for i in range(gl_vidsdl.vid_opt_e.VIDEO_OPTIONS_ITEMS):
         match i:
             case gl_vidsdl.vid_opt_e.VID_OPT_MODE:
                 menu.M_Print(16, y, "        Video mode")
-                menu.M_Print (184, y, va("%ix%i", int(cvar.Cvar_GetCvar('vid_width').value), int(cvar.Cvar_GetCvar('vid_height').value)))
+                menu.M_Print (184, y, "%ix%i" % (int(cvar.Cvar_GetCvar('vid_width').value), int(cvar.Cvar_GetCvar('vid_height').value)))
 
             case gl_vidsdl.vid_opt_e.VID_OPT_BPP:
                 menu.M_Print (16, y, "       Color depth");
@@ -1036,7 +1044,7 @@ def VID_MenuDraw():
             case gl_vidsdl.vid_opt_e.VID_OPT_VSYNC:
                 menu.M_Print (16, y, "     Vertical sync");
                 if gl_swap_control:
-                    M_DrawCheckbox (184, y, int(cvar.Cvar_GetCvar('vid_vsync').value))
+                    menu.M_DrawCheckbox (184, y, int(cvar.Cvar_GetCvar('vid_vsync').value))
                 else:
                     menu.M_Print (184, y, "N/A");
 
@@ -1116,24 +1124,24 @@ def VID_Menu_ChooseNextRate(_dir):
         cvar.Cvar_SetValueQuick('vid_refreshrate', vid_menu_rates[i])
 
 def VID_MenuKey(key):
-    global video_options_cursor
+    global video_options_cursor, m_entersound
 
     match key:
-        case keys.K_ESCAPE | keys.K_BBUTTON:
+        case keys.Key.K_ESCAPE | keys.Key.K_BBUTTON:
             VID_SyncCvars()
             snd_dma.S_LocalSound('misc/menu1.wav')
             menu.M_Menu_Options_f()
-        case keys.K_UPARROW:
+        case keys.Key.K_UPARROW:
             snd_dma.S_LocalSound('misc/menu1.wav')
             video_options_cursor -= 1
             if video_options_cursor < 0:
                 video_options_cursor = vid_opt_e.VIDEO_OPTIONS_ITEMS - 1
-        case keys.K_DOWNARROW:
+        case keys.Key.K_DOWNARROW:
             snd_dma.S_LocalSound('misc/menu1.wav')
             video_options_cursor += 1
             if video_options_cursor > vid_opt_e.VIDEO_OPTIONS_ITEMS:
                 video_options_cursor = 0
-        case keys.K_LEFTARROW:
+        case keys.Key.K_LEFTARROW:
             snd_dma.S_LocalSound('misc/menu3.wav')
             match video_options_cursor:
                 case vid_opt_e.VID_OPT_MODE:
@@ -1143,10 +1151,10 @@ def VID_MenuKey(key):
                 case vid_opt_e.VID_OPT_REFRESHRATE:
                     VID_Menu_ChooseNextRate(1)
                 case vid_opt_e.VID_OPT_FULLSCREEN:
-                    Cbuf_AddText('toggle vid_fullscreen\n')
+                    _cmd.Cbuf_AddText('toggle vid_fullscreen\n')
                 case vid_opt_e.VID_OPT_VSYNC:
-                    Cbuf_AddText('toggle vid_vsync\n')
-        case keys.K_RIGHTARROW:
+                    _cmd.Cbuf_AddText('toggle vid_vsync\n')
+        case keys.Key.K_RIGHTARROW:
             snd_dma.S_LocalSound('misc/menu3.wav')
             match video_options_cursor:
                 case vid_opt_e.VID_OPT_MODE:
@@ -1156,12 +1164,12 @@ def VID_MenuKey(key):
                 case vid_opt_e.VID_OPT_REFRESHRATE:
                     VID_Menu_ChooseNextRate(-1)
                 case vid_opt_e.VID_OPT_FULLSCREEN:
-                    Cbuf_AddText('toggle vid_fullscreen\n')
+                    _cmd.Cbuf_AddText('toggle vid_fullscreen\n')
                 case vid_opt_e.VID_OPT_VSYNC:
-                    Cbuf_AddText('toggle vid_vsync\n')
+                    _cmd.Cbuf_AddText('toggle vid_vsync\n')
 
 
-        case keys.K_ENTER | keys.K_KP_ENTER | keys.K_ABUTTON:
+        case keys.Key.K_ENTER | keys.Key.K_KP_ENTER | keys.Key.K_ABUTTON:
             m_entersound = True
             match video_options_cursor:
                 case vid_opt_e.VID_OPT_MODE:
@@ -1171,14 +1179,14 @@ def VID_MenuKey(key):
                 case vid_opt_e.VID_OPT_REFRESHRATE:
                     VID_Menu_ChooseNextRate(1)
                 case vid_opt_e.VID_OPT_FULLSCREEN:
-                    Cbuf_AddText('toggle vid_fullscreen\n')
+                    _cmd.Cbuf_AddText('toggle vid_fullscreen\n')
                 case vid_opt_e.VID_OPT_VSYNC:
-                    Cbuf_AddText('toggle vid_vsync\n')
+                    _cmd.Cbuf_AddText('toggle vid_vsync\n')
                 case vid_opt_e.VID_OPT_APPLY:
-                    Cbuf_AddText('vid_restart\n')
+                    _cmd.Cbuf_AddText('vid_restart\n')
                     keys.key_dest = keys.keydest_t.key_game
                     menu.m_state = menu.m_state_e.m_none
-                    IN_Activate()
+                    in_sdl.IN_Activate()
 
 
 def VID_Shutdown():
