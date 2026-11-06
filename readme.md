@@ -35,4 +35,5 @@ A Python implementation of Quake 1.
 ```
 
 
+<img width="1859" height="1458" alt="Screenshot From 2026-11-06 16-13-12" src="https://github.com/user-attachments/assets/31a4ed3d-569e-4900-bd03-9d03466941ba" />
 
